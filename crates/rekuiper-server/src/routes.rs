@@ -45,6 +45,7 @@ pub struct AppState {
     pub stream_bus: StreamBus,
     pub connections: Arc<RwLock<HashMap<String, Value>>>,
     pub source_configs: Arc<RwLock<HashMap<String, Value>>>,
+    pub sink_configs: Arc<RwLock<HashMap<String, Value>>>,
     pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
     pub source_cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
     pub http_client: reqwest::Client,
@@ -81,6 +82,7 @@ impl AppState {
             stream_bus,
             connections: Arc::new(RwLock::new(HashMap::new())),
             source_configs: Arc::new(RwLock::new(HashMap::new())),
+            sink_configs: Arc::new(RwLock::new(HashMap::new())),
             http_client: reqwest::Client::builder()
                 .tcp_nodelay(true)
                 .build()
@@ -245,23 +247,39 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metadata/sources/yaml/:name", get(get_source_yaml))
         .route(
             "/metadata/sources/:name/confKeys/:conf_key",
-            put(save_source_conf_key)
+            get(get_source_conf_key)
+                .put(save_source_conf_key)
                 .post(save_source_conf_key)
-                .delete(empty_ok),
+                .delete(delete_source_conf_key),
         )
         .route("/metadata/sinks/yaml/:name", get(get_sink_yaml))
         .route(
             "/metadata/sinks/:name/confKeys/:conf_key",
-            put(empty_ok).delete(empty_ok),
+            get(get_sink_conf_key)
+                .put(save_sink_conf_key)
+                .post(save_sink_conf_key)
+                .delete(delete_sink_conf_key),
         )
         .route("/metadata/connections/yaml/:name", get(get_connection_yaml))
         .route(
             "/metadata/connections/:name/confKeys/:conf_key",
-            put(empty_ok).delete(empty_ok),
+            get(get_connection_conf_key)
+                .put(save_connection_conf_key)
+                .post(save_connection_conf_key)
+                .delete(delete_connection_conf_key),
         )
-        .route("/metadata/sources/connection/:name", post(empty_ok))
-        .route("/metadata/sinks/connection/:name", post(empty_ok))
-        .route("/metadata/lookups/connection/:name", post(empty_ok))
+        .route(
+            "/metadata/sources/connection/:name",
+            post(register_source_connection),
+        )
+        .route(
+            "/metadata/sinks/connection/:name",
+            post(register_sink_connection),
+        )
+        .route(
+            "/metadata/lookups/connection/:name",
+            post(register_lookup_connection),
+        )
         .route("/data/import/status", get(import_status))
         .route("/metrics/dump", get(metrics_dump))
         .route("/metrics/dump/check", get(metrics_dump))
@@ -3378,7 +3396,51 @@ async fn get_sink_yaml(Path(name): Path<String>) -> Response {
 async fn save_source_conf_key(
     State(state): State<AppState>,
     Path((name, conf_key)): Path<(String, String)>,
-    Json(payload): Json<Value>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
+    };
+    state
+        .source_configs
+        .write()
+        .insert(format!("{}/{}", name, conf_key), payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn get_source_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let key = format!("{}/{}", name, conf_key);
+    if let Some(val) = state.source_configs.read().get(&key).cloned() {
+        Json(val).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Configuration key {} for {} not found", conf_key, name),
+        )
+            .into_response()
+    }
+}
+
+async fn delete_source_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
 ) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
@@ -3389,7 +3451,199 @@ async fn save_source_conf_key(
     state
         .source_configs
         .write()
+        .remove(&format!("{}/{}", name, conf_key));
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn save_sink_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
+    };
+    state
+        .sink_configs
+        .write()
         .insert(format!("{}/{}", name, conf_key), payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn get_sink_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let key = format!("{}/{}", name, conf_key);
+    if let Some(val) = state.sink_configs.read().get(&key).cloned() {
+        Json(val).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Configuration key {} for {} not found", conf_key, name),
+        )
+            .into_response()
+    }
+}
+
+async fn delete_sink_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    state
+        .sink_configs
+        .write()
+        .remove(&format!("{}/{}", name, conf_key));
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn save_connection_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
+    };
+    let mut conns = state.connections.write();
+    conns.insert(format!("{}.{}", name, conf_key), payload.clone());
+    conns.insert(format!("{}/{}", name, conf_key), payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn get_connection_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let conns = state.connections.read();
+    if let Some(val) = conns
+        .get(&format!("{}.{}", name, conf_key))
+        .or_else(|| conns.get(&format!("{}/{}", name, conf_key)))
+        .cloned()
+    {
+        Json(val).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Connection conf_key {} for {} not found", conf_key, name),
+        )
+            .into_response()
+    }
+}
+
+async fn delete_connection_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    let mut conns = state.connections.write();
+    conns.remove(&format!("{}.{}", name, conf_key));
+    conns.remove(&format!("{}/{}", name, conf_key));
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn register_source_connection(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({ "id": name })
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({ "id": name }))
+    };
+    let id = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&name)
+        .to_string();
+    state.connections.write().insert(id, payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn register_sink_connection(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({ "id": name })
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({ "id": name }))
+    };
+    let id = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&name)
+        .to_string();
+    state.connections.write().insert(id, payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn register_lookup_connection(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let payload = if body.is_empty() {
+        json!({ "id": name })
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({ "id": name }))
+    };
+    let id = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&name)
+        .to_string();
+    state.connections.write().insert(id, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 

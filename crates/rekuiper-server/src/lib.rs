@@ -49,6 +49,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         stream_bus,
         connections: Arc::new(RwLock::new(HashMap::new())),
         source_configs: Arc::new(RwLock::new(HashMap::new())),
+        sink_configs: Arc::new(RwLock::new(HashMap::new())),
         ruletests: Arc::new(RwLock::new(HashMap::new())),
         source_cancels: Arc::new(RwLock::new(HashMap::new())),
         http_client: reqwest::Client::builder()

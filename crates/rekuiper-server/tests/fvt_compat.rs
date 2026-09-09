@@ -3746,3 +3746,157 @@ async fn test_connection_metadata_and_resource_discovery() {
     let conns: Vec<serde_json::Value> = resp.json().await.unwrap();
     assert!(conns.is_empty());
 }
+
+#[tokio::test]
+async fn test_confkeys_persistence_and_registration() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Source confKeys CRUD
+    let resp = client
+        .put(format!(
+            "{}/metadata/sources/mqtt/confKeys/custom_conf",
+            base_url
+        ))
+        .json(&serde_json::json!({"server": "tcp://broker:1883"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/sources/mqtt/confKeys/custom_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let cfg: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(cfg["server"], "tcp://broker:1883");
+
+    let resp = client
+        .delete(format!(
+            "{}/metadata/sources/mqtt/confKeys/custom_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/sources/mqtt/confKeys/custom_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 2. Sink confKeys CRUD
+    let resp = client
+        .put(format!(
+            "{}/metadata/sinks/mqtt/confKeys/sink_conf",
+            base_url
+        ))
+        .json(&serde_json::json!({"topic": "out/events"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/sinks/mqtt/confKeys/sink_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let cfg: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(cfg["topic"], "out/events");
+
+    let resp = client
+        .delete(format!(
+            "{}/metadata/sinks/mqtt/confKeys/sink_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/sinks/mqtt/confKeys/sink_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 3. Connection confKeys CRUD
+    let resp = client
+        .put(format!(
+            "{}/metadata/connections/mqtt/confKeys/conn_conf",
+            base_url
+        ))
+        .json(&serde_json::json!({"server": "tcp://conn:1883"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/connections/mqtt/confKeys/conn_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let cfg: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(cfg["server"], "tcp://conn:1883");
+
+    let resp = client
+        .delete(format!(
+            "{}/metadata/connections/mqtt/confKeys/conn_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!(
+            "{}/metadata/connections/mqtt/confKeys/conn_conf",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 4. Source/sink/lookup connection bindings
+    let resp = client
+        .post(format!("{}/metadata/sources/connection/mqtt", base_url))
+        .json(&serde_json::json!({"id": "mqtt_reg_src", "server": "tcp://127.0.0.1:1883"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/metadata/connections/mqtt_reg_src", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}

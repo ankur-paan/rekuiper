@@ -18,11 +18,11 @@ No item may be marked complete without:
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
-| **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 2 | 1 |
+| **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 0 | 2 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **19** | **8** |
+| **Total** | | **27 Tasks** | **20** | **7** |
 
 ---
 
@@ -124,13 +124,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Completely eliminated `empty_yaml` stub; routed `/metadata/connections/:name` to dedicated `get_connection_metadata` (reads registered connection or `etc/connections/{name}.json` or connector profile), populated `/metadata/connections` and `/metadata/resources` directly from `state.connections`, and implemented `get_connection_yaml` resolving `etc/connections/{name}.yaml` or `etc/connections/connection.yaml`. Covered by `test_connection_metadata_and_resource_discovery` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 6.3: Sink & Connection Configuration Key Persistence**
-  - **Problem**: `PUT, DELETE /metadata/sinks/:name/confKeys/:conf_key` and `PUT, DELETE /metadata/connections/:name/confKeys/:conf_key` return `empty_ok` without saving.
-  - **Implementation**:
-    - Store sink configurations under `sink_configs` in `AppState` (mirroring `source_configs`).
-    - Store connection configuration keys in `state.connections`.
-  - **Verification**: CRUD test creating, reading, and deleting sink confKeys.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 6.3: Sink & Connection Configuration Key Persistence**
+  - **Status**: Completed & Verified. Added `sink_configs` to `AppState`; implemented complete CRUD handlers for `/metadata/sources/:name/confKeys/:conf_key`, `/metadata/sinks/:name/confKeys/:conf_key`, and `/metadata/connections/:name/confKeys/:conf_key` (including `GET`, `PUT`, `POST`, `DELETE`); implemented authentic connection registration handlers for `/metadata/sources/connection/:name`, `/metadata/sinks/connection/:name`, and `/metadata/lookups/connection/:name` with `Bytes` body tolerance. Covered by `test_confkeys_persistence_and_registration` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 
