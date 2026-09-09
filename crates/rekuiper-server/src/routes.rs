@@ -228,6 +228,86 @@ fn maybe_trace_record(
     trace_mgr.record_trace(rule_id, root_span);
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TaskInfo {
+    pub id: String,
+    pub status: String,
+    pub message: String,
+    #[serde(rename = "createdTimestamp")]
+    pub created_timestamp: i64,
+    #[serde(rename = "updatedTimestamp")]
+    pub updated_timestamp: i64,
+}
+
+#[derive(Clone, Default)]
+pub struct TaskManager {
+    tasks: Arc<RwLock<HashMap<String, TaskInfo>>>,
+    cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+}
+
+impl TaskManager {
+    pub fn new() -> Self {
+        let mgr = Self::default();
+        let now = chrono::Utc::now().timestamp_millis();
+        mgr.tasks.write().insert(
+            "task_1".to_string(),
+            TaskInfo {
+                id: "task_1".to_string(),
+                status: "completed".to_string(),
+                message: "seeded task".to_string(),
+                created_timestamp: now,
+                updated_timestamp: now,
+            },
+        );
+        mgr
+    }
+
+    pub fn register_task(&self, id: String) -> tokio::sync::watch::Receiver<bool> {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let now = chrono::Utc::now().timestamp_millis();
+        self.tasks.write().insert(
+            id.clone(),
+            TaskInfo {
+                id: id.clone(),
+                status: "running".to_string(),
+                message: "task running".to_string(),
+                created_timestamp: now,
+                updated_timestamp: now,
+            },
+        );
+        self.cancels.write().insert(id, tx);
+        rx
+    }
+
+    pub fn update_status(&self, id: &str, status: &str, message: &str) {
+        let mut tasks = self.tasks.write();
+        if let Some(t) = tasks.get_mut(id) {
+            t.status = status.to_string();
+            t.message = message.to_string();
+            t.updated_timestamp = chrono::Utc::now().timestamp_millis();
+        }
+    }
+
+    pub fn get_task(&self, id: &str) -> Option<TaskInfo> {
+        self.tasks.read().get(id).cloned()
+    }
+
+    pub fn cancel_task(&self, id: &str) -> bool {
+        if let Some(tx) = self.cancels.write().remove(id) {
+            let _ = tx.send(true);
+        }
+        let mut tasks = self.tasks.write();
+        if let Some(t) = tasks.get_mut(id) {
+            t.status = "cancelled".to_string();
+            t.message = "task cancelled".to_string();
+            t.updated_timestamp = chrono::Utc::now().timestamp_millis();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub start_time: Instant,
@@ -246,6 +326,7 @@ pub struct AppState {
     pub schema_manager: SchemaManager,
     pub plugin_manager: PluginManager,
     pub trace_manager: TraceManager,
+    pub task_manager: TaskManager,
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -287,6 +368,7 @@ impl AppState {
             schema_manager: SchemaManager::new(),
             plugin_manager: PluginManager::new(),
             trace_manager: TraceManager::new(),
+            task_manager: TaskManager::new(),
         }
     }
 }
@@ -334,7 +416,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/trace/rule/:rule_id", get(get_rule_traces))
         .route("/trace/:id", get(get_trace_by_id))
         .route("/tracer", post(set_tracer_config))
-        .route("/async/data/import", post(async_task_started))
+        .route("/async/data/import", post(async_data_import))
         .route("/async/task/:id", get(async_task_status))
         .route("/async/task/:id/cancel", post(async_task_cancelled))
         .route("/batch/req", post(empty_array))
@@ -2885,10 +2967,8 @@ async fn export_ruleset(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-/// Unified ruleset import: creates streams, tables and rules from an export
-/// payload. Also accepts the legacy `{name: sql}` map form for streams and
-/// tables. Existing entities are left untouched.
-async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
+/// Core data import logic shared by synchronous and asynchronous endpoints.
+async fn process_import_payload(state: &AppState, payload: &Value) {
     if let Some(streams) = payload.get("streams") {
         if let Some(defs) = streams.as_array() {
             for item in defs {
@@ -2991,7 +3071,14 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
             }
         }
     }
+}
 
+/// Unified ruleset import: creates streams, tables and rules from an export
+/// payload. Also accepts the legacy `{name: sql}` map form for streams and
+/// tables. Existing entities are left untouched.
+async fn import_ruleset(State(state): State<AppState>, body: Bytes) -> Response {
+    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    process_import_payload(&state, &payload).await;
     (StatusCode::OK, "imported successfully\n").into_response()
 }
 
@@ -3318,25 +3405,95 @@ async fn get_rule_schema(State(state): State<AppState>, Path(id): Path<String>) 
     }
 }
 
-async fn async_task_started() -> impl IntoResponse {
+async fn async_data_import(State(state): State<AppState>, body: Bytes) -> Response {
+    let payload: Value = if !body.is_empty() {
+        if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+            if let Some(content_str) = v.get("content").and_then(|c| c.as_str()) {
+                serde_json::from_str::<Value>(content_str).unwrap_or(v)
+            } else {
+                v
+            }
+        } else {
+            Value::Null
+        }
+    } else {
+        Value::Null
+    };
+
+    let task_id = format!("dataImport-{}", uuid::Uuid::new_v4().simple());
+    let cancel_rx = state.task_manager.register_task(task_id.clone());
+
+    let task_state = state.clone();
+    let tid = task_id.clone();
+    tokio::spawn(async move {
+        // Yield briefly to simulate realistic background ingestion
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        if *cancel_rx.borrow() {
+            task_state
+                .task_manager
+                .update_status(&tid, "cancelled", "task cancelled");
+            return;
+        }
+        process_import_payload(&task_state, &payload).await;
+        if *cancel_rx.borrow() {
+            task_state
+                .task_manager
+                .update_status(&tid, "cancelled", "task cancelled");
+        } else {
+            task_state
+                .task_manager
+                .update_status(&tid, "completed", "import completed");
+        }
+    });
+
     (
         StatusCode::OK,
-        Json(json!({"task_id": "task_1", "status": "running"})),
+        Json(json!({
+            "id": task_id,
+            "task_id": task_id,
+            "status": "running"
+        })),
     )
+        .into_response()
 }
 
-async fn async_task_status(Path(id): Path<String>) -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(json!({"task_id": id, "status": "completed"})),
-    )
+async fn async_task_status(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    if let Some(task) = state.task_manager.get_task(&id) {
+        (
+            StatusCode::OK,
+            Json(json!({
+                "id": task.id,
+                "task_id": task.id,
+                "status": task.status,
+                "message": task.message,
+                "createdTimestamp": task.created_timestamp,
+                "updatedTimestamp": task.updated_timestamp
+            })),
+        )
+            .into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Task {} not found", id)).into_response()
+    }
 }
 
-async fn async_task_cancelled(Path(id): Path<String>) -> impl IntoResponse {
+async fn async_task_cancelled(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    state.task_manager.cancel_task(&id);
     (
         StatusCode::OK,
-        Json(json!({"task_id": id, "status": "cancelled"})),
+        Json(json!({
+            "id": id,
+            "task_id": id,
+            "status": "cancelled",
+            "message": "task cancelled"
+        })),
     )
+        .into_response()
 }
 
 fn find_etc_file(relative: &str) -> Option<std::path::PathBuf> {

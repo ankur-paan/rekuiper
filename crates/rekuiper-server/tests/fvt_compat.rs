@@ -4262,3 +4262,111 @@ async fn test_rule_execution_trace_buffer() {
         .send()
         .await;
 }
+
+#[tokio::test]
+async fn test_async_task_lifecycle_and_cancellation() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Unknown task returns 404
+    let resp = client
+        .get(format!("{}/async/task/nonexistent_task", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 2. Pre-seeded task_1 returns 200
+    let resp = client
+        .get(format!("{}/async/task/task_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let t1: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(t1["id"], "task_1");
+    assert_eq!(t1["status"], "completed");
+
+    // 3. Spawn real background async data import
+    let resp = client
+        .post(format!("{}/async/data/import", base_url))
+        .json(&serde_json::json!({
+            "streams": [{
+                "name": "async_stream_1",
+                "sql": "create stream async_stream_1 () WITH (FORMAT=\"JSON\");",
+                "options": {}
+            }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let import_resp: serde_json::Value = resp.json().await.unwrap();
+    let task_id = import_resp["id"].as_str().unwrap().to_string();
+    assert!(task_id.starts_with("dataImport-"));
+    assert_eq!(import_resp["status"], "running");
+
+    // 4. Poll status until completed (max 2 seconds)
+    let mut completed = false;
+    for _ in 0..20 {
+        let resp = client
+            .get(format!("{}/async/task/{}", base_url, task_id))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let status_val: serde_json::Value = resp.json().await.unwrap();
+        if status_val["status"] == "completed" {
+            completed = true;
+            assert!(status_val["createdTimestamp"].as_i64().unwrap() > 0);
+            assert!(status_val["updatedTimestamp"].as_i64().unwrap() > 0);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    assert!(completed, "Async import task should have completed");
+
+    // 5. Verify that the background import actually created the stream
+    let resp = client
+        .get(format!("{}/streams/async_stream_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 6. Test task cancellation on a new task
+    let resp = client
+        .post(format!("{}/async/data/import", base_url))
+        .json(&serde_json::json!({
+            "streams": []
+        }))
+        .send()
+        .await
+        .unwrap();
+    let task_2_resp: serde_json::Value = resp.json().await.unwrap();
+    let task_2_id = task_2_resp["id"].as_str().unwrap();
+
+    let resp = client
+        .post(format!("{}/async/task/{}/cancel", base_url, task_2_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let cancel_resp: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(cancel_resp["status"], "cancelled");
+
+    let resp = client
+        .get(format!("{}/async/task/{}", base_url, task_2_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let task_2_status: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(task_2_status["status"], "cancelled");
+
+    // 7. Cleanup
+    let _ = client
+        .delete(format!("{}/streams/async_stream_1", base_url))
+        .send()
+        .await;
+}

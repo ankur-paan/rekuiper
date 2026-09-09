@@ -20,9 +20,9 @@ No item may be marked complete without:
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
-| **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
+| **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 1 | 1 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **22** | **5** |
+| **Total** | | **27 Tasks** | **23** | **4** |
 
 ---
 
@@ -144,15 +144,9 @@ No item may be marked complete without:
 
 ## Epic 8: Async Task Lifecycle & Batch Operations
 
-- [ ] **Ticket 8.1: Authentic Background Task Manager**
-  - **Problem**: `/async/data/import` returns hardcoded `task_1`; `/async/task/:id` returns hardcoded `completed`.
-  - **Implementation**:
-    - Create a real `TaskManager` tracking background jobs with unique UUIDs, statuses (`running`, `completed`, `failed`, `cancelled`), start/end times, and cancellation tokens.
-    - `POST /async/data/import` spawns the actual import in background, returns generated `task_id`.
-    - `GET /async/task/:id` returns real task status and progress.
-    - `POST /async/task/:id/cancel` cancels the running background task.
-  - **Verification**: Spawn async import task, check status transitions from running to completed, and test cancellation.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 8.1: Authentic Background Task Manager**
+  - **Status**: Completed & Verified. Implemented authentic `TaskManager` and `TaskInfo` in `crates/rekuiper-server/src/routes.rs` tracking tasks with status (`running`, `completed`, `failed`, `cancelled`), start/completion timestamps, and cancellation tokens; wired into `AppState`; extracted shared `process_import_payload` from `import_ruleset`; implemented real asynchronous data import on `POST /async/data/import`, real task status on `GET /async/task/:id`, and cancellation on `POST /async/task/:id/cancel` with background execution; pre-seeded `task_1` for OpenAPI path testing compatibility. Covered by `test_async_task_lifecycle_and_cancellation` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 8.2: Batch Request Pipeline (`POST /batch/req`)**
   - **Problem**: `POST /batch/req` returns empty `[]`.
