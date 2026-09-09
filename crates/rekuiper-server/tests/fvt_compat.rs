@@ -2185,6 +2185,97 @@ async fn test_kafka_config_and_pipeline() {
 }
 
 #[tokio::test]
+async fn test_file_source_streaming_ingestion() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // 1. Temporary JSON Lines file with three records.
+    let mut db_path = std::env::temp_dir();
+    db_path.push(format!(
+        "rekuiper-file-source-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    // Forward slashes keep the SQL string literal simple on every platform.
+    let data_path = db_path.to_string_lossy().replace('\\', "/");
+    tokio::fs::write(&db_path, "{\"temp\": 20}\n{\"temp\": 25}\n{\"temp\": 30}\n")
+        .await
+        .unwrap();
+
+    // 2. File-backed stream; the rule fans out to a memory topic.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": format!(
+                "CREATE STREAM test_file_stream () WITH (TYPE=\"file\", DATASOURCE=\"{}\", FORMAT=\"json\")",
+                data_path
+            )
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let mut rx = state.stream_bus.subscribe("file_out");
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_file_src",
+            "sql": "SELECT * FROM test_file_stream",
+            "actions": [{"memory": {"topic": "file_out"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // 3. All three file records flow through the rule, in file order.
+    let mut temps = Vec::new();
+    for _ in 0..3 {
+        let record = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for file record")
+            .expect("file_out topic closed");
+        temps.push(
+            record
+                .data
+                .get("temp")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
+    assert_eq!(temps, vec![json!(20), json!(25), json!(30)]);
+
+    // Rule saw every record on its source side too.
+    let status: serde_json::Value = client
+        .get(format!("{}/rules/rule_file_src/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(status["sourceRecordsInTotal"].as_u64().unwrap_or(0) >= 3);
+
+    // 4. Stopping the rule cancels the file reader cleanly.
+    let resp = client
+        .post(format!("{}/rules/rule_file_src/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        !state.source_cancels.read().contains_key("rule_file_src"),
+        "stopped rule should release its source handle"
+    );
+
+    let _ = tokio::fs::remove_file(&db_path).await;
+}
+
+#[tokio::test]
 async fn test_mqtt_source_lifecycle_and_defaults() {
     let (base_url, _handle, state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();

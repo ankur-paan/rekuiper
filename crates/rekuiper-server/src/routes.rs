@@ -12,10 +12,10 @@ use axum::{
 use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
-    apply_data_template, FileSink, HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink,
-    KafkaSource, MqttConfig, MqttSink, MqttSource, RedisSink, RedisSinkConfig, RedisSubSource,
-    SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig, SqlSink, WebSocketConfig,
-    WebSocketSink, WebSocketSource,
+    apply_data_template, FileSink, FileSource, FileSourceConfig, HttpPullConfig, HttpPullSource,
+    KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink, MqttSource, RedisSink,
+    RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig,
+    SqlSink, WebSocketConfig, WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
     model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamRecord},
@@ -726,6 +726,22 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
         MqttSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
+    // File source streams tail a line-delimited file into the stream bus.
+    if let Some(config) = resolve_file_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        rule_id,
+    ) {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.to_string(), cancel_tx);
+        FileSource::new(config, stream_tx).spawn(cancel_rx);
+    }
+
     // HTTP pull source streams poll a remote endpoint into the stream bus.
     if let Some(conf) = resolve_httppull_config(
         &state.stream_manager,
@@ -1119,8 +1135,89 @@ fn resolve_kafka_source(
     Some(config)
 }
 
-/// Signal cancellation to a rule's background streaming source (MQTT, HTTP
-/// pull, WebSocket, Redis subscription or Kafka consumer), if one is
+/// Resolve the [`FileSourceConfig`] for a rule whose source stream declares
+/// `TYPE="file"`: the path comes from `DATASOURCE` (falling back to a stored
+/// `file/{conf_key}` config), with `FORMAT`/`fileType`, `hasHeader` and
+/// `delimiter` layered from stream options over config defaults.
+fn resolve_file_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<FileSourceConfig> {
+    use rekuiper_connectors::DelimitedCodec;
+
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !kind.eq_ignore_ascii_case("file") {
+        return None;
+    }
+    let mut config = FileSourceConfig {
+        path: String::new(),
+        format: "json".to_string(),
+        has_header: false,
+        delimiter: None,
+        interval: 0,
+    };
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.is_empty() {
+            let lookup = format!("file/{}", key);
+            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                match serde_json::from_value::<FileSourceConfig>(conf_val) {
+                    Ok(parsed) => config = parsed,
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid file config '{}': {}",
+                            rule_id,
+                            lookup,
+                            e
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(path) = def.options.get("DATASOURCE") {
+        if !path.trim().is_empty() {
+            config.path = path.clone();
+        }
+    }
+    if config.path.trim().is_empty() {
+        tracing::warn!(
+            "[RULE {}] file stream '{}' has neither DATASOURCE path nor file config",
+            rule_id,
+            stream_name
+        );
+        return None;
+    }
+    if let Some(format) = def
+        .options
+        .get("FORMAT")
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| def.options.get("FILETYPE").filter(|s| !s.trim().is_empty()))
+    {
+        config.format = format.clone();
+    }
+    if let Some(flag) = def
+        .options
+        .get("HASHEADER")
+        .or_else(|| def.options.get("HAS_HEADER"))
+    {
+        match flag.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => config.has_header = true,
+            "false" | "0" | "no" | "" => config.has_header = false,
+            _ => {}
+        }
+    }
+    if let Some(delim) = def.options.get("DELIMITER").filter(|s| !s.is_empty()) {
+        config.delimiter = Some(DelimitedCodec::delimiter_from_name(delim));
+    }
+    Some(config)
+}
+
+/// Signal cancellation to a rule's background streaming source (MQTT, file,
+/// HTTP pull, WebSocket, Redis subscription or Kafka consumer), if one is
 /// registered.
 fn cancel_rule_source(state: &AppState, rule_id: &str) {
     if let Some(tx) = state.source_cancels.write().remove(rule_id) {

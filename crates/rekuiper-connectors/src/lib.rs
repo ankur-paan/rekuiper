@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::io::AsyncBufReadExt;
 
 pub mod codec;
 pub use codec::*;
@@ -250,26 +251,27 @@ async fn append_text(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// File source following the eKuiper file source convention.
 ///
-/// Reads line-delimited JSON records from a file, where each non-empty line
-/// is a JSON object, and converts them into [`StreamRecord`]s.
+/// Streams line-delimited records from a file into [`StreamRecord`]s,
+/// decoding each line per the configured [`FileSourceConfig`] format.
 pub struct FileSource {
-    pub path: PathBuf,
+    pub config: FileSourceConfig,
+    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
 }
 
 impl FileSource {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+    pub fn new(config: FileSourceConfig, tx: tokio::sync::broadcast::Sender<StreamRecord>) -> Self {
+        Self { config, tx }
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
+        Path::new(&self.config.path)
     }
 
     /// Read all records from the file without sending them anywhere.
     pub async fn read_records(&self) -> Result<Vec<StreamRecord>> {
-        let content = tokio::fs::read_to_string(&self.path)
+        let content = tokio::fs::read_to_string(&self.config.path)
             .await
-            .with_context(|| format!("Failed to read file {:?}", self.path))?;
+            .with_context(|| format!("Failed to read file {:?}", self.config.path))?;
         parse_ldjson(&content)
     }
 
@@ -1459,6 +1461,188 @@ impl SimulatorSource {
     }
 }
 
+/// File source configuration (eKuiper file source format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSourceConfig {
+    /// File path or directory path to read (from DATASOURCE or config).
+    pub path: String,
+    /// Format / file type: "json" (default), "lines", "delimited", or "csv".
+    #[serde(default = "default_file_source_format")]
+    pub format: String,
+    /// Whether the first row is a header for delimited/csv format.
+    #[serde(default)]
+    pub has_header: bool,
+    /// Delimiter character for CSV/TSV (default ',').
+    #[serde(default, deserialize_with = "deserialize_delimiter")]
+    pub delimiter: Option<char>,
+    /// Optional pacing interval between emitted records in milliseconds
+    /// (defaults to 0 for immediate replay).
+    #[serde(default)]
+    pub interval: u64,
+}
+
+fn default_file_source_format() -> String {
+    "json".to_string()
+}
+
+/// Accepts a single delimiter character (`","`, `"\t"`, `"|"`) as well as
+/// friendly names (`"comma"`, `"tab"`, `"pipe"`, `"semicolon"`).
+fn deserialize_delimiter<'de, D>(deserializer: D) -> Result<Option<char>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    Ok(opt.map(|s| crate::codec::DelimitedCodec::delimiter_from_name(&s)))
+}
+
+/// Streaming reader: [`FileSource::spawn`] tails the file, decoding each
+/// line per format — JSON lines as objects (arrays fan out per element),
+/// delimited/CSV rows mapped positionally onto headers (using the first row
+/// when `has_header` is set) — until cancelled.
+impl FileSource {
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let file = match tokio::fs::File::open(&self.config.path).await {
+                Ok(file) => file,
+                Err(e) => {
+                    tracing::warn!("File source cannot open {}: {}", self.config.path, e);
+                    return;
+                }
+            };
+            let mut lines = tokio::io::BufReader::new(file).lines();
+            let delimiter = self.config.delimiter.unwrap_or(',');
+            let mut headers: Option<Vec<String>> = None;
+            loop {
+                tokio::select! {
+                    line_res = lines.next_line() => {
+                        match line_res {
+                            Ok(Some(line)) => {
+                                let line = line.trim();
+                                if line.is_empty() {
+                                    continue;
+                                }
+                                if let Some(records) =
+                                    Self::decode_line(&self.config, &mut headers, delimiter, line)
+                                {
+                                    for record in records {
+                                        // All subscribers dropped: shut down cleanly.
+                                        if self.tx.send(record).is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                                if self.config.interval > 0 {
+                                    tokio::select! {
+                                        _ = tokio::time::sleep(std::time::Duration::from_millis(
+                                            self.config.interval,
+                                        )) => {}
+                                        exit = Self::is_cancelled(&mut cancel_rx) => {
+                                            if exit {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                // EOF: pause before re-polling (tail -f) while
+                                // staying responsive to cancellation.
+                                tokio::select! {
+                                    _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                                    exit = Self::is_cancelled(&mut cancel_rx) => {
+                                        if exit {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "File source read error on {}: {}",
+                                    self.config.path,
+                                    e
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    exit = Self::is_cancelled(&mut cancel_rx) => {
+                        if exit {
+                            return;
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    async fn is_cancelled(cancel_rx: &mut tokio::sync::watch::Receiver<bool>) -> bool {
+        match cancel_rx.changed().await {
+            Ok(_) => *cancel_rx.borrow(),
+            // Cancellation sender dropped: shut down.
+            Err(_) => true,
+        }
+    }
+
+    /// Decode one non-empty line according to the configured format.
+    /// Returns `None` for header rows (consumed, not emitted).
+    fn decode_line(
+        config: &FileSourceConfig,
+        headers: &mut Option<Vec<String>>,
+        delimiter: char,
+        line: &str,
+    ) -> Option<Vec<StreamRecord>> {
+        if config.format.eq_ignore_ascii_case("delimited")
+            || config.format.eq_ignore_ascii_case("csv")
+        {
+            if config.has_header && headers.is_none() {
+                *headers = Some(
+                    line.split(delimiter)
+                        .map(|h| h.trim().trim_matches('"').to_string())
+                        .collect(),
+                );
+                return None;
+            }
+            let headers: Vec<String> = match headers {
+                Some(h) => h.clone(),
+                None => {
+                    tracing::warn!("Delimited file source has no headers; skipping line");
+                    return Some(Vec::new());
+                }
+            };
+            let data = parse_delimited_line(line, delimiter, &headers);
+            return Some(vec![StreamRecord::new(data)]);
+        }
+        // JSON / lines: objects emit directly, arrays fan out per element.
+        match serde_json::from_str::<Value>(line) {
+            Ok(Value::Object(map)) => Some(vec![StreamRecord::new(map.into_iter().collect())]),
+            Ok(Value::Array(items)) => {
+                let mut records = Vec::new();
+                for item in items {
+                    if let Value::Object(map) = item {
+                        records.push(StreamRecord::new(map.into_iter().collect()));
+                    } else {
+                        tracing::warn!("Skipping non-object element in file source line");
+                    }
+                }
+                Some(records)
+            }
+            Ok(_) => {
+                tracing::warn!("Skipping non-object JSON line in file source");
+                Some(Vec::new())
+            }
+            Err(e) => {
+                tracing::warn!("Skipping invalid JSON line in file source: {}", e);
+                Some(Vec::new())
+            }
+        }
+    }
+}
+
 /// Delimited-format parser (eKuiper delimited serialization):
 /// splits `line` on `delimiter`, trims each token and maps it to the
 /// corresponding header, converting numeric tokens to [`Value::Number`].
@@ -1766,13 +1950,79 @@ mod tests {
         assert_eq!(v1["status"], json!("ok"));
 
         // FileSource reads the same file back into StreamRecords.
-        let source = FileSource::new(&path);
+        let source = FileSource::new(
+            FileSourceConfig {
+                path: path.to_string_lossy().into_owned(),
+                format: "json".to_string(),
+                has_header: false,
+                delimiter: None,
+                interval: 0,
+            },
+            tokio::sync::broadcast::channel(16).0,
+        );
         let records = source.read_records().await.unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].data.get("temp"), Some(&json!(25.0)));
         assert_eq!(records[1].data.get("status"), Some(&json!("ok")));
 
         let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_file_source_streaming() {
+        let path = unique_temp_path("filesource");
+        tokio::fs::write(&path, "{\"temp\": 20}\n{\"temp\": 25}\n{\"temp\": 30}\n")
+            .await
+            .unwrap();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
+        let source = FileSource::new(
+            FileSourceConfig {
+                path: path.to_string_lossy().into_owned(),
+                format: "json".to_string(),
+                has_header: false,
+                delimiter: None,
+                interval: 0,
+            },
+            tx,
+        );
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let handle = source.spawn(cancel_rx);
+
+        let mut temps = Vec::new();
+        for _ in 0..3 {
+            let record = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for file record")
+                .expect("file channel closed");
+            temps.push(record.data.get("temp").cloned().unwrap());
+        }
+        assert_eq!(temps, vec![json!(20), json!(25), json!(30)]);
+
+        // Cancellation stops the tail loop cleanly.
+        cancel_tx.send(true).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("file source did not exit after cancel")
+            .unwrap();
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[test]
+    fn test_file_source_config_defaults() {
+        let cfg: FileSourceConfig = serde_json::from_value(json!({"path": "data/a.json"})).unwrap();
+        assert_eq!(cfg.format, "json");
+        assert!(!cfg.has_header);
+        assert_eq!(cfg.delimiter, None);
+        assert_eq!(cfg.interval, 0);
+
+        // Delimiter accepts single chars and friendly names.
+        let cfg: FileSourceConfig =
+            serde_json::from_value(json!({"path": "a.csv", "delimiter": "tab"})).unwrap();
+        assert_eq!(cfg.delimiter, Some('\t'));
+        let cfg: FileSourceConfig =
+            serde_json::from_value(json!({"path": "a.csv", "delimiter": "|"})).unwrap();
+        assert_eq!(cfg.delimiter, Some('|'));
     }
 
     #[test]

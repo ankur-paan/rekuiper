@@ -13,12 +13,12 @@ No item may be marked complete without:
 
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
-| **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 1 | 1 |
+| **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 0 | 7 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **1** | **16** |
+| **Total** | | **17 Tasks** | **2** | **15** |
 
 ---
 
@@ -28,15 +28,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Streams without `TYPE` or with `TYPE="mqtt"` resolve MQTT config (broker, topic, stream options), spawn background `MqttSource` with `tokio::select!` cancellation, decode incoming payloads to `StreamRecord`, and broadcast to `stream_bus`. Stopping rule cancels MQTT client. Covered by `test_mqtt_source_lifecycle_and_defaults` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-connectors/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 1.2: Streaming File Source Ingestion**
-  - **Problem**: `FileSink` exists, but there is no streaming `FileSource` reader running in `bootstrap_rule_sources` to ingest file data into rules (`TYPE="file"`).
-  - **Requirements**:
-    - Implement `FileSource` in `rekuiper-connectors` that reads line-delimited JSON or CSV from a path configured via `DATASOURCE` or `CONF_KEY`.
-    - Wire `FileSource` into `bootstrap_rule_sources` with cancellation handle.
-  - **Files**:
-    - `crates/rekuiper-connectors/src/lib.rs`
-    - `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test creating a stream with `TYPE="file"`, pointing to a test file, and verifying records stream into the rule.
+- [x] **Ticket 1.2: Streaming File Source Ingestion**
+  - **Status**: Completed & Verified. Implemented `FileSourceConfig` and unified streaming `FileSource` reading line-delimited JSON or CSV rows with `parse_delimited_line`, header capture, pacing intervals, and cancellation loop. Wired `resolve_file_source` and spawn in `bootstrap_rule_sources`. Covered by `test_file_source_streaming_ingestion` in `fvt_compat.rs` and unit tests in `rekuiper-connectors`.
+  - **Files**: `crates/rekuiper-connectors/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 
