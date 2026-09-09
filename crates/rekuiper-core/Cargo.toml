@@ -22,3 +22,6 @@ parking_lot = { workspace = true }
 async-trait = { workspace = true }
 sqlx = { workspace = true }
 rekuiper-conf = { workspace = true }
+
+[dev-dependencies]
+rekuiper-sql = { workspace = true }

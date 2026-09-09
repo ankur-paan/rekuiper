@@ -1773,6 +1773,7 @@ dependencies = [
  "chrono",
  "parking_lot",
  "rekuiper-conf",
+ "rekuiper-sql",
  "serde",
  "serde_json",
  "sqlx",

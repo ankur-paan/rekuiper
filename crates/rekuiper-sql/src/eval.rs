@@ -1712,8 +1712,17 @@ impl Evaluator {
             "latest" => Self::func_latest_scalar(args),
             "had_changed" => Self::func_had_changed_scalar(args),
             "changed_col" => Self::func_changed_col_scalar(args),
-            _ => Value::Null,
+            // ---- Registered UDFs (anything not built in) ----
+            _ => Self::call_global_udf(name, args),
         }
+    }
+
+    /// Fall back to a user-registered UDF for names outside the built-in
+    /// match list; `Value::Null` when nothing is registered under the name.
+    fn call_global_udf(name: &str, args: &[Value]) -> Value {
+        rekuiper_core::plugin::get_global_udf_registry()
+            .call_udf(name, args)
+            .unwrap_or(Value::Null)
     }
 
     // ---------- helpers for function args ----------

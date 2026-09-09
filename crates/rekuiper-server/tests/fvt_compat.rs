@@ -729,10 +729,8 @@ async fn test_all_openapi_paths_responding() {
         "/metadata/connections/yaml/mqtt",
         "/plugins/sources/mqtt",
         "/plugins/sinks/mqtt",
-        "/plugins/functions/echo",
         "/plugins/portables/pyfunc",
         "/plugins/portables/pyfunc/status",
-        "/plugins/udfs/myudf",
         "/services/edgex",
         "/services/functions/echo",
         "/udf/javascript/func1",
@@ -827,6 +825,116 @@ async fn test_all_openapi_paths_responding() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_udf_plugin_endpoints() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Empty registries list nothing.
+    for path in ["/plugins/functions", "/plugins/udfs"] {
+        let resp = client
+            .get(format!("{}{}", base_url, path))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {}", path);
+        let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert!(items.is_empty());
+    }
+
+    // Register a function plugin and a UDF plugin.
+    let resp = client
+        .post(format!("{}/plugins/functions", base_url))
+        .json(&json!({"name": "my_math", "functions": ["cube", "clamp"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .post(format!("{}/plugins/udfs", base_url))
+        .json(&json!({"name": "my_udf", "functions": ["myfunc"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // Missing names are rejected.
+    let resp = client
+        .post(format!("{}/plugins/functions", base_url))
+        .json(&json!({"functions": ["x"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    // Listings are segregated by plugin type.
+    let resp = client
+        .get(format!("{}/plugins/functions", base_url))
+        .send()
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "my_math");
+    assert_eq!(items[0]["plugin_type"], "function");
+
+    let resp = client
+        .get(format!("{}/plugins/udfs", base_url))
+        .send()
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "my_udf");
+
+    // Detail lookups, including cross-type misses.
+    let resp = client
+        .get(format!("{}/plugins/functions/my_math", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let def: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(def["functions"], json!(["cube", "clamp"]));
+
+    let resp = client
+        .get(format!("{}/plugins/udfs/my_math", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let resp = client
+        .get(format!("{}/plugins/functions/missing", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // Unregister; deletes stay idempotent.
+    let resp = client
+        .delete(format!("{}/plugins/functions/my_math", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .get(format!("{}/plugins/functions", base_url))
+        .send()
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(items.is_empty());
+
+    let resp = client
+        .delete(format!("{}/plugins/udfs/my_udf", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
 
 #[tokio::test]

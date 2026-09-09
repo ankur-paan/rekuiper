@@ -19,8 +19,8 @@ use rekuiper_connectors::{
 };
 use rekuiper_core::{
     model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamRecord},
-    RuleDefinition, RuleManager, SchemaManager, StreamBus, StreamDefinition, StreamManager,
-    TableDefinition, TableManager,
+    PluginDefinition, PluginManager, RuleDefinition, RuleManager, SchemaManager, StreamBus,
+    StreamDefinition, StreamManager, TableDefinition, TableManager,
 };
 use rekuiper_sql::{
     Evaluator, Expr, JoinClause, JoinType, Parser, RuleState, SelectStmt, TimeUnit, WindowDef,
@@ -48,6 +48,7 @@ pub struct AppState {
     pub source_cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
     pub http_client: reqwest::Client,
     pub schema_manager: SchemaManager,
+    pub plugin_manager: PluginManager,
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -86,6 +87,7 @@ impl AppState {
             ruletests: Arc::new(RwLock::new(HashMap::new())),
             source_cancels: Arc::new(RwLock::new(HashMap::new())),
             schema_manager: SchemaManager::new(),
+            plugin_manager: PluginManager::new(),
         }
     }
 }
@@ -181,13 +183,16 @@ pub fn create_router(state: AppState) -> Router {
                 .put(validated_empty_ok)
                 .delete(validated_empty_ok),
         )
-        .route("/plugins/functions", get(empty_array))
+        .route(
+            "/plugins/functions",
+            get(list_function_plugins).post(create_function_plugin),
+        )
         .route("/plugins/functions/prebuild", get(empty_array))
         .route(
             "/plugins/functions/:name",
-            get(validated_empty_object)
+            get(get_function_plugin)
                 .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+                .delete(delete_function_plugin),
         )
         .route(
             "/plugins/functions/:name/register",
@@ -204,8 +209,14 @@ pub fn create_router(state: AppState) -> Router {
             "/plugins/portables/:name/status",
             get(validated_empty_object),
         )
-        .route("/plugins/udfs", get(empty_array))
-        .route("/plugins/udfs/:name", get(validated_empty_object))
+        .route(
+            "/plugins/udfs",
+            get(list_udf_plugins).post(create_udf_plugin),
+        )
+        .route(
+            "/plugins/udfs/:name",
+            get(get_udf_plugin).delete(delete_udf_plugin),
+        )
         .route("/services", get(empty_array))
         .route(
             "/services/:name",
@@ -2338,6 +2349,108 @@ async fn delete_schema(
 /// Generic success acknowledgement for fire-and-forget endpoints.
 async fn empty_ok() -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"message": "success"})))
+}
+
+// ---------------------------------------------------------------------------
+// Plugin registry (`/plugins/functions`, `/plugins/udfs`).
+// ---------------------------------------------------------------------------
+
+async fn list_function_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.plugin_manager.list_plugins("function"))
+}
+
+async fn create_function_plugin(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    create_plugin_of_type(&state, "function", payload).await
+}
+
+async fn get_function_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    get_typed_plugin(&state, "function", &name)
+}
+
+async fn delete_function_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    delete_typed_plugin(&state, &name).await
+}
+
+async fn list_udf_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.plugin_manager.list_plugins("udf"))
+}
+
+async fn create_udf_plugin(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
+    create_plugin_of_type(&state, "udf", payload).await
+}
+
+async fn get_udf_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    get_typed_plugin(&state, "udf", &name)
+}
+
+async fn delete_udf_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    delete_typed_plugin(&state, &name).await
+}
+
+fn typed_plugin_payload(plugin_type: &str, mut payload: Value) -> Result<PluginDefinition, String> {
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "plugin_type".to_string(),
+            Value::String(plugin_type.to_string()),
+        );
+    }
+    serde_json::from_value::<PluginDefinition>(payload)
+        .map_err(|e| format!("Invalid plugin definition: {}", e))
+}
+
+async fn create_plugin_of_type(state: &AppState, plugin_type: &str, payload: Value) -> Response {
+    let name = payload
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match typed_plugin_payload(plugin_type, payload) {
+        Ok(def) => {
+            let created = def.name.clone();
+            if let Err(e) = state.plugin_manager.register_plugin(def).await {
+                return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            }
+            (
+                StatusCode::CREATED,
+                format!("Plugin {} is created.\n", created),
+            )
+                .into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+fn get_typed_plugin(state: &AppState, plugin_type: &str, name: &str) -> Response {
+    if let Err(resp) = check_valid_name(name) {
+        return resp;
+    }
+    match state.plugin_manager.get_plugin(name) {
+        Some(def) if def.plugin_type == plugin_type => Json(def).into_response(),
+        Some(_) => (
+            StatusCode::NOT_FOUND,
+            format!("Plugin {} is not a {}", name, plugin_type),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, format!("Plugin {} not found", name)).into_response(),
+    }
+}
+
+async fn delete_typed_plugin(state: &AppState, name: &str) -> Response {
+    if let Err(resp) = check_valid_name(name) {
+        return resp;
+    }
+    // Idempotent like the other drop endpoints: missing plugins still 200.
+    let _ = state.plugin_manager.delete_plugin(name).await;
+    (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
 }
 
 /// Empty YAML document response for metadata YAML endpoints.
