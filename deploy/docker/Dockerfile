@@ -7,7 +7,7 @@
 # ==============================================================================
 # Build Stage: Multi-stage compilation using official Rust Alpine image
 # ==============================================================================
-FROM rust:1.80-alpine AS builder
+FROM rust:alpine AS builder
 
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev sqlite-dev build-base
 
