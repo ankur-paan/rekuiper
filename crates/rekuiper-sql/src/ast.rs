@@ -132,6 +132,12 @@ pub struct JoinClause {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum SetOp {
+    Union,
+    UnionAll,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
     pub fields: Vec<Expr>,
     /// Output alias per field (`None` when the field has no `AS alias`).
@@ -144,6 +150,7 @@ pub struct SelectStmt {
     pub having: Option<Expr>,
     pub order_by: Vec<OrderByItem>,
     pub limit: Option<usize>,
+    pub set_op: Option<(SetOp, Box<SelectStmt>)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

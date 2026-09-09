@@ -14,6 +14,10 @@ categories.workspace = true
 name = "kuiper"
 path = "src/main.rs"
 
+[lib]
+name = "rekuiper_cli"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { workspace = true }
 clap = { workspace = true }

@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOperator, Expr, SelectStmt, UnaryOperator};
+use crate::ast::{BinaryOperator, Expr, SelectStmt, SetOp, UnaryOperator};
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use parking_lot::RwLock;
@@ -20,10 +20,43 @@ pub struct RuleState {
 pub struct Evaluator;
 
 impl Evaluator {
+    /// Copy of a statement with any trailing `UNION` detached, so a single
+    /// branch can be evaluated without recursing into the set operation.
+    fn without_set_op(stmt: &SelectStmt) -> SelectStmt {
+        let mut single = stmt.clone();
+        single.set_op = None;
+        single
+    }
+
+    /// Merge two single-row UNION branch outputs into one row: key union with
+    /// the right branch winning conflicts. `Union` vs `UnionAll` multiplicity
+    /// only manifests in multi-row APIs; see `eval_select_stateful_multi`.
+    fn merge_union_rows(
+        left: Option<HashMap<String, Value>>,
+        right: Option<HashMap<String, Value>>,
+    ) -> Option<HashMap<String, Value>> {
+        match (left, right) {
+            (Some(mut l), Some(r)) => {
+                for (k, v) in r {
+                    l.insert(k, v);
+                }
+                Some(l)
+            }
+            (one @ Some(_), None) | (None, one @ Some(_)) => one,
+            (None, None) => None,
+        }
+    }
+
     pub fn eval_select(
         stmt: &SelectStmt,
         record: &HashMap<String, Value>,
     ) -> Option<HashMap<String, Value>> {
+        if let Some((_, rhs)) = &stmt.set_op {
+            // Each branch filters/projects the same record independently.
+            let left = Self::eval_select(&Self::without_set_op(stmt), record);
+            let right = Self::eval_select(rhs, record);
+            return Self::merge_union_rows(left, right);
+        }
         if let Some(ref condition) = stmt.where_clause {
             let matches = Self::eval_bool(condition, record);
             if !matches {
@@ -79,6 +112,13 @@ impl Evaluator {
         stmt: &SelectStmt,
         records: &[HashMap<String, Value>],
     ) -> Option<HashMap<String, Value>> {
+        if let Some((_, rhs)) = &stmt.set_op {
+            // Each branch aggregates the same batch independently; the two
+            // single-row outputs merge (right wins on conflict).
+            let left = Self::eval_aggregate(&Self::without_set_op(stmt), records);
+            let right = Self::eval_aggregate(rhs, records);
+            return Self::merge_union_rows(left, right);
+        }
         let first: Option<&HashMap<String, Value>> = records.first();
         let mut output = HashMap::new();
 
@@ -343,6 +383,11 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Option<HashMap<String, Value>> {
+        if let Some((_, rhs)) = &stmt.set_op {
+            let left = Self::eval_select_stateful(&Self::without_set_op(stmt), record, state);
+            let right = Self::eval_select_stateful(rhs, record, state);
+            return Self::merge_union_rows(left, right);
+        }
         let mut output = HashMap::new();
         for (idx, field) in stmt.fields.iter().enumerate() {
             let alias = stmt.field_aliases.get(idx).and_then(|a| a.clone());
@@ -391,7 +436,32 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Vec<HashMap<String, Value>> {
-        let Some(base) = Self::eval_select_stateful(stmt, record, state) else {
+        let mut rows = Self::eval_own_rows_multi(stmt, record, state);
+        if let Some((op, rhs)) = &stmt.set_op {
+            let right = Self::eval_select_stateful_multi(rhs, record, state);
+            if *op == SetOp::Union {
+                for row in right {
+                    if !rows.contains(&row) {
+                        rows.push(row);
+                    }
+                }
+            } else {
+                rows.extend(right);
+            }
+        }
+        rows
+    }
+
+    /// Single-statement portion of [`Self::eval_select_stateful_multi`]:
+    /// projection (+ unnest expansion) without following `set_op`.
+    fn eval_own_rows_multi(
+        stmt: &SelectStmt,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> Vec<HashMap<String, Value>> {
+        // NOTE: set_op-free base on purpose — the caller combines branches.
+        let single = Self::without_set_op(stmt);
+        let Some(base) = Self::eval_select_stateful(&single, record, state) else {
             return Vec::new();
         };
         let unnest_pos = stmt.fields.iter().position(

@@ -522,6 +522,14 @@ impl RuleManager {
         Ok(())
     }
 
+    /// Stop-then-start lifecycle transition: aborts any running task and
+    /// leaves the rule `running` (persisted as such).
+    pub async fn restart_rule(&self, id: &str) -> Result<()> {
+        self.stop_rule(id).await?;
+        self.start_rule(id).await?;
+        Ok(())
+    }
+
     pub async fn delete_rule(&self, id: &str) -> Result<()> {
         {
             let mut map = self.rules.write();

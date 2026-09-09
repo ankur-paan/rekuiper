@@ -117,6 +117,47 @@ pub fn compile_graph_to_sql_and_actions(
         default
     }
 
+    // A visual rule must be acyclic: depth-first search over the topo edges,
+    // tracking the recursion stack to catch back edges (including self-loops).
+    // Diamond topologies (A -> B, A -> C, B -> D, C -> D) pass: nodes leave
+    // the stack once fully explored.
+    {
+        use std::collections::HashSet;
+        fn visit<'a>(
+            node: &'a str,
+            edges: &'a HashMap<String, Vec<String>>,
+            visiting: &mut HashSet<&'a str>,
+            done: &mut HashSet<&'a str>,
+        ) -> Result<(), String> {
+            if !visiting.insert(node) {
+                return Err(format!("Graph contains a cycle at node '{}'", node));
+            }
+            if done.contains(node) {
+                visiting.remove(node);
+                return Ok(());
+            }
+            if let Some(next) = edges.get(node) {
+                for target in next {
+                    visit(target, edges, visiting, done)?;
+                }
+            }
+            visiting.remove(node);
+            done.insert(node);
+            Ok(())
+        }
+        let mut visiting = HashSet::new();
+        let mut done = HashSet::new();
+        let mut endpoints: Vec<&String> = graph.topo.edges.keys().collect();
+        for targets in graph.topo.edges.values() {
+            endpoints.extend(targets);
+        }
+        endpoints.sort();
+        endpoints.dedup();
+        for node in endpoints {
+            visit(node, &graph.topo.edges, &mut visiting, &mut done)?;
+        }
+    }
+
     // Source stream: prefer `sourceName`/`datasource` props of source nodes
     // (node key as fallback), else the topo entry points.
     let mut source_keys: Vec<&String> = graph

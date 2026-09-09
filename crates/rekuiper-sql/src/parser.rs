@@ -1,6 +1,6 @@
 use crate::ast::{
     BinaryOperator, CreateStreamStmt, CreateTableStmt, Expr, JoinClause, JoinType, OrderByItem,
-    SelectStmt, SortOrder, TimeUnit, UnaryOperator, WindowDef,
+    SelectStmt, SetOp, SortOrder, TimeUnit, UnaryOperator, WindowDef,
 };
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -380,6 +380,18 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
 
+        // Set operations bind loosest of all: `SELECT ... UNION [ALL] SELECT ...`.
+        // Right-recursive, so `A UNION B UNION C` parses as `A UNION (B UNION C)`.
+        let mut set_op: Option<(SetOp, Box<SelectStmt>)> = None;
+        if self.match_keyword("UNION") {
+            let op = if self.match_keyword("ALL") {
+                SetOp::UnionAll
+            } else {
+                SetOp::Union
+            };
+            set_op = Some((op, Box::new(self.parse_select()?)));
+        }
+
         Ok(SelectStmt {
             fields,
             field_aliases,
@@ -391,6 +403,7 @@ impl<'a> Parser<'a> {
             having,
             order_by,
             limit,
+            set_op,
         })
     }
 
