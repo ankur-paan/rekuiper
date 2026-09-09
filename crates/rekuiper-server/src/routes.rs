@@ -13,9 +13,9 @@ use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
     apply_data_template, FileSink, HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink,
-    KafkaSource, MqttConfig, MqttSink, RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig,
-    SimulatorSource, Sink, SqlConnectorConfig, SqlSink, WebSocketConfig, WebSocketSink,
-    WebSocketSource,
+    KafkaSource, MqttConfig, MqttSink, MqttSource, RedisSink, RedisSinkConfig, RedisSubSource,
+    SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig, SqlSink, WebSocketConfig,
+    WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
     model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamRecord},
@@ -616,7 +616,116 @@ async fn create_rule(
 /// Starts background source producers (HTTP pull, WebSocket, RedisSub, Kafka,
 /// simulator) for a rule based on its source stream type. Shared by rule
 /// creation and daemon-bootstrap restore.
+/// Resolve the MQTT source configuration for a rule's stream.
+///
+/// MQTT is the default streaming source: streams with no `TYPE`, an empty
+/// `TYPE`, or `TYPE="mqtt"` ingest from the broker. Any other non-empty
+/// `TYPE` (recognized sources like `kafka`, or anything else) resolves to
+/// `None` here so exactly one source bootstrap owns the stream.
+fn resolve_mqtt_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<MqttConfig> {
+    let def = stream_manager.get_stream(stream_name)?;
+    if let Some(kind) = def.options.get("TYPE") {
+        if !kind.trim().is_empty() && !kind.eq_ignore_ascii_case("mqtt") {
+            return None;
+        }
+    }
+    let mut config = MqttConfig {
+        server: "tcp://127.0.0.1:1883".to_string(),
+        topic: String::new(),
+        client_id: None,
+        qos: 0,
+        username: None,
+        password: None,
+    };
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.trim().is_empty() {
+            let lookup = format!("mqtt/{}", key);
+            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                match serde_json::from_value::<MqttConfig>(conf_val) {
+                    Ok(stored) => config = stored,
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid mqtt config '{}': {}",
+                            rule_id,
+                            lookup,
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if let Some(server) = def.options.get("SERVER") {
+        if !server.trim().is_empty() {
+            config.server = server.clone();
+        }
+    }
+    if let Some(topic) = def.options.get("DATASOURCE") {
+        if !topic.trim().is_empty() {
+            config.topic = topic.clone();
+        }
+    }
+    if config.topic.trim().is_empty() {
+        config.topic = stream_name.to_string();
+    }
+    let client_id = def
+        .options
+        .get("CLIENTID")
+        .or_else(|| def.options.get("CLIENT_ID"));
+    if let Some(id) = client_id {
+        if !id.trim().is_empty() {
+            config.client_id = Some(id.clone());
+        }
+    }
+    if let Some(user) = def.options.get("USERNAME") {
+        if !user.is_empty() {
+            config.username = Some(user.clone());
+        }
+    }
+    if let Some(pass) = def.options.get("PASSWORD") {
+        if !pass.is_empty() {
+            config.password = Some(pass.clone());
+        }
+    }
+    if let Some(qos) = def.options.get("QOS") {
+        match qos.trim().parse::<u8>() {
+            Ok(q) => config.qos = q,
+            Err(_) => {
+                tracing::warn!(
+                    "[RULE {}] invalid mqtt QOS '{}', keeping {}",
+                    rule_id,
+                    qos,
+                    config.qos
+                );
+            }
+        }
+    }
+    Some(config)
+}
+
 fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
+    // MQTT is the default streaming source: typeless streams and TYPE="mqtt"
+    // subscribe to the broker topic and feed the rule pipeline.
+    if let Some(config) = resolve_mqtt_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        rule_id,
+    ) {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.to_string(), cancel_tx);
+        MqttSource::new(config, stream_tx).spawn(cancel_rx);
+    }
+
     // HTTP pull source streams poll a remote endpoint into the stream bus.
     if let Some(conf) = resolve_httppull_config(
         &state.stream_manager,
@@ -1010,9 +1119,10 @@ fn resolve_kafka_source(
     Some(config)
 }
 
-/// Signal cancellation to a rule's background source poller (HTTP pull,
-/// WebSocket, Redis subscription or Kafka consumer), if one is registered.
-fn cancel_httppull(state: &AppState, rule_id: &str) {
+/// Signal cancellation to a rule's background streaming source (MQTT, HTTP
+/// pull, WebSocket, Redis subscription or Kafka consumer), if one is
+/// registered.
+fn cancel_rule_source(state: &AppState, rule_id: &str) {
     if let Some(tx) = state.source_cancels.write().remove(rule_id) {
         let _ = tx.send(true);
     }
@@ -1976,7 +2086,7 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
     }
     match state.rule_manager.stop_rule(&name).await {
         Ok(_) => {
-            cancel_httppull(&state, &name);
+            cancel_rule_source(&state, &name);
             (StatusCode::OK, format!("Rule {} was stopped", name)).into_response()
         }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
@@ -1988,7 +2098,7 @@ async fn restart_rule(State(state): State<AppState>, Path(name): Path<String>) -
         return resp;
     }
     let _ = state.rule_manager.stop_rule(&name).await;
-    cancel_httppull(&state, &name);
+    cancel_rule_source(&state, &name);
     match state.rule_manager.start_rule(&name).await {
         Ok(_) => (StatusCode::OK, format!("Rule {} was restarted", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
@@ -2001,7 +2111,7 @@ async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) ->
     }
     match state.rule_manager.delete_rule(&name).await {
         Ok(_) => {
-            cancel_httppull(&state, &name);
+            cancel_rule_source(&state, &name);
             (StatusCode::OK, format!("Rule {} is dropped.\n", name)).into_response()
         }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
@@ -2626,7 +2736,7 @@ async fn bulk_start_rules(State(state): State<AppState>) -> impl IntoResponse {
 async fn bulk_stop_rules(State(state): State<AppState>) -> impl IntoResponse {
     for rule in state.rule_manager.list_rules() {
         let _ = state.rule_manager.stop_rule(&rule.id).await;
-        cancel_httppull(&state, &rule.id);
+        cancel_rule_source(&state, &rule.id);
     }
     (StatusCode::OK, Json(json!({})))
 }

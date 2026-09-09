@@ -2185,6 +2185,112 @@ async fn test_kafka_config_and_pipeline() {
 }
 
 #[tokio::test]
+async fn test_mqtt_source_lifecycle_and_defaults() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    async fn create_stream(client: &reqwest::Client, base_url: &str, sql: &str) {
+        let resp = client
+            .post(format!("{}/streams", base_url))
+            .json(&json!({ "sql": sql }))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "create stream: {}", sql);
+    }
+
+    async fn create_rule(client: &reqwest::Client, base_url: &str, id: &str, sql: &str) {
+        let resp = client
+            .post(format!("{}/rules", base_url))
+            .json(&json!({
+                "id": id,
+                "sql": sql,
+                "actions": [{"log": {}}]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "create rule: {}", id);
+    }
+
+    fn has_source_handle(state: &AppState, rule_id: &str) -> bool {
+        state.source_cancels.read().contains_key(rule_id)
+    }
+
+    // 1. Typeless stream defaults to MQTT: subscriber task is registered.
+    create_stream(
+        &client,
+        &base_url,
+        "CREATE STREAM demo () WITH (DATASOURCE=\"demo\")",
+    )
+    .await;
+    create_rule(
+        &client,
+        &base_url,
+        "rule_mqtt_default",
+        "SELECT * FROM demo",
+    )
+    .await;
+    assert!(
+        has_source_handle(&state, "rule_mqtt_default"),
+        "typeless stream should bootstrap an MQTT subscriber"
+    );
+
+    // 2. Explicit TYPE="mqtt" also bootstraps.
+    create_stream(
+        &client,
+        &base_url,
+        "CREATE STREAM m_mqtt () WITH (TYPE=\"mqtt\", DATASOURCE=\"telemetry\")",
+    )
+    .await;
+    create_rule(
+        &client,
+        &base_url,
+        "rule_mqtt_explicit",
+        "SELECT * FROM m_mqtt",
+    )
+    .await;
+    assert!(
+        has_source_handle(&state, "rule_mqtt_explicit"),
+        "TYPE=mqtt stream should bootstrap an MQTT subscriber"
+    );
+
+    // 3. Other source types must not bootstrap MQTT.
+    create_stream(
+        &client,
+        &base_url,
+        "CREATE STREAM m_mem () WITH (TYPE=\"memory\")",
+    )
+    .await;
+    create_rule(&client, &base_url, "rule_mem", "SELECT * FROM m_mem").await;
+    assert!(
+        !has_source_handle(&state, "rule_mem"),
+        "TYPE=memory stream must not bootstrap an MQTT subscriber"
+    );
+
+    // 4. Stopping the rule cancels the source task and drops its handle.
+    let resp = client
+        .post(format!("{}/rules/rule_mqtt_default/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        !has_source_handle(&state, "rule_mqtt_default"),
+        "stopped rule should release its source handle"
+    );
+    let status: serde_json::Value = client
+        .get(format!("{}/rules/rule_mqtt_default/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["status"], "stopped");
+}
+
+#[tokio::test]
 async fn test_sql_connector_and_data_template() {
     use rekuiper_connectors::apply_data_template;
     use std::collections::HashMap;

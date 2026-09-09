@@ -498,15 +498,74 @@ pub fn decode_mqtt_payload(payload: &[u8]) -> Result<StreamRecord> {
 /// incoming JSON message as a [`StreamRecord`].
 pub struct MqttSource {
     pub config: MqttConfig,
+    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
 }
 
 impl MqttSource {
-    pub fn new(config: MqttConfig) -> Self {
-        Self { config }
+    pub fn new(config: MqttConfig, tx: tokio::sync::broadcast::Sender<StreamRecord>) -> Self {
+        Self { config, tx }
     }
 
     pub fn config(&self) -> &MqttConfig {
         &self.config
+    }
+
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let opts = match mqtt_options(&self.config) {
+                Ok(opts) => opts,
+                Err(e) => {
+                    tracing::warn!("MQTT source bad broker config: {}", e);
+                    return;
+                }
+            };
+            let (client, mut eventloop) = AsyncClient::new(opts, 64);
+            if let Err(e) = client
+                .subscribe(self.config.topic.clone(), self.config.qos_level())
+                .await
+            {
+                tracing::warn!("MQTT subscribe to {} failed: {}", self.config.topic, e);
+                return;
+            }
+            loop {
+                tokio::select! {
+                    event = eventloop.poll() => {
+                        match event {
+                            Ok(Event::Incoming(Packet::Publish(p))) => {
+                                match decode_mqtt_payload(&p.payload) {
+                                    Ok(record) => {
+                                        // Ignore SendError: subscribers dropped.
+                                        let _ = self.tx.send(record);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Skipping invalid MQTT payload: {}", e);
+                                    }
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!("MQTT connection error: {}", e);
+                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            }
+                        }
+                    }
+                    changed = cancel_rx.changed() => {
+                        match changed {
+                            Ok(_) => {
+                                if *cancel_rx.borrow() {
+                                    return;
+                                }
+                            }
+                            // Cancellation sender dropped: shut down.
+                            Err(_) => return,
+                        }
+                    }
+                }
+            }
+        })
     }
 
     pub async fn run(self, tx: tokio::sync::mpsc::Sender<StreamRecord>) -> Result<()> {
