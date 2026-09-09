@@ -1723,6 +1723,22 @@ impl Evaluator {
             "array_slice" => Self::func_array_slice(args),
             "array_concat" => Self::func_array_concat(args),
             "deduplicate" => Self::func_deduplicate(args),
+            "cardinality" | "array_cardinality" => Self::func_cardinality(args),
+            "element_at" => Self::func_element_at(args),
+            "array_contains_any" => Self::func_array_contains_any(args),
+            "array_remove" => Self::func_array_remove(args),
+            "array_distinct" => Self::func_array_distinct(args),
+            "array_intersect" => Self::func_array_intersect(args),
+            "array_union" => Self::func_array_union(args),
+            "array_except" => Self::func_array_except(args),
+            "array_max" => Self::func_array_max(args),
+            "array_min" => Self::func_array_min(args),
+            "array_avg" => Self::func_array_avg(args),
+            "array_flatten" => Self::func_array_flatten(args),
+            "array_sort" => Self::func_array_sort(args),
+            "repeat" => Self::func_repeat(args),
+            "sequence" => Self::func_sequence(args),
+            "kvpair_array_to_obj" => Self::func_kvpair_array_to_obj(args),
             // ---- Analytic scalar fallbacks (batch/stateful paths below) ----
             "collect" => Self::func_collect_scalar(args),
             "lead" => Self::func_lead_scalar(args),
@@ -3341,6 +3357,304 @@ impl Evaluator {
             }
         }
         Value::Array(out)
+    }
+
+    fn func_cardinality(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match &args[0] {
+            Value::Array(arr) => Value::from(arr.len() as i64),
+            Value::Null => Value::from(0),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_element_at(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let Some(index) = Self::to_i64_arg(&args[1]) else {
+            return Value::Null;
+        };
+        // 1-based indexing; negatives count back from the end (-1 is last).
+        // Index 0 and out-of-range positions yield Null.
+        let len = arr.len() as i64;
+        let pos = if index > 0 {
+            index - 1
+        } else if index < 0 {
+            len + index
+        } else {
+            return Value::Null;
+        };
+        if pos < 0 || pos >= len {
+            return Value::Null;
+        }
+        arr[pos as usize].clone()
+    }
+
+    fn func_array_contains_any(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(haystack), Some(needles)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Bool(false);
+        };
+        Value::Bool(
+            needles
+                .iter()
+                .any(|n| haystack.iter().any(|h| Self::values_equal(h, n))),
+        )
+    }
+
+    fn func_array_remove(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        Value::Array(
+            arr.iter()
+                .filter(|item| !Self::values_equal(item, &args[1]))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    fn func_array_distinct(args: &[Value]) -> Value {
+        Self::func_deduplicate(args)
+    }
+
+    fn func_array_intersect(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(a), Some(b)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Null;
+        };
+        let mut out = Vec::new();
+        for item in a {
+            if b.iter().any(|other| Self::values_equal(item, other))
+                && !out.iter().any(|seen| Self::values_equal(seen, item))
+            {
+                out.push(item.clone());
+            }
+        }
+        Value::Array(out)
+    }
+
+    fn func_array_union(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(a), Some(b)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Null;
+        };
+        let mut out: Vec<Value> = Vec::with_capacity(a.len() + b.len());
+        for item in a.iter().chain(b.iter()) {
+            if !out.iter().any(|seen| Self::values_equal(seen, item)) {
+                out.push(item.clone());
+            }
+        }
+        Value::Array(out)
+    }
+
+    fn func_array_except(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(a), Some(b)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Null;
+        };
+        Value::Array(
+            a.iter()
+                .filter(|item| !b.iter().any(|other| Self::values_equal(item, other)))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Shared numeric scan for `array_max`/`array_min`: extreme value among
+    /// numeric elements, preserving the original JSON representation.
+    fn array_extreme<F>(arr: &[Value], better: F) -> Value
+    where
+        F: Fn(std::cmp::Ordering) -> bool,
+    {
+        let mut best: Option<&Value> = None;
+        for item in arr {
+            if !item.is_number() {
+                continue;
+            }
+            best = Some(match best {
+                None => item,
+                Some(current) => match Self::compare_values(item, current) {
+                    Some(ord) if better(ord) => item,
+                    _ => current,
+                },
+            });
+        }
+        best.cloned().unwrap_or(Value::Null)
+    }
+
+    fn func_array_max(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        Self::array_extreme(arr, |ord| ord == std::cmp::Ordering::Greater)
+    }
+
+    fn func_array_min(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        Self::array_extreme(arr, |ord| ord == std::cmp::Ordering::Less)
+    }
+
+    fn func_array_avg(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut sum = 0.0;
+        let mut count = 0u64;
+        for item in arr {
+            if let Some(f) = item.as_f64() {
+                sum += f;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Value::Null;
+        }
+        serde_json::json!(sum / count as f64)
+    }
+
+    fn func_array_flatten(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut out = Vec::new();
+        for item in arr {
+            match item {
+                Value::Array(inner) => out.extend(inner.iter().cloned()),
+                other => out.push(other.clone()),
+            }
+        }
+        Value::Array(out)
+    }
+
+    fn func_array_sort(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut out = arr.clone();
+        out.sort_by(|a, b| {
+            Self::compare_values(a, b)
+                .unwrap_or_else(|| Self::to_string_always(a).cmp(&Self::to_string_always(b)))
+        });
+        Value::Array(out)
+    }
+
+    fn func_repeat(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(n) = Self::to_i64_arg(&args[1]) else {
+            return Value::Null;
+        };
+        if n < 0 {
+            return Value::Null;
+        }
+        Value::Array(vec![args[0].clone(); n as usize])
+    }
+
+    fn func_sequence(args: &[Value]) -> Value {
+        if args.len() != 2 && args.len() != 3 {
+            return Value::Null;
+        }
+        let (Some(start), Some(stop)) = (Self::to_i64_arg(&args[0]), Self::to_i64_arg(&args[1]))
+        else {
+            return Value::Null;
+        };
+        let step = if args.len() == 3 {
+            let Some(step) = Self::to_i64_arg(&args[2]) else {
+                return Value::Null;
+            };
+            if step == 0 {
+                return Value::Null;
+            }
+            step
+        } else if start <= stop {
+            1
+        } else {
+            -1
+        };
+        // An explicit step fighting the direction would loop forever.
+        if (step > 0 && start > stop) || (step < 0 && start < stop) {
+            return Value::Null;
+        }
+        let mut out = Vec::new();
+        let mut current = start;
+        loop {
+            out.push(Value::from(current));
+            if current == stop {
+                break;
+            }
+            match current.checked_add(step) {
+                Some(next) => current = next,
+                None => break,
+            }
+        }
+        Value::Array(out)
+    }
+
+    fn func_kvpair_array_to_obj(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut map = serde_json::Map::new();
+        for item in arr {
+            let Some(obj) = item.as_object() else {
+                continue;
+            };
+            let Some(key) = obj
+                .get("key")
+                .or_else(|| obj.get("Key"))
+                .or_else(|| obj.get("k"))
+                .map(Self::to_string_always)
+            else {
+                continue;
+            };
+            let value = obj
+                .get("value")
+                .or_else(|| obj.get("Value"))
+                .or_else(|| obj.get("v"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            map.insert(key, value);
+        }
+        Value::Object(map)
     }
 
     // ---------- analytic scalar fallbacks (single-record context) ----------

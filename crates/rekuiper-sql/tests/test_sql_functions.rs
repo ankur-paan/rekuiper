@@ -1016,3 +1016,202 @@ fn test_math_and_bitwise_parity() {
         Value::Null
     );
 }
+
+// ---------------------------------------------------------------------------
+// Array manipulation functions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_array_functions_parity() {
+    let empty = empty();
+
+    // Cardinality.
+    assert_eq!(
+        eval_one("SELECT cardinality([1, 2, 3]) AS v FROM demo", &empty),
+        json!(3)
+    );
+    assert_eq!(
+        eval_one("SELECT array_cardinality([]) AS v FROM demo", &empty),
+        json!(0)
+    );
+    assert_eq!(
+        eval_one("SELECT cardinality(null) AS v FROM demo", &empty),
+        json!(0)
+    );
+
+    // Element access: 1-based, negative from the end.
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], 1) AS v FROM demo", &empty),
+        json!(10)
+    );
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], -1) AS v FROM demo", &empty),
+        json!(30)
+    );
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], -3) AS v FROM demo", &empty),
+        json!(10)
+    );
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], 5) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], 0) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT element_at([10, 20, 30], -4) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Containment and set operations.
+    assert_eq!(
+        eval_one(
+            "SELECT array_contains_any([1, 2], [2, 3]) AS v FROM demo",
+            &empty
+        ),
+        json!(true)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT array_contains_any([1, 2], [3, 4]) AS v FROM demo",
+            &empty
+        ),
+        json!(false)
+    );
+    assert_eq!(
+        eval_one("SELECT array_contains_any(5, [1]) AS v FROM demo", &empty),
+        json!(false)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT array_remove([1, 2, 1, 3], 1) AS v FROM demo",
+            &empty
+        ),
+        json!([2, 3])
+    );
+    assert_eq!(
+        eval_one("SELECT array_distinct([1, 2, 1, 3]) AS v FROM demo", &empty),
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        eval_one("SELECT array_union([1, 2], [2, 3]) AS v FROM demo", &empty),
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT array_intersect([1, 2, 3], [2, 3, 4]) AS v FROM demo",
+            &empty
+        ),
+        json!([2, 3])
+    );
+    assert_eq!(
+        eval_one("SELECT array_except([1, 2, 3], [2]) AS v FROM demo", &empty),
+        json!([1, 3])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT array_except([1, 2], [1, 2, 3]) AS v FROM demo",
+            &empty
+        ),
+        json!([])
+    );
+
+    // Numeric aggregations skip non-numeric elements.
+    assert_eq!(
+        eval_one("SELECT array_max([3, 1, 4]) AS v FROM demo", &empty),
+        json!(4)
+    );
+    assert_eq!(
+        eval_one("SELECT array_min([3, 1, 4]) AS v FROM demo", &empty),
+        json!(1)
+    );
+    assert_eq!(
+        eval_one("SELECT array_avg([2, 4]) AS v FROM demo", &empty),
+        json!(3.0)
+    );
+    assert_eq!(
+        eval_one("SELECT array_max(['a', null]) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT array_avg([]) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Flatten (one level) and sort.
+    assert_eq!(
+        eval_one("SELECT array_flatten([[1, 2], [3]]) AS v FROM demo", &empty),
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT array_flatten([[1, 2], [3], 4]) AS v FROM demo",
+            &empty
+        ),
+        json!([1, 2, 3, 4])
+    );
+    assert_eq!(
+        eval_one("SELECT array_sort([3, 1, 2]) AS v FROM demo", &empty),
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        eval_one("SELECT array_sort(['b', 'a']) AS v FROM demo", &empty),
+        json!(["a", "b"])
+    );
+
+    // Generators.
+    assert_eq!(
+        eval_one("SELECT sequence(1, 3) AS v FROM demo", &empty),
+        json!([1, 2, 3])
+    );
+    assert_eq!(
+        eval_one("SELECT sequence(3, 1, -1) AS v FROM demo", &empty),
+        json!([3, 2, 1])
+    );
+    assert_eq!(
+        eval_one("SELECT sequence(5, 5) AS v FROM demo", &empty),
+        json!([5])
+    );
+    assert_eq!(
+        eval_one("SELECT sequence(1, 3, 0) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT sequence(1, 3, -1) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT repeat('a', 3) AS v FROM demo", &empty),
+        json!(["a", "a", "a"])
+    );
+    assert_eq!(
+        eval_one("SELECT repeat('a', 0) AS v FROM demo", &empty),
+        json!([])
+    );
+    assert_eq!(
+        eval_one("SELECT repeat('a', -1) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Key/value pair expansion, including alternate spellings.
+    assert_eq!(
+        eval_one(
+            "SELECT kvpair_array_to_obj([{\"key\": \"a\", \"value\": 1}]) AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 1})
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT kvpair_array_to_obj([{\"Key\": \"x\", \"Value\": true}, {\"k\": \"y\", \"v\": 2}]) AS v FROM demo",
+            &empty
+        ),
+        json!({"x": true, "y": 2})
+    );
+    assert_eq!(
+        eval_one("SELECT kvpair_array_to_obj([]) AS v FROM demo", &empty),
+        json!({})
+    );
+}

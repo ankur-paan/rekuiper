@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 2 | 5 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 3 | 4 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **4** | **13** |
+| **Total** | | **17 Tasks** | **5** | **12** |
 
 ---
 
@@ -44,25 +44,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Implemented `bitand`, `bitor`, `bitxor`, `bitnot` via `to_i64_arg`; `pi()`, `rand()`; 1-arg & 2-arg `log`/`ln`, `log2`, `log10`; `power`/`pow` with checked integer pow; `cosh`, `sinh`, `tanh`, `cot`; `radians`, `degrees`; and `conv` radix 2–36 string/number converter with sign and magnitude handling. Covered by `test_math_and_bitwise_parity` in `test_sql_functions.rs`.
   - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
-### Ticket 2.3: Array Manipulation Functions
-- [ ] **Functions**:
-  - `cardinality(arr)` / `array_cardinality(arr)`: Returns element count.
-  - `element_at(arr, index)`: 1-based indexing into array; negative indices count from end (`-1` = last).
-  - `array_contains(arr, val)`: Boolean check if array contains value.
-  - `array_contains_any(arr1, arr2)`: Boolean check if any element of `arr2` is in `arr1`.
-  - `array_remove(arr, val)`: Returns copy of `arr` with all occurrences of `val` removed.
-  - `array_distinct(arr)`: Returns deduplicated array preserving order.
-  - `array_intersect(arr1, arr2)`: Set intersection of two arrays.
-  - `array_union(arr1, arr2)`: Set union of two arrays.
-  - `array_except(arr1, arr2)`: Set difference `arr1 - arr2`.
-  - `array_max(arr)`, `array_min(arr)`, `array_avg(arr)`: Statistical aggregates over numeric array.
-  - `array_flatten(arr)`: Flattens 2D array by one level.
-  - `array_sort(arr)`: Sorts elements ascending.
-  - `repeat(val, n)`: Returns array containing `val` repeated `n` times.
-  - `sequence(start, stop, step)`: Generates array sequence `[start, start+step, ...]`.
-  - `kvpair_array_to_obj(arr)`: Converts array of `[{"key": k, "value": v}]` into a single JSON object.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Unit tests testing all array operators against edge cases (empty arrays, mixed types, nulls).
+- [x] **Ticket 2.3: Array Manipulation Functions**
+  - **Status**: Completed & Verified. Added parser desugaring for array `[e...]` and object `{k: v...}` literals. Implemented `cardinality`/`array_cardinality`, 1-based & negative-indexed `element_at`, `array_contains_any`, `array_remove`, `array_distinct` (=deduplicate), `array_intersect`, `array_union`, `array_except`, `array_max`, `array_min`, `array_avg`, `array_flatten`, `array_sort`, `repeat`, `sequence`, and `kvpair_array_to_obj`. Covered by `test_array_functions_parity` in `test_sql_functions.rs`.
+  - **Files**: `crates/rekuiper-sql/src/parser.rs`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.4: DateTime Functions & Calendar Extractors
 - [ ] **Functions**:

@@ -866,6 +866,31 @@ impl<'a> Parser<'a> {
         self.parse_primary()
     }
 
+    /// Object-literal key: a quoted string or a bare identifier.
+    fn parse_object_key(&mut self) -> Result<String> {
+        self.skip_whitespace();
+        if self.pos >= self.input.len() {
+            bail!("Unexpected end of object literal");
+        }
+        let rem = &self.input[self.pos..];
+        if rem.starts_with('\'') || rem.starts_with('"') {
+            let quote = rem.chars().next().unwrap();
+            let rest = &rem[quote.len_utf8()..];
+            let end = rest
+                .find(quote)
+                .ok_or_else(|| anyhow::anyhow!("Unterminated object key"))?;
+            let key = rest[..end].to_string();
+            self.pos += quote.len_utf8() + end + quote.len_utf8();
+            return Ok(key);
+        }
+        let Some(word) = self.peek_word() else {
+            bail!("Expected object key");
+        };
+        self.skip_whitespace();
+        self.pos += word.len();
+        Ok(word)
+    }
+
     fn parse_primary(&mut self) -> Result<Expr> {
         self.skip_whitespace();
         if self.pos >= self.input.len() {
@@ -892,6 +917,68 @@ impl<'a> Parser<'a> {
             let s = &rest[..end];
             self.pos += quote.len_utf8() + end + quote.len_utf8();
             return Ok(Expr::Literal(serde_json::Value::String(s.to_string())));
+        }
+
+        // Array literal: [e1, e2, ...] — desugared to array_create(...).
+        if rem.starts_with('[') {
+            self.pos += 1;
+            let mut args = Vec::new();
+            self.skip_whitespace();
+            if !(self.pos < self.input.len() && self.input[self.pos..].starts_with(']')) {
+                loop {
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with(']') {
+                        break;
+                    }
+                    args.push(self.parse_expr()?);
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with(',') {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.skip_whitespace();
+            self.expect_char(']')?;
+            return Ok(Expr::Call {
+                name: "array_create".to_string(),
+                args,
+            });
+        }
+
+        // Object literal: {"k": v, ...} — desugared to json_map("k", v, ...).
+        // Keys may be quoted strings or bare identifiers.
+        if rem.starts_with('{') {
+            self.pos += 1;
+            let mut args = Vec::new();
+            self.skip_whitespace();
+            if !(self.pos < self.input.len() && self.input[self.pos..].starts_with('}')) {
+                loop {
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with('}') {
+                        break;
+                    }
+                    let key = self.parse_object_key()?;
+                    self.skip_whitespace();
+                    self.expect_char(':')?;
+                    let val = self.parse_expr()?;
+                    args.push(Expr::Literal(serde_json::Value::String(key)));
+                    args.push(val);
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with(',') {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.skip_whitespace();
+            self.expect_char('}')?;
+            return Ok(Expr::Call {
+                name: "json_map".to_string(),
+                args,
+            });
         }
 
         // Numeric literal: digit or '.' followed by digit
