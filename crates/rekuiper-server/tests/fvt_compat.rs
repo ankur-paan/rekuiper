@@ -3323,3 +3323,95 @@ async fn test_dynamic_metadata_functions() {
         "custom_fn2 must disappear after plugin deletion"
     );
 }
+
+#[tokio::test]
+async fn test_rule_schema_introspection() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM demo () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    async fn create_rule(client: &reqwest::Client, base_url: &str, id: &str, sql: &str) {
+        let resp = client
+            .post(format!("{}/rules", base_url))
+            .json(&json!({
+                "id": id,
+                "sql": sql,
+                "actions": [{"memory": {"topic": "schema_sink"}}]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    }
+
+    async fn fetch_schema(
+        client: &reqwest::Client,
+        base_url: &str,
+        id: &str,
+    ) -> (reqwest::StatusCode, serde_json::Value) {
+        let resp = client
+            .get(format!("{}/rules/{}/schema", base_url, id))
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status();
+        // Error responses are plain text; only success carries a JSON schema.
+        let body = resp.json().await.unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    // Dynamic identifier stays "any"; bigint literal widens `b + 1` to float.
+    create_rule(
+        &client,
+        &base_url,
+        "rule_schema_test",
+        "SELECT a, b + 1 AS c FROM demo",
+    )
+    .await;
+    let (status, schema) = fetch_schema(&client, &base_url, "rule_schema_test").await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(schema, json!({"a": "any", "c": "float"}));
+
+    // Typed function calls resolve to their static return types.
+    create_rule(
+        &client,
+        &base_url,
+        "rule_typed_test",
+        "SELECT concat(name, '!') AS greeting, count(*) AS cnt, isnull(val) AS is_missing FROM demo",
+    )
+    .await;
+    let (status, schema) = fetch_schema(&client, &base_url, "rule_typed_test").await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(schema["greeting"], json!("string"), "schema: {}", schema);
+    assert_eq!(schema["cnt"], json!("bigint"), "schema: {}", schema);
+    assert_eq!(schema["is_missing"], json!("boolean"), "schema: {}", schema);
+
+    // Unknown rule ids 404.
+    let (status, _) = fetch_schema(&client, &base_url, "non_existent").await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+
+    // Clean up rules and stream.
+    for rule in ["rule_schema_test", "rule_typed_test"] {
+        let resp = client
+            .delete(format!("{}/rules/{}", base_url, rule))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    let resp = client
+        .delete(format!("{}/streams/demo", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}

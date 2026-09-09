@@ -17,8 +17,8 @@ No item may be marked complete without:
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
-| **Epic 5** | REST API Realism & System Introspection | 3 | 1 | 2 |
-| **Total** | | **17 Tasks** | **15** | **2** |
+| **Epic 5** | REST API Realism & System Introspection | 3 | 2 | 1 |
+| **Total** | | **17 Tasks** | **16** | **1** |
 
 ---
 
@@ -100,12 +100,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. New `crates/rekuiper-sql/src/functions.rs` defines `FunctionMeta` (`name/category/description/aggregate/arity/example`) and `builtin_function_metadata()` with all 185 built-ins (35 math, 16 string, 39 array/object, 28 datetime, 4 JSON-path, 19 crypto/encoding/regex, 9 conversion, 18 aggregates, 11 analytics, 6 system), every name and arity verified against the evaluator dispatch; unit test asserts count 185 plus uniqueness. `list_function_metadata` now takes `State` and serves built-ins plus `list_plugins("function")`/`list_plugins("udf")` entries (category `plugin`/`udf`, unknown arity reported honestly, built-ins win collisions). Covered by `test_dynamic_metadata_functions` in `fvt_compat.rs` (>= 185 entries, spot presence/category/aggregate checks, plugin register → visible → delete → removed).
   - **Files**: `crates/rekuiper-sql/src/functions.rs`, `crates/rekuiper-sql/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 5.2: Real Rule Schema Introspection (`GET /rules/:id/schema`)**
-  - **Problem**: `get_rule_schema` returns an empty `{}` object.
-  - **Requirements**:
-    - Introspect the rule's SQL AST projection items and stream definitions to return the expected output schema fields and inferred types.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-sql/src/eval.rs`
-  - **Verification**: Test verifying `SELECT a, b + 1 AS c FROM demo` returns schema `{ "a": "any", "c": "float" }`.
+- [x] **Ticket 5.2: Real Rule Schema Introspection (`GET /rules/:id/schema`)**
+  - **Status**: Completed & Verified. `Evaluator::infer_expr_type` statically types every `Expr` (literals, boolean/arithmetic/unary ops with bigint-widening, `BETWEEN`/`IN`/`IS NULL`, a ~150-name call table grouped float/bigint/boolean/string/array/struct, first-concrete `CASE` branch, `Over` delegation) and `Evaluator::infer_select_schema` maps each SELECT field to its alias (or `column_name`) plus type. `get_rule_schema` returns 404 for unknown rules, `{}` when the SQL won't parse (graph rules), else the inferred object. Covered by `test_rule_schema_introspection` in `fvt_compat.rs` (`{"a": "any", "c": "float"}`, greeting/cnt/is_missing string/bigint/boolean, 404, cleanup).
+  - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 5.3: Process CPU and Memory Metrics**
   - **Problem**: `GET /rules/:id/cpu` and `GET /metrics/dump` return empty objects.

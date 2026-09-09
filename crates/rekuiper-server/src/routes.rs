@@ -3072,10 +3072,18 @@ async fn get_rule_schema(State(state): State<AppState>, Path(id): Path<String>) 
     if let Err(resp) = check_valid_name(&id) {
         return resp;
     }
-    if state.rule_manager.get_rule(&id).is_some() {
-        (StatusCode::OK, Json(json!({}))).into_response()
-    } else {
-        (StatusCode::NOT_FOUND, format!("Rule {} not found", id)).into_response()
+    let Some(rule) = state.rule_manager.get_rule(&id) else {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", id)).into_response();
+    };
+    let mut parser = Parser::new(&rule.sql);
+    match parser.parse_select() {
+        // Graph rules carry no SELECT SQL: report an empty schema.
+        Err(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Ok(stmt) => (
+            StatusCode::OK,
+            Json(Value::Object(Evaluator::infer_select_schema(&stmt))),
+        )
+            .into_response(),
     }
 }
 

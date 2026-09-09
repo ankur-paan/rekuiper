@@ -1551,6 +1551,149 @@ impl Evaluator {
         }
     }
 
+    /// Static result-type inference for schema introspection (`GET
+    /// /rules/:id/schema`). Dynamic inputs (identifiers, untyped calls)
+    /// infer to `"any"`.
+    pub fn infer_expr_type(expr: &Expr) -> &'static str {
+        match expr {
+            Expr::Wildcard | Expr::Identifier(_) | Expr::FieldAccess { .. } => "any",
+            Expr::Literal(val) => match val {
+                Value::Bool(_) => "boolean",
+                Value::Number(n) => {
+                    if n.is_i64() || n.is_u64() {
+                        "bigint"
+                    } else {
+                        "float"
+                    }
+                }
+                Value::String(_) => "string",
+                Value::Array(_) => "array",
+                Value::Object(_) => "struct",
+                Value::Null => "any",
+            },
+            Expr::BinaryOp { left, op, right } => match op {
+                BinaryOperator::Eq
+                | BinaryOperator::Neq
+                | BinaryOperator::Lt
+                | BinaryOperator::Lte
+                | BinaryOperator::Gt
+                | BinaryOperator::Gte
+                | BinaryOperator::And
+                | BinaryOperator::Or
+                | BinaryOperator::Like => "boolean",
+                BinaryOperator::Div => "float",
+                BinaryOperator::Add
+                | BinaryOperator::Sub
+                | BinaryOperator::Mul
+                | BinaryOperator::Mod => {
+                    if Self::infer_expr_type(left) == "bigint"
+                        && Self::infer_expr_type(right) == "bigint"
+                    {
+                        "bigint"
+                    } else {
+                        "float"
+                    }
+                }
+            },
+            Expr::UnaryOp { op, expr } => match op {
+                UnaryOperator::Not => "boolean",
+                UnaryOperator::Neg => {
+                    if Self::infer_expr_type(expr) == "bigint" {
+                        "bigint"
+                    } else {
+                        "float"
+                    }
+                }
+            },
+            Expr::Between { .. } | Expr::InList { .. } | Expr::IsNull { .. } => "boolean",
+            Expr::Call { name, .. } => match name.to_ascii_lowercase().as_str() {
+                "avg" | "stddev" | "stddevs" | "var" | "vars" | "percentile" | "sin" | "cos"
+                | "tan" | "asin" | "acos" | "atan" | "atan2" | "cosh" | "sinh" | "tanh" | "cot"
+                | "radians" | "degrees" | "exp" | "ln" | "log" | "log2" | "log10" | "sqrt"
+                | "pi" | "rand" => "float",
+                "count" | "length" | "cardinality" | "array_cardinality" | "array_length"
+                | "array_position" | "row_number" | "acc_count" | "year" | "month" | "day"
+                | "day_of_week" | "day_of_month" | "day_of_year" | "hour" | "minute" | "second"
+                | "microsecond" | "tstamp" | "to_seconds" | "from_days" | "bitand" | "bitor"
+                | "bitxor" | "bitnot" => "bigint",
+                "isnan" | "isnumeric" | "isnull" | "had_changed" | "changed_col"
+                | "regexp_matches" | "startswith" | "endswith" | "json_path_exists"
+                | "array_contains" | "array_contains_any" => "boolean",
+                "concat" | "lower" | "upper" | "trim" | "ltrim" | "rtrim" | "lpad" | "rpad"
+                | "replace" | "reverse" | "substr" | "substring" | "regexp_replace"
+                | "regexp_substring" | "split_value" | "chr" | "hex2dec" | "dec2hex" | "encode"
+                | "base64_encode" | "decode" | "base64_decode" | "uuid" | "newuuid"
+                | "format_date" | "day_name" | "month_name" | "to_json" | "tojson" | "rule_id" => {
+                    "string"
+                }
+                "split"
+                | "array_create"
+                | "array_slice"
+                | "array_concat"
+                | "deduplicate"
+                | "array_remove"
+                | "array_distinct"
+                | "array_intersect"
+                | "array_union"
+                | "array_except"
+                | "array_flatten"
+                | "array_sort"
+                | "repeat"
+                | "sequence"
+                | "obj_to_kvpair_array"
+                | "object_to_kvpair_array"
+                | "collect"
+                | "keys"
+                | "values" => "array",
+                "object_construct"
+                | "object_concat"
+                | "erase"
+                | "object_erase"
+                | "object_pick"
+                | "kvpair_array_to_obj"
+                | "json_map"
+                | "merge_agg"
+                | "acc_map_agg" => "struct",
+                _ => "any",
+            },
+            Expr::Case {
+                when_clauses,
+                else_clause,
+                ..
+            } => {
+                for (_, then_expr) in when_clauses {
+                    let inferred = Self::infer_expr_type(then_expr);
+                    if inferred != "any" {
+                        return inferred;
+                    }
+                }
+                else_clause
+                    .as_ref()
+                    .map(|e| Self::infer_expr_type(e))
+                    .unwrap_or("any")
+            }
+            Expr::Over { call, .. } => Self::infer_expr_type(call),
+        }
+    }
+
+    /// Output column name to inferred type for every SELECT field, honoring
+    /// explicit `AS` aliases.
+    pub fn infer_select_schema(stmt: &SelectStmt) -> serde_json::Map<String, Value> {
+        let mut schema = serde_json::Map::new();
+        for (idx, field) in stmt.fields.iter().enumerate() {
+            let field_name = stmt
+                .field_aliases
+                .get(idx)
+                .and_then(|a| a.clone())
+                .unwrap_or_else(|| Self::column_name(field, idx));
+            schema.insert(
+                field_name,
+                Value::String(Self::infer_expr_type(field).to_string()),
+            );
+        }
+        schema
+    }
+
     pub fn eval_bool(expr: &Expr, record: &HashMap<String, Value>) -> bool {
         match Self::eval_val(expr, record) {
             Value::Bool(b) => b,
