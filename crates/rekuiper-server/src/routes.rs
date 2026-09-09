@@ -312,7 +312,7 @@ async fn create_stream(
                     sql: sql.clone(),
                     options: stmt.options,
                 };
-                if let Err(e) = state.stream_manager.create_stream(stream_def) {
+                if let Err(e) = state.stream_manager.create_stream(stream_def).await {
                     return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
                 }
                 state.stream_bus.get_or_create(&stmt.name);
@@ -330,7 +330,7 @@ async fn create_stream(
             sql: "".to_string(),
             options: HashMap::new(),
         };
-        if let Err(e) = state.stream_manager.create_stream(stream_def) {
+        if let Err(e) = state.stream_manager.create_stream(stream_def).await {
             return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
         }
         state.stream_bus.get_or_create(&name);
@@ -359,7 +359,7 @@ async fn delete_stream(State(state): State<AppState>, Path(name): Path<String>) 
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    match state.stream_manager.delete_stream(&name) {
+    match state.stream_manager.delete_stream(&name).await {
         Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.\n", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
@@ -461,7 +461,7 @@ async fn create_table(
                 sql: sql.clone(),
                 options: stmt.options,
             };
-            if let Err(e) = state.table_manager.create_table(table_def) {
+            if let Err(e) = state.table_manager.create_table(table_def).await {
                 return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
             }
             (
@@ -489,7 +489,7 @@ async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    match state.table_manager.delete_table(&name) {
+    match state.table_manager.delete_table(&name).await {
         Ok(_) => (StatusCode::OK, format!("Table {} is dropped.\n", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
@@ -575,7 +575,7 @@ async fn create_rule(
 
     let rule_id = rule.id.clone();
 
-    if let Err(e) = state.rule_manager.create_rule(rule.clone()) {
+    if let Err(e) = state.rule_manager.create_rule(rule.clone()).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
 
@@ -593,19 +593,32 @@ async fn create_rule(
         rule.actions.clone(),
     );
 
+    bootstrap_rule_sources(&state, &rule_id, &select_stmt);
+
+    (
+        StatusCode::CREATED,
+        format!("Rule {} was created successfully.\n", rule_id),
+    )
+        .into_response()
+}
+
+/// Starts background source producers (HTTP pull, WebSocket, RedisSub, Kafka,
+/// simulator) for a rule based on its source stream type. Shared by rule
+/// creation and daemon-bootstrap restore.
+fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
     // HTTP pull source streams poll a remote endpoint into the stream bus.
     if let Some(conf) = resolve_httppull_config(
         &state.stream_manager,
         &state.source_configs,
         &select_stmt.from,
-        &rule_id,
+        rule_id,
     ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.clone(), cancel_tx);
+            .insert(rule_id.to_string(), cancel_tx);
         HttpPullSource {
             config: conf,
             tx: stream_tx,
@@ -618,14 +631,14 @@ async fn create_rule(
         &state.stream_manager,
         &state.source_configs,
         &select_stmt.from,
-        &rule_id,
+        rule_id,
     ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.clone(), cancel_tx);
+            .insert(rule_id.to_string(), cancel_tx);
         WebSocketSource { url, tx: stream_tx }.spawn(cancel_rx);
     }
 
@@ -634,14 +647,14 @@ async fn create_rule(
         &state.stream_manager,
         &state.source_configs,
         &select_stmt.from,
-        &rule_id,
+        rule_id,
     ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.clone(), cancel_tx);
+            .insert(rule_id.to_string(), cancel_tx);
         RedisSubSource {
             url,
             channel,
@@ -655,14 +668,14 @@ async fn create_rule(
         &state.stream_manager,
         &state.source_configs,
         &select_stmt.from,
-        &rule_id,
+        rule_id,
     ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.clone(), cancel_tx);
+            .insert(rule_id.to_string(), cancel_tx);
         KafkaSource {
             config,
             tx: stream_tx,
@@ -709,12 +722,42 @@ async fn create_rule(
             }
         }
     }
+}
 
-    (
-        StatusCode::CREATED,
-        format!("Rule {} was created successfully.\n", rule_id),
-    )
-        .into_response()
+/// Respawns execution tasks (plus source producers) for every rule whose
+/// persisted status is `running`, so a restarted daemon resumes processing
+/// without manual intervention.
+pub async fn restore_running_rules(state: &AppState) {
+    for rule in state.rule_manager.list_rules() {
+        let running = state
+            .rule_manager
+            .get_rule_status(&rule.id)
+            .is_some_and(|s| s.status == "running");
+        if !running {
+            continue;
+        }
+        let mut parser = Parser::new(&rule.sql);
+        let select_stmt = match parser.parse_select() {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                tracing::warn!("Skipping restore of rule {}: invalid SQL: {}", rule.id, e);
+                continue;
+            }
+        };
+        spawn_rule_task(
+            &state.rule_manager,
+            &state.stream_bus,
+            &state.stream_manager,
+            &state.table_manager,
+            &state.source_configs,
+            &state.http_client,
+            rule.id.clone(),
+            select_stmt.clone(),
+            rule.actions.clone(),
+        );
+        bootstrap_rule_sources(state, &rule.id, &select_stmt);
+        tracing::info!("Restored running rule {}", rule.id);
+    }
 }
 
 /// Resolve the HTTP pull configuration for a rule whose source stream
@@ -1910,7 +1953,7 @@ async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> 
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    match state.rule_manager.start_rule(&name) {
+    match state.rule_manager.start_rule(&name).await {
         Ok(_) => (StatusCode::OK, format!("Rule {} was started", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
@@ -1920,7 +1963,7 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    match state.rule_manager.stop_rule(&name) {
+    match state.rule_manager.stop_rule(&name).await {
         Ok(_) => {
             cancel_httppull(&state, &name);
             (StatusCode::OK, format!("Rule {} was stopped", name)).into_response()
@@ -1933,9 +1976,9 @@ async fn restart_rule(State(state): State<AppState>, Path(name): Path<String>) -
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    let _ = state.rule_manager.stop_rule(&name);
+    let _ = state.rule_manager.stop_rule(&name).await;
     cancel_httppull(&state, &name);
-    match state.rule_manager.start_rule(&name) {
+    match state.rule_manager.start_rule(&name).await {
         Ok(_) => (StatusCode::OK, format!("Rule {} was restarted", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
@@ -1945,7 +1988,7 @@ async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) ->
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    match state.rule_manager.delete_rule(&name) {
+    match state.rule_manager.delete_rule(&name).await {
         Ok(_) => {
             cancel_httppull(&state, &name);
             (StatusCode::OK, format!("Rule {} is dropped.\n", name)).into_response()
@@ -1991,7 +2034,7 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
             for item in defs {
                 if let Ok(def) = serde_json::from_value::<StreamDefinition>(item.clone()) {
                     let name = def.name.clone();
-                    let _ = state.stream_manager.create_stream(def);
+                    let _ = state.stream_manager.create_stream(def).await;
                     state.stream_bus.get_or_create(&name);
                 }
             }
@@ -2001,18 +2044,24 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
                 let mut parser = Parser::new(sql_str);
                 if let Ok(stmt) = parser.parse_create_stream() {
                     let stream_name = stmt.name.clone();
-                    let _ = state.stream_manager.create_stream(StreamDefinition {
-                        name: stream_name.clone(),
-                        sql: sql_str.to_string(),
-                        options: stmt.options,
-                    });
+                    let _ = state
+                        .stream_manager
+                        .create_stream(StreamDefinition {
+                            name: stream_name.clone(),
+                            sql: sql_str.to_string(),
+                            options: stmt.options,
+                        })
+                        .await;
                     state.stream_bus.get_or_create(&stream_name);
                 } else if !name.is_empty() {
-                    let _ = state.stream_manager.create_stream(StreamDefinition {
-                        name: name.clone(),
-                        sql: sql_str.to_string(),
-                        options: HashMap::new(),
-                    });
+                    let _ = state
+                        .stream_manager
+                        .create_stream(StreamDefinition {
+                            name: name.clone(),
+                            sql: sql_str.to_string(),
+                            options: HashMap::new(),
+                        })
+                        .await;
                     state.stream_bus.get_or_create(name);
                 }
             }
@@ -2023,7 +2072,7 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
         if let Some(defs) = tables.as_array() {
             for item in defs {
                 if let Ok(def) = serde_json::from_value::<TableDefinition>(item.clone()) {
-                    let _ = state.table_manager.create_table(def);
+                    let _ = state.table_manager.create_table(def).await;
                 }
             }
         } else if let Some(map) = tables.as_object() {
@@ -2031,17 +2080,23 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
                 let sql_str = sql.as_str().unwrap_or("");
                 let mut parser = Parser::new(sql_str);
                 if let Ok(stmt) = parser.parse_create_table() {
-                    let _ = state.table_manager.create_table(TableDefinition {
-                        name: stmt.name.clone(),
-                        sql: sql_str.to_string(),
-                        options: stmt.options,
-                    });
+                    let _ = state
+                        .table_manager
+                        .create_table(TableDefinition {
+                            name: stmt.name.clone(),
+                            sql: sql_str.to_string(),
+                            options: stmt.options,
+                        })
+                        .await;
                 } else if !name.is_empty() {
-                    let _ = state.table_manager.create_table(TableDefinition {
-                        name: name.clone(),
-                        sql: sql_str.to_string(),
-                        options: HashMap::new(),
-                    });
+                    let _ = state
+                        .table_manager
+                        .create_table(TableDefinition {
+                            name: name.clone(),
+                            sql: sql_str.to_string(),
+                            options: HashMap::new(),
+                        })
+                        .await;
                 }
             }
         }
@@ -2057,7 +2112,7 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
                 let Ok(select_stmt) = parser.parse_select() else {
                     continue;
                 };
-                if state.rule_manager.create_rule(def.clone()).is_err() {
+                if state.rule_manager.create_rule(def.clone()).await.is_err() {
                     continue;
                 }
                 spawn_rule_task(
@@ -2316,14 +2371,14 @@ async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>
 
 async fn bulk_start_rules(State(state): State<AppState>) -> impl IntoResponse {
     for rule in state.rule_manager.list_rules() {
-        let _ = state.rule_manager.start_rule(&rule.id);
+        let _ = state.rule_manager.start_rule(&rule.id).await;
     }
     (StatusCode::OK, Json(json!({})))
 }
 
 async fn bulk_stop_rules(State(state): State<AppState>) -> impl IntoResponse {
     for rule in state.rule_manager.list_rules() {
-        let _ = state.rule_manager.stop_rule(&rule.id);
+        let _ = state.rule_manager.stop_rule(&rule.id).await;
         cancel_httppull(&state, &rule.id);
     }
     (StatusCode::OK, Json(json!({})))

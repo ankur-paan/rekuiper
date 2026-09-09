@@ -20,4 +20,5 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
 async-trait = { workspace = true }
+sqlx = { workspace = true }
 rekuiper-conf = { workspace = true }

@@ -3,8 +3,8 @@ pub mod routes;
 use anyhow::Result;
 use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
-use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
-use routes::{create_router, prometheus_metrics_handler, AppState};
+use rekuiper_core::{RuleManager, SqliteKvStore, StreamBus, StreamManager, TableManager};
+use routes::{create_router, prometheus_metrics_handler, restore_running_rules, AppState};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -13,16 +13,25 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
+    // Embedded KV persistence (eKuiper `data/sqliteKV.db`): definitions
+    // survive daemon restarts and running rules resume automatically.
+    let kv: Arc<dyn rekuiper_core::KvStore> =
+        Arc::new(SqliteKvStore::new("data/sqliteKV.db").await?);
     let stream_bus = StreamBus::new();
-    let stream_manager = StreamManager::new();
-    let rule_manager = RuleManager::new(stream_bus.clone());
+    let stream_manager = StreamManager::new_with_kv(kv.clone());
+    let rule_manager = RuleManager::new_with_kv(stream_bus.clone(), kv.clone());
+    let table_manager = TableManager::new_with_kv(kv.clone());
+
+    stream_manager.load_from_kv(&kv).await?;
+    table_manager.load_from_kv(&kv).await?;
+    rule_manager.load_from_kv(&kv).await?;
 
     let state = AppState {
         start_time: Instant::now(),
         version,
         config: config.clone(),
         stream_manager,
-        table_manager: TableManager::new(),
+        table_manager,
         rule_manager,
         stream_bus,
         connections: Arc::new(RwLock::new(HashMap::new())),
@@ -34,6 +43,8 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
             .build()
             .unwrap_or_default(),
     };
+
+    restore_running_rules(&state).await;
 
     let app = create_router(state.clone())
         .layer(CorsLayer::permissive())
