@@ -50,6 +50,7 @@ rskafka = "0.6"
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres"] }
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
 
 # Internal crate dependencies
 rekuiper-core = { path = "crates/rekuiper-core" }

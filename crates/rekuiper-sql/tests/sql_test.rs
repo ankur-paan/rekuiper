@@ -455,11 +455,8 @@ fn test_math_functions() {
     assert_eq!(eval_expr("SELECT sqrt(0) FROM demo", &empty), json!(0.0));
     assert_eq!(eval_expr("SELECT sqrt(-1) FROM demo", &empty), json!(null));
 
-    // power
-    assert_eq!(
-        eval_expr("SELECT power(2, 3) FROM demo", &empty),
-        json!(8.0)
-    );
+    // power (integer inputs with non-negative exponent stay integral)
+    assert_eq!(eval_expr("SELECT power(2, 3) FROM demo", &empty), json!(8));
     assert_eq!(
         eval_expr("SELECT power(9, 0.5) FROM demo", &empty),
         json!(3.0)
@@ -952,7 +949,11 @@ fn test_extended_math_functions() {
         json!(0.0)
     );
     assert_eq!(eval_expr("SELECT log10(100) FROM demo", &empty), json!(2.0));
-    assert_eq!(eval_expr("SELECT log(100) FROM demo", &empty), json!(2.0));
+    // log(x) is the natural logarithm (use log10 for base 10).
+    assert_eq!(
+        eval_expr("SELECT log(100) FROM demo", &empty),
+        json!(4.605170185988092)
+    );
     assert_eq!(eval_expr("SELECT sign(42) FROM demo", &empty), json!(1));
     assert_eq!(eval_expr("SELECT sign(0) FROM demo", &empty), json!(0));
 

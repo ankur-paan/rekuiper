@@ -1643,9 +1643,24 @@ impl Evaluator {
             "atan2" => Self::func_atan2(args),
             "exp" => Self::func_exp(args),
             "ln" => Self::func_ln(args),
-            "log" | "log10" => Self::func_log10(args),
+            "log" => Self::func_log(args),
+            "log2" => Self::func_log2(args),
+            "log10" => Self::func_log10(args),
             "sign" => Self::func_sign(args),
             "mod" => Self::func_mod(args),
+            "cosh" => Self::func_cosh(args),
+            "sinh" => Self::func_sinh(args),
+            "tanh" => Self::func_tanh(args),
+            "cot" => Self::func_cot(args),
+            "radians" => Self::func_radians(args),
+            "degrees" => Self::func_degrees(args),
+            "bitand" => Self::func_bitand(args),
+            "bitor" => Self::func_bitor(args),
+            "bitxor" => Self::func_bitxor(args),
+            "bitnot" => Self::func_bitnot(args),
+            "pi" => Self::func_pi(args),
+            "rand" => Self::func_rand(args),
+            "conv" => Self::func_conv(args),
             // ---- String ----
             "concat" => Self::func_concat(args),
             "lower" => Self::func_lower(args),
@@ -2022,11 +2037,20 @@ impl Evaluator {
         if args.iter().any(|v| v.is_null()) {
             return Value::Null;
         }
+        // Integer fast path: exact results for non-negative exponents.
+        if let (Some(base), Some(exp)) = (args[0].as_i64(), args[1].as_i64()) {
+            if exp >= 0 {
+                return match u32::try_from(exp).ok().and_then(|e| base.checked_pow(e)) {
+                    Some(n) => Value::from(n),
+                    None => Value::Null,
+                };
+            }
+        }
         let (Some(x), Some(y)) = (Self::to_f64(&args[0]), Self::to_f64(&args[1])) else {
             return Value::Null;
         };
         let r = x.powf(y);
-        if r.is_nan() {
+        if r.is_nan() || r.is_infinite() {
             return Value::Null;
         }
         serde_json::json!(r)
@@ -2376,6 +2400,231 @@ impl Evaluator {
             }
             _ => Value::Null,
         }
+    }
+
+    /// `log(x)` is the natural logarithm; `log(base, x)` computes `x` in the
+    /// given base. Non-positive `x` (and non-finite results) yield `Null`.
+    fn func_log(args: &[Value]) -> Value {
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        match args.len() {
+            1 => match Self::to_f64(&args[0]) {
+                Some(v) if v > 0.0 => {
+                    let r = v.ln();
+                    if r.is_nan() || r.is_infinite() {
+                        return Value::Null;
+                    }
+                    serde_json::json!(r)
+                }
+                _ => Value::Null,
+            },
+            2 => match (Self::to_f64(&args[0]), Self::to_f64(&args[1])) {
+                (Some(base), Some(x)) if x > 0.0 => {
+                    let r = x.log(base);
+                    if r.is_nan() || r.is_infinite() {
+                        return Value::Null;
+                    }
+                    serde_json::json!(r)
+                }
+                _ => Value::Null,
+            },
+            _ => Value::Null,
+        }
+    }
+
+    fn func_log2(args: &[Value]) -> Value {
+        if args.len() != 1 || args[0].is_null() {
+            return Value::Null;
+        }
+        match Self::to_f64(&args[0]) {
+            Some(v) if v > 0.0 => {
+                let r = v.log2();
+                if r.is_nan() || r.is_infinite() {
+                    return Value::Null;
+                }
+                serde_json::json!(r)
+            }
+            _ => Value::Null,
+        }
+    }
+
+    fn func_cosh(args: &[Value]) -> Value {
+        Self::func_float1(args, f64::cosh)
+    }
+
+    fn func_sinh(args: &[Value]) -> Value {
+        Self::func_float1(args, f64::sinh)
+    }
+
+    fn func_tanh(args: &[Value]) -> Value {
+        Self::func_float1(args, f64::tanh)
+    }
+
+    fn func_cot(args: &[Value]) -> Value {
+        if args.len() != 1 || args[0].is_null() {
+            return Value::Null;
+        }
+        match Self::to_f64(&args[0]) {
+            Some(v) => {
+                let t = v.tan();
+                if t == 0.0 {
+                    return Value::Null;
+                }
+                let r = 1.0 / t;
+                if r.is_nan() || r.is_infinite() {
+                    return Value::Null;
+                }
+                serde_json::json!(r)
+            }
+            None => Value::Null,
+        }
+    }
+
+    fn func_radians(args: &[Value]) -> Value {
+        if args.len() != 1 || args[0].is_null() {
+            return Value::Null;
+        }
+        match Self::to_f64(&args[0]) {
+            Some(v) if v.is_finite() => serde_json::json!(v.to_radians()),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_degrees(args: &[Value]) -> Value {
+        if args.len() != 1 || args[0].is_null() {
+            return Value::Null;
+        }
+        match Self::to_f64(&args[0]) {
+            Some(v) if v.is_finite() => serde_json::json!(v.to_degrees()),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_bitand(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        match (Self::to_i64_arg(&args[0]), Self::to_i64_arg(&args[1])) {
+            (Some(a), Some(b)) => Value::from(a & b),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_bitor(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        match (Self::to_i64_arg(&args[0]), Self::to_i64_arg(&args[1])) {
+            (Some(a), Some(b)) => Value::from(a | b),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_bitxor(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        match (Self::to_i64_arg(&args[0]), Self::to_i64_arg(&args[1])) {
+            (Some(a), Some(b)) => Value::from(a ^ b),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_bitnot(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::to_i64_arg(&args[0]) {
+            Some(a) => Value::from(!a),
+            None => Value::Null,
+        }
+    }
+
+    fn func_pi(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        serde_json::json!(std::f64::consts::PI)
+    }
+
+    fn func_rand(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        serde_json::json!(rand::random::<f64>())
+    }
+
+    /// `conv(num, from_base, to_base)`: radix conversion (2-36) rendering a
+    /// lowercase string. `num` may be an integer or its string form.
+    fn func_conv(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let (Some(from_base), Some(to_base)) =
+            (Self::to_i64_arg(&args[1]), Self::to_i64_arg(&args[2]))
+        else {
+            return Value::Null;
+        };
+        if !(2..=36).contains(&from_base) || !(2..=36).contains(&to_base) {
+            return Value::Null;
+        }
+        let digits = match &args[0] {
+            Value::String(s) => s.trim().to_string(),
+            Value::Number(_) => match Self::to_i64_arg(&args[0]) {
+                Some(n) => n.to_string(),
+                None => return Value::Null,
+            },
+            _ => return Value::Null,
+        };
+        let value = match Self::parse_radix(&digits, from_base as u32) {
+            Some(n) => n,
+            None => return Value::Null,
+        };
+        Value::String(Self::format_radix(value, to_base as u32))
+    }
+
+    fn parse_radix(text: &str, base: u32) -> Option<i64> {
+        let text = text.trim();
+        let (negative, digits) = match text.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, text.strip_prefix('+').unwrap_or(text)),
+        };
+        if digits.is_empty() {
+            return None;
+        }
+        let mut acc: i64 = 0;
+        for c in digits.chars() {
+            let d = c.to_digit(base)? as i64;
+            acc = acc.checked_mul(base as i64)?.checked_add(d)?;
+        }
+        Some(if negative { acc.checked_neg()? } else { acc })
+    }
+
+    fn format_radix(value: i64, base: u32) -> String {
+        if value == 0 {
+            return "0".to_string();
+        }
+        let negative = value < 0;
+        // Work in unsigned space so i64::MIN converts losslessly.
+        let mut n = if negative {
+            (value as u64).wrapping_neg()
+        } else {
+            value as u64
+        };
+        let mut out = Vec::new();
+        while n > 0 {
+            let d = (n % base as u64) as u32;
+            out.push(char::from_digit(d, base).unwrap_or('?'));
+            n /= base as u64;
+        }
+        if negative {
+            out.push('-');
+        }
+        out.iter().rev().collect()
     }
 
     fn func_sign(args: &[Value]) -> Value {

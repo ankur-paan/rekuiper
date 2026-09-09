@@ -1815,6 +1815,7 @@ dependencies = [
  "chrono",
  "md-5",
  "parking_lot",
+ "rand",
  "regex",
  "rekuiper-core",
  "serde",

@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 1 | 6 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 2 | 5 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **3** | **14** |
+| **Total** | | **17 Tasks** | **4** | **13** |
 
 ---
 
@@ -40,21 +40,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Added `meta(key)` and `mqtt(key)` envelope-and-fallback lookup, `isnull(val)`, `uuid()`/`newuuid()` via uuid v4, `tstamp()`, `event_time()` with record-field priority, `rule_id()`, `window_start()`, `window_end()`. Wired into `eval_val`, `eval_stateful_call`, and `eval_agg_expr`. Covered by `test_system_and_meta_functions` in `test_sql_functions.rs`.
   - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
-### Ticket 2.2: Math & Bitwise Operations
-- [ ] **Functions**:
-  - `bitand(a, b)`: Bitwise AND of integer-converted arguments.
-  - `bitor(a, b)`: Bitwise OR of integer-converted arguments.
-  - `bitxor(a, b)`: Bitwise XOR of integer-converted arguments.
-  - `bitnot(a)`: Bitwise NOT of integer-converted argument.
-  - `pi()`: Returns mathematical constant π (`3.141592653589793`).
-  - `rand()`: Returns pseudo-random float in `[0.0, 1.0)`.
-  - `power(base, exp)` / `pow`: Exponentiation `base ^ exp`.
-  - `log(val)`: Natural logarithm (alias to `ln`), plus `log2(val)` and `log10(val)`.
-  - `cosh(x)`, `sinh(x)`, `tanh(x)`, `cot(x)`: Hyperbolic and cotangent trigonometry.
-  - `radians(deg)`, `degrees(rad)`: Degree/radian conversions.
-  - `conv(num, from_base, to_base)`: Convert number representation between arbitrary bases 2–36.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Unit tests for bitwise masks, trigonometric edge cases, log, and base conversion.
+- [x] **Ticket 2.2: Math & Bitwise Operations**
+  - **Status**: Completed & Verified. Implemented `bitand`, `bitor`, `bitxor`, `bitnot` via `to_i64_arg`; `pi()`, `rand()`; 1-arg & 2-arg `log`/`ln`, `log2`, `log10`; `power`/`pow` with checked integer pow; `cosh`, `sinh`, `tanh`, `cot`; `radians`, `degrees`; and `conv` radix 2–36 string/number converter with sign and magnitude handling. Covered by `test_math_and_bitwise_parity` in `test_sql_functions.rs`.
+  - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.3: Array Manipulation Functions
 - [ ] **Functions**:

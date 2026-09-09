@@ -22,4 +22,5 @@ md-5 = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
 uuid = { workspace = true }
+rand = { workspace = true }
 rekuiper-core = { workspace = true }

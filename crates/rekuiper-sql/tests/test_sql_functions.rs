@@ -812,3 +812,207 @@ fn test_system_and_meta_functions() {
     let out = Evaluator::eval_select_stateful(&stmt, &r, &state).expect("Should project");
     assert_eq!(out.get("v"), Some(&json!("factory/temp")));
 }
+
+// ---------------------------------------------------------------------------
+// Math & bitwise parity
+// ---------------------------------------------------------------------------
+
+fn assert_approx(actual: &Value, expected: f64, eps: f64) {
+    let v = actual.as_f64().expect("expected numeric value");
+    assert!(
+        (v - expected).abs() <= eps,
+        "expected ~{}, got {}",
+        expected,
+        v
+    );
+}
+
+#[test]
+fn test_math_and_bitwise_parity() {
+    let empty = empty();
+
+    // Bitwise integer ops.
+    assert_eq!(
+        eval_one("SELECT bitand(12, 10) AS v FROM demo", &empty),
+        json!(8)
+    );
+    assert_eq!(
+        eval_one("SELECT bitor(12, 10) AS v FROM demo", &empty),
+        json!(14)
+    );
+    assert_eq!(
+        eval_one("SELECT bitxor(12, 10) AS v FROM demo", &empty),
+        json!(6)
+    );
+    assert_eq!(
+        eval_one("SELECT bitnot(0) AS v FROM demo", &empty),
+        json!(-1)
+    );
+    assert_eq!(
+        eval_one("SELECT bitnot(5) AS v FROM demo", &empty),
+        json!(-6)
+    );
+    // Null / non-integer inputs propagate Null.
+    assert_eq!(
+        eval_one("SELECT bitand(null, 1) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT bitor(1, null) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT bitxor('abc', 1) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT bitnot(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Pi & random.
+    assert_approx(
+        &eval_one("SELECT pi() AS v FROM demo", &empty),
+        std::f64::consts::PI,
+        1e-12,
+    );
+    let r = eval_one("SELECT rand() AS v FROM demo", &empty);
+    let f = r.as_f64().expect("rand() returns a float");
+    assert!((0.0..1.0).contains(&f), "rand() out of range: {}", f);
+
+    // Logarithms.
+    assert_approx(
+        &eval_one("SELECT log2(8) AS v FROM demo", &empty),
+        3.0,
+        1e-12,
+    );
+    assert_approx(
+        &eval_one("SELECT log10(100) AS v FROM demo", &empty),
+        2.0,
+        1e-12,
+    );
+    assert_approx(
+        &eval_one("SELECT log(2.718281828) AS v FROM demo", &empty),
+        1.0,
+        1e-6,
+    );
+    assert_approx(
+        &eval_one("SELECT log(2, 8) AS v FROM demo", &empty),
+        3.0,
+        1e-9,
+    );
+    assert_eq!(
+        eval_one("SELECT log(0) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT log(-1) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT log2(0) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT log(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Integer-preserving powers plus float fallback.
+    assert_eq!(
+        eval_one("SELECT power(2, 10) AS v FROM demo", &empty),
+        json!(1024)
+    );
+    assert_eq!(
+        eval_one("SELECT pow(3, 2) AS v FROM demo", &empty),
+        json!(9)
+    );
+    assert_eq!(
+        eval_one("SELECT power(2, -1) AS v FROM demo", &empty),
+        json!(0.5)
+    );
+    assert_approx(
+        &eval_one("SELECT power(9, 0.5) AS v FROM demo", &empty),
+        3.0,
+        1e-12,
+    );
+    assert_eq!(
+        eval_one("SELECT power(10, 1000) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT power(null, 2) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Hyperbolic, cotangent, degree conversion.
+    assert_eq!(
+        eval_one("SELECT cosh(0) AS v FROM demo", &empty),
+        json!(1.0)
+    );
+    assert_eq!(
+        eval_one("SELECT sinh(0) AS v FROM demo", &empty),
+        json!(0.0)
+    );
+    assert_eq!(
+        eval_one("SELECT tanh(0) AS v FROM demo", &empty),
+        json!(0.0)
+    );
+    assert_approx(
+        &eval_one("SELECT cot(1) AS v FROM demo", &empty),
+        0.6420926159,
+        1e-9,
+    );
+    assert_eq!(
+        eval_one("SELECT cot(0) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_approx(
+        &eval_one("SELECT radians(180) AS v FROM demo", &empty),
+        std::f64::consts::PI,
+        1e-12,
+    );
+    assert_approx(
+        &eval_one("SELECT degrees(pi()) AS v FROM demo", &empty),
+        180.0,
+        1e-9,
+    );
+
+    // Base conversion.
+    assert_eq!(
+        eval_one("SELECT conv('a', 16, 2) AS v FROM demo", &empty),
+        json!("1010")
+    );
+    assert_eq!(
+        eval_one("SELECT conv(15, 10, 16) AS v FROM demo", &empty),
+        json!("f")
+    );
+    assert_eq!(
+        eval_one("SELECT conv('1111', 2, 10) AS v FROM demo", &empty),
+        json!("15")
+    );
+    assert_eq!(
+        eval_one("SELECT conv('z', 36, 10) AS v FROM demo", &empty),
+        json!("35")
+    );
+    assert_eq!(
+        eval_one("SELECT conv('-10', 10, 16) AS v FROM demo", &empty),
+        json!("-a")
+    );
+    assert_eq!(
+        eval_one("SELECT conv('x', 16, 2) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT conv('a', 1, 2) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT conv('a', 16, 37) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT conv(null, 16, 2) AS v FROM demo", &empty),
+        Value::Null
+    );
+}
