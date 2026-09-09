@@ -5,7 +5,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: idacslabs/rekuiper:0.420-beta
+    image: ankurkrp/rekuiper:0.420-beta
     container_name: rekuiper
     ports:
       - "9081:9081"   # REST API & OpenAPI docs

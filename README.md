@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/badge/release-v0.420--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-idacslabs%2Frekuiper%3A0.420--beta-blue.svg)](https://hub.docker.com/r/idacslabs/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.420--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-orange.svg)](#)
 [![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-100%25%20Covered-green.svg)](openapi.json)
 [![Throughput](https://img.shields.io/badge/throughput-180k%2B%20eps-success.svg)](#performance--competitive-benchmarks)
@@ -150,7 +150,7 @@ docker run -d \
   -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  idacslabs/rekuiper:0.420-beta
+  ankurkrp/rekuiper:0.420-beta
 ```
 
 Or deploy an instant end-to-end edge stack (including `rekuiper`, Eclipse Mosquitto MQTT broker, and Redis):
