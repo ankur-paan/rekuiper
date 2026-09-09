@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::ast::{BinaryOperator, Expr, SelectStmt, UnaryOperator};
 use parking_lot::RwLock;
 use serde_json::Value;
-use crate::ast::{BinaryOperator, Expr, SelectStmt, UnaryOperator};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Per-rule running state for analytic cumulative functions (`acc_*`).
 ///
@@ -17,7 +17,10 @@ pub struct RuleState {
 pub struct Evaluator;
 
 impl Evaluator {
-    pub fn eval_select(stmt: &SelectStmt, record: &HashMap<String, Value>) -> Option<HashMap<String, Value>> {
+    pub fn eval_select(
+        stmt: &SelectStmt,
+        record: &HashMap<String, Value>,
+    ) -> Option<HashMap<String, Value>> {
         if let Some(ref condition) = stmt.where_clause {
             let matches = Self::eval_bool(condition, record);
             if !matches {
@@ -43,7 +46,10 @@ impl Evaluator {
                         output.insert(key, Value::Null);
                     }
                 }
-                Expr::FieldAccess { parent: _, field: leaf } => {
+                Expr::FieldAccess {
+                    parent: _,
+                    field: leaf,
+                } => {
                     let val = Self::eval_val(field, record);
                     // Use leaf field name as output key (flattened projection)
                     output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
@@ -78,7 +84,10 @@ impl Evaluator {
         for (idx, g) in stmt.group_by.iter().enumerate() {
             let key = match g {
                 Expr::Identifier(name) => name.clone(),
-                Expr::FieldAccess { parent: _, field: leaf } => leaf.clone(),
+                Expr::FieldAccess {
+                    parent: _,
+                    field: leaf,
+                } => leaf.clone(),
                 _ => Self::column_name(g, idx),
             };
             let val = match first {
@@ -104,26 +113,25 @@ impl Evaluator {
                         .and_then(|a| a.clone())
                         .unwrap_or_else(|| name.clone());
                     // Prefer already-retained group value; otherwise first record.
-                    if !output.contains_key(&key) {
-                        let val = first
+                    output.entry(key).or_insert_with(|| {
+                        first
                             .and_then(|rec| rec.get(name).cloned())
-                            .unwrap_or(Value::Null);
-                        output.insert(key, val);
-                    }
+                            .unwrap_or(Value::Null)
+                    });
                 }
-                Expr::FieldAccess { parent: _, field: leaf } => {
+                Expr::FieldAccess {
+                    parent: _,
+                    field: leaf,
+                } => {
                     let key = stmt
                         .field_aliases
                         .get(idx)
                         .and_then(|a| a.clone())
                         .unwrap_or_else(|| leaf.clone());
-                    if !output.contains_key(&key) {
-                        let val = match first {
-                            Some(rec) => Self::eval_val(field, rec),
-                            None => Value::Null,
-                        };
-                        output.insert(key, val);
-                    }
+                    output.entry(key).or_insert_with(|| match first {
+                        Some(rec) => Self::eval_val(field, rec),
+                        None => Value::Null,
+                    });
                 }
                 Expr::Call { name, args } if Self::is_aggregate_call(name) => {
                     let val = Self::eval_aggregate_call(name, args, records);
@@ -200,7 +208,10 @@ impl Evaluator {
                     .and_then(|rec| rec.get(name).cloned())
                     .unwrap_or(Value::Null)
             }
-            Expr::FieldAccess { parent: _, field: leaf } => {
+            Expr::FieldAccess {
+                parent: _,
+                field: leaf,
+            } => {
                 if let Some(v) = output.get(leaf) {
                     return v.clone();
                 }
@@ -236,13 +247,22 @@ impl Evaluator {
                 let v = Self::eval_agg_expr(expr, records, output);
                 Self::eval_unary_op(op, &v)
             }
-            Expr::Between { expr, low, high, negated } => {
+            Expr::Between {
+                expr,
+                low,
+                high,
+                negated,
+            } => {
                 let v = Self::eval_agg_expr(expr, records, output);
                 let l = Self::eval_agg_expr(low, records, output);
                 let h = Self::eval_agg_expr(high, records, output);
                 Self::eval_between(&v, &l, &h, *negated)
             }
-            Expr::InList { expr, list, negated } => {
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
                 let v = Self::eval_agg_expr(expr, records, output);
                 let mut matched = false;
                 for item in list {
@@ -258,12 +278,13 @@ impl Evaluator {
                 let v = Self::eval_agg_expr(expr, records, output);
                 Value::Bool(if *negated { !v.is_null() } else { v.is_null() })
             }
-            Expr::Case { operand, when_clauses, else_clause } => Self::eval_case(
+            Expr::Case {
                 operand,
                 when_clauses,
                 else_clause,
-                |e| Self::eval_agg_expr(e, records, output),
-            ),
+            } => Self::eval_case(operand, when_clauses, else_clause, |e| {
+                Self::eval_agg_expr(e, records, output)
+            }),
         }
     }
 
@@ -333,7 +354,10 @@ impl Evaluator {
                         output.insert(key, Value::Null);
                     }
                 }
-                Expr::FieldAccess { parent: _, field: leaf } => {
+                Expr::FieldAccess {
+                    parent: _,
+                    field: leaf,
+                } => {
                     let val = Self::eval_stateful_expr(field, record, state);
                     output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
                 }
@@ -364,9 +388,9 @@ impl Evaluator {
         let Some(base) = Self::eval_select_stateful(stmt, record, state) else {
             return Vec::new();
         };
-        let unnest_pos = stmt.fields.iter().position(|f| {
-            matches!(f, Expr::Call { name, .. } if name.eq_ignore_ascii_case("unnest"))
-        });
+        let unnest_pos = stmt.fields.iter().position(
+            |f| matches!(f, Expr::Call { name, .. } if name.eq_ignore_ascii_case("unnest")),
+        );
         let Some(idx) = unnest_pos else {
             return vec![base];
         };
@@ -431,13 +455,22 @@ impl Evaluator {
                 let v = Self::eval_stateful_expr(expr, record, state);
                 Self::eval_unary_op(op, &v)
             }
-            Expr::Between { expr, low, high, negated } => {
+            Expr::Between {
+                expr,
+                low,
+                high,
+                negated,
+            } => {
                 let v = Self::eval_stateful_expr(expr, record, state);
                 let l = Self::eval_stateful_expr(low, record, state);
                 let h = Self::eval_stateful_expr(high, record, state);
                 Self::eval_between(&v, &l, &h, *negated)
             }
-            Expr::InList { expr, list, negated } => {
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
                 let v = Self::eval_stateful_expr(expr, record, state);
                 let mut matched = false;
                 for item in list {
@@ -465,19 +498,18 @@ impl Evaluator {
             Expr::Call { .. } => Self::eval_stateful_call(expr, record, state, None),
             Expr::Over { call, partition_by } => {
                 let partition_key = match partition_by {
-                    Some(p) => {
-                        Self::value_to_key(&Self::eval_stateful_expr(p, record, state))
-                    }
+                    Some(p) => Self::value_to_key(&Self::eval_stateful_expr(p, record, state)),
                     None => String::new(),
                 };
                 Self::eval_stateful_call(call, record, state, Some(&partition_key))
             }
-            Expr::Case { operand, when_clauses, else_clause } => Self::eval_case(
+            Expr::Case {
                 operand,
                 when_clauses,
                 else_clause,
-                |e| Self::eval_stateful_expr(e, record, state),
-            ),
+            } => Self::eval_case(operand, when_clauses, else_clause, |e| {
+                Self::eval_stateful_expr(e, record, state)
+            }),
         }
     }
 
@@ -502,7 +534,13 @@ impl Evaluator {
                 .map(|a| Self::eval_stateful_expr(a, record, state))
                 .collect();
             let call_id = Self::column_name(expr, 0);
-            return Self::eval_acc_call(&lowered, &vals, state, &call_id, partition_key.unwrap_or(""));
+            return Self::eval_acc_call(
+                &lowered,
+                &vals,
+                state,
+                &call_id,
+                partition_key.unwrap_or(""),
+            );
         }
         if lowered == "lag" {
             let vals: Vec<Value> = args
@@ -572,19 +610,11 @@ impl Evaluator {
     /// (default `Null`) when fewer rows have been seen. The current value is
     /// appended to history after the lookup. State key:
     /// `lag:{func_call_id}:{partition_key}`.
-    fn eval_lag(
-        args: &[Value],
-        state: &RuleState,
-        call_id: &str,
-        partition_key: &str,
-    ) -> Value {
+    fn eval_lag(args: &[Value], state: &RuleState, call_id: &str, partition_key: &str) -> Value {
         if args.is_empty() || args.len() > 3 {
             return Value::Null;
         }
-        let offset = args
-            .get(1)
-            .and_then(|v| Self::to_i64_arg(v))
-            .unwrap_or(1);
+        let offset = args.get(1).and_then(Self::to_i64_arg).unwrap_or(1);
         if offset <= 0 {
             return args[0].clone();
         }
@@ -642,7 +672,10 @@ impl Evaluator {
                 })
                 .collect(),
         );
-        state.state.write().insert(state_key.to_string(), out.clone());
+        state
+            .state
+            .write()
+            .insert(state_key.to_string(), out.clone());
         out
     }
 
@@ -717,12 +750,9 @@ impl Evaluator {
             None => true,
             Some((stored_compare, _)) => match Self::compare_values(compare, stored_compare) {
                 Some(ord) => {
-                    (take_greater
-                        && (ord == std::cmp::Ordering::Greater
-                            || ord == std::cmp::Ordering::Equal))
-                        || (!take_greater
-                            && (ord == std::cmp::Ordering::Less
-                                || ord == std::cmp::Ordering::Equal))
+                    ord == std::cmp::Ordering::Equal
+                        || (take_greater && ord == std::cmp::Ordering::Greater)
+                        || (!take_greater && ord == std::cmp::Ordering::Less)
                 }
                 None => false,
             },
@@ -1004,7 +1034,12 @@ impl Evaluator {
                 UnaryOperator::Not => format!("NOT {}", Self::column_name(expr, idx)),
                 UnaryOperator::Neg => format!("-{}", Self::column_name(expr, idx)),
             },
-            Expr::Between { expr, low, high, negated } => {
+            Expr::Between {
+                expr,
+                low,
+                high,
+                negated,
+            } => {
                 let not = if *negated { "NOT " } else { "" };
                 format!(
                     "{} {}BETWEEN {} AND {}",
@@ -1014,10 +1049,19 @@ impl Evaluator {
                     Self::column_name(high, idx)
                 )
             }
-            Expr::InList { expr, list, negated } => {
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
                 let not = if *negated { "NOT " } else { "" };
                 let items: Vec<String> = list.iter().map(|e| Self::column_name(e, idx)).collect();
-                format!("{} {}IN ({})", Self::column_name(expr, idx), not, items.join(", "))
+                format!(
+                    "{} {}IN ({})",
+                    Self::column_name(expr, idx),
+                    not,
+                    items.join(", ")
+                )
             }
             Expr::IsNull { expr, negated } => {
                 let not = if *negated { "NOT " } else { "" };
@@ -1035,7 +1079,11 @@ impl Evaluator {
                 ),
                 None => format!("{} OVER ()", Self::column_name(call, idx)),
             },
-            Expr::Case { operand, when_clauses, else_clause } => {
+            Expr::Case {
+                operand,
+                when_clauses,
+                else_clause,
+            } => {
                 let mut s = String::from("CASE");
                 if let Some(op) = operand {
                     s.push(' ');
@@ -1086,13 +1134,22 @@ impl Evaluator {
                 let v = Self::eval_val(expr, record);
                 Self::eval_unary_op(op, &v)
             }
-            Expr::Between { expr, low, high, negated } => {
+            Expr::Between {
+                expr,
+                low,
+                high,
+                negated,
+            } => {
                 let v = Self::eval_val(expr, record);
                 let l = Self::eval_val(low, record);
                 let h = Self::eval_val(high, record);
                 Self::eval_between(&v, &l, &h, *negated)
             }
-            Expr::InList { expr, list, negated } => {
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
                 let v = Self::eval_val(expr, record);
                 let mut matched = false;
                 for item in list {
@@ -1124,12 +1181,13 @@ impl Evaluator {
             // Stateless single-record evaluation ignores partitioning (there is
             // no shared state); cumulative `acc_*` calls yield `Null` here.
             Expr::Over { call, .. } => Self::eval_val(call, record),
-            Expr::Case { operand, when_clauses, else_clause } => Self::eval_case(
+            Expr::Case {
                 operand,
                 when_clauses,
                 else_clause,
-                |e| Self::eval_val(e, record),
-            ),
+            } => Self::eval_case(operand, when_clauses, else_clause, |e| {
+                Self::eval_val(e, record)
+            }),
         }
     }
 
@@ -1183,11 +1241,15 @@ impl Evaluator {
             }
             BinaryOperator::Eq => Value::Bool(Self::values_equal(left, right)),
             BinaryOperator::Neq => Value::Bool(!Self::values_equal(left, right)),
-            BinaryOperator::Lt => Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Less),
+            BinaryOperator::Lt => {
+                Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Less)
+            }
             BinaryOperator::Lte => Self::eval_ordering(left, right, |o| {
                 o == std::cmp::Ordering::Less || o == std::cmp::Ordering::Equal
             }),
-            BinaryOperator::Gt => Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Greater),
+            BinaryOperator::Gt => {
+                Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Greater)
+            }
             BinaryOperator::Gte => Self::eval_ordering(left, right, |o| {
                 o == std::cmp::Ordering::Greater || o == std::cmp::Ordering::Equal
             }),
@@ -1265,7 +1327,10 @@ impl Evaluator {
             // For negated (NOT BETWEEN), NULL is still UNKNOWN -> false.
             return Value::Bool(false);
         }
-        let in_range = match (Self::compare_values(val, low), Self::compare_values(val, high)) {
+        let in_range = match (
+            Self::compare_values(val, low),
+            Self::compare_values(val, high),
+        ) {
             (Some(o1), Some(o2)) => {
                 (o1 == std::cmp::Ordering::Greater || o1 == std::cmp::Ordering::Equal)
                     && (o2 == std::cmp::Ordering::Less || o2 == std::cmp::Ordering::Equal)
@@ -1497,9 +1562,7 @@ impl Evaluator {
             Value::String(s) => s.clone(),
             Value::Number(n) => n.to_string(),
             Value::Bool(b) => b.to_string(),
-            Value::Array(_) | Value::Object(_) => {
-                serde_json::to_string(v).unwrap_or_default()
-            }
+            Value::Array(_) | Value::Object(_) => serde_json::to_string(v).unwrap_or_default(),
         }
     }
 
@@ -2102,10 +2165,10 @@ impl Evaluator {
         if args.iter().any(|v| v.is_null()) {
             return Value::Null;
         }
-        Value::String(
-            Self::to_string_always(&args[0])
-                .replace(&Self::to_string_always(&args[1]), &Self::to_string_always(&args[2])),
-        )
+        Value::String(Self::to_string_always(&args[0]).replace(
+            &Self::to_string_always(&args[1]),
+            &Self::to_string_always(&args[2]),
+        ))
     }
 
     fn func_split(args: &[Value]) -> Value {
@@ -2191,6 +2254,7 @@ impl Evaluator {
     /// Builds an object from alternating key/value arguments:
     /// `object_construct(k1, v1, k2, v2, ...)`. Keys are stringified via
     /// [`Self::to_string_always`]; an odd argument count yields `Null`.
+    #[allow(clippy::manual_is_multiple_of)]
     fn func_object_construct(args: &[Value]) -> Value {
         if args.len() % 2 != 0 {
             return Value::Null;

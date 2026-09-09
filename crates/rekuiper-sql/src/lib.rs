@@ -1,7 +1,7 @@
 pub mod ast;
-pub mod parser;
 pub mod eval;
+pub mod parser;
 
 pub use ast::*;
-pub use parser::*;
 pub use eval::*;
+pub use parser::*;

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -84,10 +84,23 @@ pub enum TimeUnit {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowDef {
-    TumblingTime { unit: TimeUnit, length: u64 },
-    HoppingTime { unit: TimeUnit, length: u64, interval: u64 },
-    SlidingTime { unit: TimeUnit, length: u64 },
-    Count { size: usize, interval: Option<usize> },
+    TumblingTime {
+        unit: TimeUnit,
+        length: u64,
+    },
+    HoppingTime {
+        unit: TimeUnit,
+        length: u64,
+        interval: u64,
+    },
+    SlidingTime {
+        unit: TimeUnit,
+        length: u64,
+    },
+    Count {
+        size: usize,
+        interval: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

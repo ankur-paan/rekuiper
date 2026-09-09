@@ -1,8 +1,8 @@
-use serde_json::json;
-use tokio::net::TcpListener;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
 use rekuiper_server::routes::{create_router, AppState};
+use serde_json::json;
+use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
     let (base_url, handle, _) = spawn_test_server_with_state().await;
@@ -10,7 +10,9 @@ async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn spawn_test_server_with_state() -> (String, tokio::task::JoinHandle<()>, AppState) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind ephemeral port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind ephemeral port");
     let local_addr = listener.local_addr().unwrap();
 
     let stream_bus = StreamBus::new();
@@ -40,7 +42,11 @@ async fn test_fvt_server_ping_and_root() {
     let client = reqwest::Client::new();
 
     // 1. Ping test (matches fvt/server_test.go)
-    let resp = client.get(format!("{}/ping", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/ping", base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // 2. Root metadata test (matches fvt/server_test.go)
@@ -74,7 +80,11 @@ async fn test_fvt_stream_and_rule_lifecycle() {
     assert!(resp.status().is_success());
 
     // 2. List streams
-    let resp = client.get(format!("{}/streams", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/streams", base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let streams: Vec<String> = resp.json().await.unwrap();
     assert!(streams.contains(&"demo".to_string()));
@@ -367,24 +377,44 @@ async fn test_tables_and_details_lifecycle() {
     assert_eq!(resp.text().await.unwrap(), "Table my_table is created.\n");
 
     // 2. Verify GET /tables includes "my_table".
-    let resp = client.get(format!("{}/tables", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/tables", base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let tables: Vec<String> = resp.json().await.unwrap();
     assert!(tables.contains(&"my_table".to_string()));
 
     // 3. Verify GET /tabledetails contains the definition of "my_table".
-    let resp = client.get(format!("{}/tabledetails", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/tabledetails", base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let details: Vec<serde_json::Value> = resp.json().await.unwrap();
     let entry = details.iter().find(|d| d["name"] == "my_table");
-    assert!(entry.is_some(), "tabledetails should contain my_table: {:?}", details);
+    assert!(
+        entry.is_some(),
+        "tabledetails should contain my_table: {:?}",
+        details
+    );
 
     // 4. Verify GET /streamdetails returns streams with details.
-    let resp = client.get(format!("{}/streamdetails", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/streamdetails", base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let stream_details: Vec<serde_json::Value> = resp.json().await.unwrap();
     let stream_entry = stream_details.iter().find(|d| d["name"] == "demo");
-    assert!(stream_entry.is_some(), "streamdetails should contain demo: {:?}", stream_details);
+    assert!(
+        stream_entry.is_some(),
+        "streamdetails should contain demo: {:?}",
+        stream_details
+    );
 
     // 5. Verify GET /tables/my_table/schema returns the schema object.
     let resp = client
@@ -414,7 +444,11 @@ async fn test_tables_and_details_lifecycle() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     assert_eq!(resp.text().await.unwrap(), "Table my_table is dropped.\n");
 
-    let resp = client.get(format!("{}/tables", base_url)).send().await.unwrap();
+    let resp = client
+        .get(format!("{}/tables", base_url))
+        .send()
+        .await
+        .unwrap();
     let tables: Vec<String> = resp.json().await.unwrap();
     assert!(!tables.contains(&"my_table".to_string()));
 
@@ -492,7 +526,9 @@ async fn test_rule_validation_topo_and_migration() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let topo: serde_json::Value = resp.json().await.unwrap();
-    let sources = topo["sources"].as_array().expect("topo.sources is an array");
+    let sources = topo["sources"]
+        .as_array()
+        .expect("topo.sources is an array");
     assert!(sources.iter().any(|s| s == "test_stream"));
 
     // Unknown rule topo -> 404.
@@ -531,8 +567,14 @@ async fn test_rule_validation_topo_and_migration() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("test_stream"), "export should contain test_stream");
-    assert!(body.contains("test_rule"), "export should contain test_rule");
+    assert!(
+        body.contains("test_stream"),
+        "export should contain test_stream"
+    );
+    assert!(
+        body.contains("test_rule"),
+        "export should contain test_rule"
+    );
 }
 
 #[tokio::test]
@@ -1507,7 +1549,7 @@ where
     R: tokio::io::AsyncBufRead + Unpin,
 {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-    let trim = |s: &str| s.trim_end_matches(|c| c == '\r' || c == '\n').to_string();
+    let trim = |s: &str| s.trim_end_matches(['\r', '\n']).to_string();
     let mut line = String::new();
     reader.read_line(&mut line).await.ok()?;
     let count: usize = trim(&line).strip_prefix('*')?.parse().ok()?;
@@ -1542,7 +1584,10 @@ async fn handle_mock_redis_conn(
         let cmd = argv[0].to_ascii_uppercase();
         let args = argv[1..].to_vec();
         let _ = cmd_tx
-            .send(MockRedisCmd { cmd: cmd.clone(), args: args.clone() })
+            .send(MockRedisCmd {
+                cmd: cmd.clone(),
+                args: args.clone(),
+            })
             .await;
         let reply: Vec<u8> = match cmd.as_str() {
             "PING" => b"+PONG\r\n".to_vec(),
@@ -1628,7 +1673,10 @@ async fn test_redis_connectors_pipeline() {
 
     // Lookup-table config pointing at the mock daemon.
     let resp = client
-        .put(format!("{}/metadata/sources/redis/confKeys/rt_redis", base_url))
+        .put(format!(
+            "{}/metadata/sources/redis/confKeys/rt_redis",
+            base_url
+        ))
         .json(&json!({"addr": redis_addr}))
         .send()
         .await
@@ -1715,7 +1763,8 @@ async fn test_redis_connectors_pipeline() {
 
     let set = next_mock_cmd(&mut cmd_rx, "SET").await;
     assert_eq!(set.args.first().map(|s| s.as_str()), Some("rk1"));
-    let stored: serde_json::Value = serde_json::from_str(set.args.get(1).map(|s| s.as_str()).unwrap_or("")).unwrap();
+    let stored: serde_json::Value =
+        serde_json::from_str(set.args.get(1).map(|s| s.as_str()).unwrap_or("")).unwrap();
     assert_eq!(stored["id"], "rk1");
 
     // b) Pub path: PUBLISH channel1 <json>.
@@ -1766,7 +1815,10 @@ async fn test_redis_sub_source() {
 
     // Point the redissub stream at the mock daemon.
     let resp = client
-        .put(format!("{}/metadata/sources/redis/confKeys/sub_conf", base_url))
+        .put(format!(
+            "{}/metadata/sources/redis/confKeys/sub_conf",
+            base_url
+        ))
         .json(&json!({"addr": redis_addr}))
         .send()
         .await
@@ -1815,7 +1867,10 @@ async fn test_kafka_config_and_pipeline() {
     assert_eq!(cfg.partition, 0);
     let cfg: KafkaConfig =
         serde_json::from_value(json!({"brokers": "a:9092,b:9092", "topic": "events"})).unwrap();
-    assert_eq!(cfg.broker_list(), vec!["a:9092".to_string(), "b:9092".to_string()]);
+    assert_eq!(
+        cfg.broker_list(),
+        vec!["a:9092".to_string(), "b:9092".to_string()]
+    );
     assert_eq!(cfg.topic.as_deref(), Some("events"));
 
     let (base_url, _handle, _state) = spawn_test_server_with_state().await;
@@ -1862,7 +1917,9 @@ async fn test_kafka_config_and_pipeline() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let topo: serde_json::Value = resp.json().await.unwrap();
-    let sources = topo["sources"].as_array().expect("topo.sources is an array");
+    let sources = topo["sources"]
+        .as_array()
+        .expect("topo.sources is an array");
     assert!(sources.iter().any(|s| s == "kafka_stream"));
 
     // Ingest a record: the unreachable broker must surface as a counted
@@ -1940,10 +1997,7 @@ async fn test_sql_connector_and_data_template() {
             .unwrap_or(0)
     ));
     // `mode=rwc` or `create_if_missing`: ensure SQLite file is created cleanly on Windows.
-    let db_url = format!(
-        "sqlite://{}",
-        db_path.to_string_lossy().replace('\\', "/")
-    );
+    let db_url = format!("sqlite://{}", db_path.to_string_lossy().replace('\\', "/"));
     let pool = sqlx::sqlite::SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
             .filename(&db_path)
@@ -2015,7 +2069,10 @@ async fn test_sql_connector_and_data_template() {
 
     // 4. LEFT JOIN enrichment against the TYPE=sql lookup table.
     let resp = client
-        .put(format!("{}/metadata/sources/sql/confKeys/sql_cfg", base_url))
+        .put(format!(
+            "{}/metadata/sources/sql/confKeys/sql_cfg",
+            base_url
+        ))
         .json(&json!({"url": db_url, "table": "alerts"}))
         .send()
         .await
@@ -2127,9 +2184,13 @@ async fn test_graph_rule_lifecycle_and_dag_execution() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let topo: serde_json::Value = resp.json().await.unwrap();
-    let sources = topo["sources"].as_array().expect("topo.sources is an array");
+    let sources = topo["sources"]
+        .as_array()
+        .expect("topo.sources is an array");
     assert!(
-        sources.iter().any(|s| s == "graph_test_stream" || s == "src"),
+        sources
+            .iter()
+            .any(|s| s == "graph_test_stream" || s == "src"),
         "unexpected topo sources: {}",
         topo
     );

@@ -1,12 +1,14 @@
-use std::collections::HashMap;
-use serde_json::json;
 use rekuiper_sql::{Evaluator, Parser};
+use serde_json::json;
+use std::collections::HashMap;
 
 #[test]
 fn test_parse_create_stream() {
     let sql = r#"CREATE STREAM demo () WITH (DATASOURCE="demo", FORMAT="json")"#;
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_create_stream().expect("Should parse CREATE STREAM");
+    let stmt = parser
+        .parse_create_stream()
+        .expect("Should parse CREATE STREAM");
     assert_eq!(stmt.name, "demo");
     assert_eq!(stmt.options.get("DATASOURCE"), Some(&"demo".to_string()));
     assert_eq!(stmt.options.get("FORMAT"), Some(&"json".to_string()));
@@ -32,7 +34,9 @@ fn test_parse_and_eval_select_all() {
 fn test_parse_and_eval_select_filter() {
     let sql = "SELECT temperature FROM demo WHERE temperature > 30";
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_select().expect("Should parse SELECT with WHERE");
+    let stmt = parser
+        .parse_select()
+        .expect("Should parse SELECT with WHERE");
 
     let mut record_low = HashMap::new();
     record_low.insert("temperature".to_string(), json!(25.0));
@@ -49,7 +53,9 @@ fn test_arithmetic_precedence() {
     // * binds tighter than +: a + b * 2 == a + (b * 2)
     let sql = "SELECT a + b * 2 FROM demo WHERE a + 5 > 10";
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_select().expect("Should parse arithmetic SELECT");
+    let stmt = parser
+        .parse_select()
+        .expect("Should parse arithmetic SELECT");
 
     // Verify AST shape: SELECT field is Add(a, Mul(b, 2))
     assert_eq!(stmt.fields.len(), 1);
@@ -59,7 +65,11 @@ fn test_arithmetic_precedence() {
             assert_eq!(*op, rekuiper_sql::BinaryOperator::Add);
             assert_eq!(**left, rekuiper_sql::Expr::Identifier("a".to_string()));
             match &**right {
-                rekuiper_sql::Expr::BinaryOp { left: rl, op: rop, right: rr } => {
+                rekuiper_sql::Expr::BinaryOp {
+                    left: rl,
+                    op: rop,
+                    right: rr,
+                } => {
                     assert_eq!(*rop, rekuiper_sql::BinaryOperator::Mul);
                     assert_eq!(**rl, rekuiper_sql::Expr::Identifier("b".to_string()));
                     assert_eq!(**rr, rekuiper_sql::Expr::Literal(json!(2)));
@@ -78,7 +88,11 @@ fn test_arithmetic_precedence() {
     // SELECT projection computes arithmetic; check via eval_val and via output values
     let computed = Evaluator::eval_val(field, &rec_match);
     assert_eq!(computed, json!(12));
-    assert!(out.values().any(|v| *v == json!(12)), "output {:?} should contain 12", out);
+    assert!(
+        out.values().any(|v| *v == json!(12)),
+        "output {:?} should contain 12",
+        out
+    );
 
     // a=4, b=10: SELECT => 4 + 10*2 = 24, WHERE 4+5=9 > 10 false => no match
     let mut rec_nomatch = HashMap::new();
@@ -126,7 +140,9 @@ fn test_arithmetic_precedence() {
 fn test_parentheses() {
     let sql = "SELECT (a + b) * 2 FROM demo WHERE (a > 5 OR b > 5) AND c = 1";
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_select().expect("Should parse parenthesized SELECT");
+    let stmt = parser
+        .parse_select()
+        .expect("Should parse parenthesized SELECT");
 
     // SELECT field should be Mul(Add(a,b), 2) — parentheses override precedence
     assert_eq!(stmt.fields.len(), 1);
@@ -212,8 +228,11 @@ fn test_between_and_in() {
     match stmt.where_clause.as_ref().expect("WHERE present") {
         rekuiper_sql::Expr::BinaryOp { left, op, right } => {
             assert_eq!(*op, rekuiper_sql::BinaryOperator::And);
-            assert!(matches!(&**left, rekuiper_sql::Expr::Between { negated: false, .. }),
-                "left should be Between, got {:?}", left);
+            assert!(
+                matches!(&**left, rekuiper_sql::Expr::Between { negated: false, .. }),
+                "left should be Between, got {:?}",
+                left
+            );
             match &**right {
                 rekuiper_sql::Expr::InList { negated, list, .. } => {
                     assert!(!negated);
@@ -261,13 +280,22 @@ fn test_between_and_in() {
     assert!(Evaluator::eval_select(&stmt, &r_cold).is_none());
 
     // NOT variants
-    let sql_not = "SELECT * FROM demo WHERE temp NOT BETWEEN 20 AND 30 AND status NOT IN ('ok', 'warn')";
+    let sql_not =
+        "SELECT * FROM demo WHERE temp NOT BETWEEN 20 AND 30 AND status NOT IN ('ok', 'warn')";
     let mut pn = Parser::new(sql_not);
-    let sn = pn.parse_select().expect("Should parse NOT BETWEEN + NOT IN");
+    let sn = pn
+        .parse_select()
+        .expect("Should parse NOT BETWEEN + NOT IN");
     match sn.where_clause.as_ref().unwrap() {
         rekuiper_sql::Expr::BinaryOp { left, right, .. } => {
-            assert!(matches!(&**left, rekuiper_sql::Expr::Between { negated: true, .. }));
-            assert!(matches!(&**right, rekuiper_sql::Expr::InList { negated: true, .. }));
+            assert!(matches!(
+                &**left,
+                rekuiper_sql::Expr::Between { negated: true, .. }
+            ));
+            assert!(matches!(
+                &**right,
+                rekuiper_sql::Expr::InList { negated: true, .. }
+            ));
         }
         other => panic!("Expected AND, got {:?}", other),
     }
@@ -323,7 +351,9 @@ fn test_is_null() {
 fn test_nested_field_access() {
     let sql = "SELECT dev.temp FROM demo WHERE dev.temp > 25.0";
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_select().expect("Should parse nested field access");
+    let stmt = parser
+        .parse_select()
+        .expect("Should parse nested field access");
 
     // SELECT field should be FieldAccess(dev, temp)
     assert_eq!(stmt.fields.len(), 1);
@@ -399,17 +429,26 @@ fn test_math_functions() {
 
     // ceil: returns float (eKuiper math.Ceil)
     assert_eq!(eval_expr("SELECT ceil(2.3) FROM demo", &empty), json!(3.0));
-    assert_eq!(eval_expr("SELECT ceil(-2.3) FROM demo", &empty), json!(-2.0));
+    assert_eq!(
+        eval_expr("SELECT ceil(-2.3) FROM demo", &empty),
+        json!(-2.0)
+    );
     assert_eq!(eval_expr("SELECT ceil(3) FROM demo", &empty), json!(3.0));
 
     // floor
     assert_eq!(eval_expr("SELECT floor(2.7) FROM demo", &empty), json!(2.0));
-    assert_eq!(eval_expr("SELECT floor(-2.3) FROM demo", &empty), json!(-3.0));
+    assert_eq!(
+        eval_expr("SELECT floor(-2.3) FROM demo", &empty),
+        json!(-3.0)
+    );
 
     // round to nearest integer (float result)
     assert_eq!(eval_expr("SELECT round(2.5) FROM demo", &empty), json!(3.0));
     assert_eq!(eval_expr("SELECT round(2.4) FROM demo", &empty), json!(2.0));
-    assert_eq!(eval_expr("SELECT round(-2.5) FROM demo", &empty), json!(-3.0));
+    assert_eq!(
+        eval_expr("SELECT round(-2.5) FROM demo", &empty),
+        json!(-3.0)
+    );
 
     // sqrt
     assert_eq!(eval_expr("SELECT sqrt(9) FROM demo", &empty), json!(3.0));
@@ -417,8 +456,14 @@ fn test_math_functions() {
     assert_eq!(eval_expr("SELECT sqrt(-1) FROM demo", &empty), json!(null));
 
     // power
-    assert_eq!(eval_expr("SELECT power(2, 3) FROM demo", &empty), json!(8.0));
-    assert_eq!(eval_expr("SELECT power(9, 0.5) FROM demo", &empty), json!(3.0));
+    assert_eq!(
+        eval_expr("SELECT power(2, 3) FROM demo", &empty),
+        json!(8.0)
+    );
+    assert_eq!(
+        eval_expr("SELECT power(9, 0.5) FROM demo", &empty),
+        json!(3.0)
+    );
 
     // Null propagation
     let mut rn = HashMap::new();
@@ -456,19 +501,31 @@ fn test_string_functions() {
     );
 
     // lower / upper
-    assert_eq!(eval_expr("SELECT lower('ABC') FROM demo", &empty), json!("abc"));
-    assert_eq!(eval_expr("SELECT upper('abc') FROM demo", &empty), json!("ABC"));
+    assert_eq!(
+        eval_expr("SELECT lower('ABC') FROM demo", &empty),
+        json!("abc")
+    );
+    assert_eq!(
+        eval_expr("SELECT upper('abc') FROM demo", &empty),
+        json!("ABC")
+    );
     let mut r = HashMap::new();
     r.insert("status".to_string(), json!("Ok"));
     assert_eq!(eval_expr("SELECT lower(status) FROM demo", &r), json!("ok"));
     assert_eq!(eval_expr("SELECT upper(status) FROM demo", &r), json!("OK"));
 
     // length (char count)
-    assert_eq!(eval_expr("SELECT length('hello') FROM demo", &empty), json!(5));
+    assert_eq!(
+        eval_expr("SELECT length('hello') FROM demo", &empty),
+        json!(5)
+    );
     assert_eq!(eval_expr("SELECT length('') FROM demo", &empty), json!(0));
 
     // trim
-    assert_eq!(eval_expr("SELECT trim('  hi  ') FROM demo", &empty), json!("hi"));
+    assert_eq!(
+        eval_expr("SELECT trim('  hi  ') FROM demo", &empty),
+        json!("hi")
+    );
 
     // substr 1-indexed: substr(s, start, [len])
     assert_eq!(
@@ -580,7 +637,10 @@ fn test_cast_function() {
     // cast over a column
     let mut r = HashMap::new();
     r.insert("v".to_string(), json!("77"));
-    assert_eq!(eval_expr("SELECT cast(v, 'bigint') FROM demo", &r), json!(77));
+    assert_eq!(
+        eval_expr("SELECT cast(v, 'bigint') FROM demo", &r),
+        json!(77)
+    );
 }
 
 #[test]
@@ -595,7 +655,10 @@ fn test_coalesce_function() {
     // coalesce(null, missing, 'default') -> 'default'
     let empty: HashMap<String, serde_json::Value> = HashMap::new();
     assert_eq!(
-        eval_expr("SELECT coalesce(null, missing, 'default') FROM demo", &empty),
+        eval_expr(
+            "SELECT coalesce(null, missing, 'default') FROM demo",
+            &empty
+        ),
         json!("default")
     );
     // first non-null wins
@@ -612,7 +675,10 @@ fn test_coalesce_function() {
     let mut r = HashMap::new();
     r.insert("a".to_string(), json!(null));
     r.insert("b".to_string(), json!(5));
-    assert_eq!(eval_expr("SELECT coalesce(a, b, 10) FROM demo", &r), json!(5));
+    assert_eq!(
+        eval_expr("SELECT coalesce(a, b, 10) FROM demo", &r),
+        json!(5)
+    );
     let mut r2 = HashMap::new();
     r2.insert("a".to_string(), json!(3));
     r2.insert("b".to_string(), json!(5));
@@ -624,7 +690,9 @@ fn test_functions_in_where() {
     // Functions in both SELECT projection and WHERE, per spec example.
     let sql = "SELECT abs(temp), upper(status) FROM demo WHERE length(status) > 2";
     let mut p = Parser::new(sql);
-    let stmt = p.parse_select().expect("Should parse functions in SELECT + WHERE");
+    let stmt = p
+        .parse_select()
+        .expect("Should parse functions in SELECT + WHERE");
     assert_eq!(stmt.fields.len(), 2);
     assert!(matches!(
         &stmt.fields[0],
@@ -710,7 +778,9 @@ fn test_parse_window_syntax() {
 
     // COUNTWINDOW without interval.
     let mut p = Parser::new("SELECT * FROM demo GROUP BY COUNTWINDOW(5)");
-    let stmt = p.parse_select().expect("parse count window without interval");
+    let stmt = p
+        .parse_select()
+        .expect("parse count window without interval");
     assert_eq!(
         stmt.window,
         Some(WindowDef::Count {
@@ -721,7 +791,9 @@ fn test_parse_window_syntax() {
 
     // GROUP BY id, SLIDINGWINDOW(mi, 1): id stays in group_by, window is extracted.
     let mut p = Parser::new("SELECT id, count(*) FROM demo GROUP BY id, SLIDINGWINDOW(mi, 1)");
-    let stmt = p.parse_select().expect("parse sliding window with group key");
+    let stmt = p
+        .parse_select()
+        .expect("parse sliding window with group key");
     assert_eq!(
         stmt.window,
         Some(WindowDef::SlidingTime {
@@ -748,9 +820,8 @@ fn test_parse_window_syntax() {
     );
 
     // HAVING is captured.
-    let mut p = Parser::new(
-        "SELECT avg(temp) FROM demo GROUP BY COUNTWINDOW(3) HAVING avg(temp) > 25",
-    );
+    let mut p =
+        Parser::new("SELECT avg(temp) FROM demo GROUP BY COUNTWINDOW(3) HAVING avg(temp) > 25");
     let stmt = p.parse_select().expect("parse having");
     assert!(stmt.having.is_some());
 }
@@ -836,9 +907,8 @@ fn test_eval_having_filter() {
         })
         .collect();
     // avg = 30.0 > 25 => match.
-    let mut p = Parser::new(
-        "SELECT avg(temp) FROM demo GROUP BY COUNTWINDOW(3) HAVING avg(temp) > 25",
-    );
+    let mut p =
+        Parser::new("SELECT avg(temp) FROM demo GROUP BY COUNTWINDOW(3) HAVING avg(temp) > 25");
     let stmt = p.parse_select().expect("parse having match");
     let out = Evaluator::eval_aggregate(&stmt, &hot).expect("having should match");
     assert!(out.values().any(|v| *v == json!(30.0)));
@@ -877,7 +947,10 @@ fn test_extended_math_functions() {
     assert_eq!(eval_expr("SELECT asin(0) FROM demo", &empty), json!(0.0));
     assert_eq!(eval_expr("SELECT acos(1) FROM demo", &empty), json!(0.0));
     assert_eq!(eval_expr("SELECT atan(0) FROM demo", &empty), json!(0.0));
-    assert_eq!(eval_expr("SELECT atan2(0, 1) FROM demo", &empty), json!(0.0));
+    assert_eq!(
+        eval_expr("SELECT atan2(0, 1) FROM demo", &empty),
+        json!(0.0)
+    );
     assert_eq!(eval_expr("SELECT log10(100) FROM demo", &empty), json!(2.0));
     assert_eq!(eval_expr("SELECT log(100) FROM demo", &empty), json!(2.0));
     assert_eq!(eval_expr("SELECT sign(42) FROM demo", &empty), json!(1));
@@ -988,12 +1061,13 @@ fn test_array_object_and_utility_functions() {
     // keys() order is unspecified; sort before asserting.
     let mut keys = eval_expr("SELECT keys(obj) FROM demo", &r);
     if let Some(arr) = keys.as_array_mut() {
+        #[allow(clippy::unnecessary_sort_by)]
         arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
     }
     assert_eq!(keys, json!(["x", "y"]));
     let mut values = eval_expr("SELECT values(obj) FROM demo", &r);
     if let Some(arr) = values.as_array_mut() {
-        arr.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        arr.sort_by_key(|a| a.to_string());
     }
     assert_eq!(values, json!([1, 2]));
 
@@ -1044,7 +1118,8 @@ fn test_searched_case_expression() {
 
 #[test]
 fn test_simple_case_expression() {
-    let sql = "SELECT CASE color WHEN 'red' THEN 1 WHEN 'yellow' THEN 2 ELSE 3 END as code FROM tbl";
+    let sql =
+        "SELECT CASE color WHEN 'red' THEN 1 WHEN 'yellow' THEN 2 ELSE 3 END as code FROM tbl";
     let mut parser = Parser::new(sql);
     let stmt = parser.parse_select().expect("Should parse simple CASE");
 
@@ -1063,9 +1138,12 @@ fn test_simple_case_expression() {
 fn test_order_by_and_limit_syntax() {
     use rekuiper_sql::SortOrder;
 
-    let sql = "SELECT a, b FROM demo WHERE a > 0 GROUP BY countwindow(5) ORDER BY a ASC, b DESC LIMIT 10";
+    let sql =
+        "SELECT a, b FROM demo WHERE a > 0 GROUP BY countwindow(5) ORDER BY a ASC, b DESC LIMIT 10";
     let mut parser = Parser::new(sql);
-    let stmt = parser.parse_select().expect("Should parse ORDER BY + LIMIT");
+    let stmt = parser
+        .parse_select()
+        .expect("Should parse ORDER BY + LIMIT");
     assert_eq!(stmt.order_by.len(), 2);
     assert_eq!(stmt.order_by[0].order, SortOrder::Asc);
     assert_eq!(stmt.order_by[1].order, SortOrder::Desc);

@@ -1,16 +1,16 @@
 pub mod routes;
 
+use anyhow::Result;
+use parking_lot::RwLock;
+use rekuiper_conf::KuiperConfig;
+use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
+use routes::{create_router, prometheus_metrics_handler, AppState};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use parking_lot::RwLock;
-use anyhow::Result;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use rekuiper_conf::KuiperConfig;
-use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
-use routes::{create_router, prometheus_metrics_handler, AppState};
 
 pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
     let stream_bus = StreamBus::new();
@@ -59,7 +59,11 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to bind prometheus metrics port {}: {}", prom_port, e);
+                    tracing::warn!(
+                        "Failed to bind prometheus metrics port {}: {}",
+                        prom_port,
+                        e
+                    );
                 }
             }
         });

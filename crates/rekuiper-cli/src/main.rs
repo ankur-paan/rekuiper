@@ -24,39 +24,19 @@ enum Commands {
         args: Vec<String>,
     },
     /// Show streams or rules
-    Show {
-        entity_type: String,
-    },
+    Show { entity_type: String },
     /// Describe a stream
-    Describe {
-        entity_type: String,
-        name: String,
-    },
+    Describe { entity_type: String, name: String },
     /// Drop a stream or rule
-    Drop {
-        entity_type: String,
-        name: String,
-    },
+    Drop { entity_type: String, name: String },
     /// Get status of a rule
-    Getstatus {
-        entity_type: String,
-        name: String,
-    },
+    Getstatus { entity_type: String, name: String },
     /// Start a rule
-    Start {
-        entity_type: String,
-        name: String,
-    },
+    Start { entity_type: String, name: String },
     /// Stop a rule
-    Stop {
-        entity_type: String,
-        name: String,
-    },
+    Stop { entity_type: String, name: String },
     /// Restart a rule
-    Restart {
-        entity_type: String,
-        name: String,
-    },
+    Restart { entity_type: String, name: String },
 }
 
 #[tokio::main]
@@ -122,17 +102,26 @@ async fn main() -> Result<()> {
                 eprintln!("Unknown entity type: {}", entity_type);
                 return Ok(());
             };
-            let res = client.get(format!("{}/{}", base_url, endpoint)).send().await?;
+            let res = client
+                .get(format!("{}/{}", base_url, endpoint))
+                .send()
+                .await?;
             println!("{}", res.text().await?);
         }
         Commands::Describe { entity_type, name } => {
             if entity_type.eq_ignore_ascii_case("stream") {
-                let res = client.get(format!("{}/streams/{}", base_url, name)).send().await?;
+                let res = client
+                    .get(format!("{}/streams/{}", base_url, name))
+                    .send()
+                    .await?;
                 println!("{}", res.text().await?);
             } else if entity_type.eq_ignore_ascii_case("table")
                 || entity_type.eq_ignore_ascii_case("tables")
             {
-                let res = client.get(format!("{}/tables/{}", base_url, name)).send().await?;
+                let res = client
+                    .get(format!("{}/tables/{}", base_url, name))
+                    .send()
+                    .await?;
                 println!("{}", res.text().await?);
             } else {
                 eprintln!("Unknown describe entity: {}", entity_type);

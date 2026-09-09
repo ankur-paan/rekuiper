@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use parking_lot::RwLock;
+use rekuiper_core::model::StreamRecord;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use rekuiper_core::model::StreamRecord;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[async_trait]
 pub trait Sink: Send + Sync {
@@ -382,11 +382,7 @@ pub fn parse_mqtt_server_url(server: &str) -> Result<(String, u16)> {
         bail!("MQTT server URL {:?} has no host", server);
     }
     // Strip any trailing path, query or fragment: host[:port][/...].
-    let hostport = remainder
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .trim();
+    let hostport = remainder.split(['/', '?', '#']).next().unwrap_or("").trim();
     if hostport.is_empty() {
         bail!("MQTT server URL {:?} has no host", server);
     }
@@ -579,7 +575,10 @@ pub struct HttpPullSource {
 }
 
 impl HttpPullSource {
-    pub fn spawn(self, mut cancel_rx: tokio::sync::watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let client = reqwest::Client::new();
             let mut ticker = tokio::time::interval(std::time::Duration::from_millis(
@@ -740,7 +739,10 @@ pub struct WebSocketSource {
 }
 
 impl WebSocketSource {
-    pub fn spawn(self, mut cancel_rx: tokio::sync::watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let (mut ws_stream, _) = match tokio_tungstenite::connect_async(&self.url).await {
                 Ok(conn) => conn,
@@ -811,7 +813,9 @@ impl WebSocketSink {
         use futures::SinkExt;
         let (mut ws_stream, _) = tokio_tungstenite::connect_async(&self.url).await?;
         ws_stream
-            .send(tokio_tungstenite::tungstenite::Message::Text(text.to_string()))
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                text.to_string(),
+            ))
             .await?;
         let _ = ws_stream.close(None).await;
         Ok(())
@@ -897,9 +901,7 @@ impl RedisSink {
             .map(redis_scalar_key)
             .filter(|k| !k.is_empty())
             .or_else(|| self.config.key.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!("Redis sink needs a key: set `field` or `key`")
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Redis sink needs a key: set `field` or `key`"))?;
         redis::cmd("SET")
             .arg(&key)
             .arg(&json_str)
@@ -929,7 +931,10 @@ pub struct RedisSubSource {
 }
 
 impl RedisSubSource {
-    pub fn spawn(self, mut cancel_rx: tokio::sync::watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let client = match redis::Client::open(self.url.clone()) {
                 Ok(client) => client,
@@ -1033,10 +1038,7 @@ pub async fn redis_lookup_key(addr: &str, key: &str) -> Result<Option<Value>> {
     };
     let client = redis::Client::open(url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
-    let stored: Option<Vec<u8>> = redis::cmd("GET")
-        .arg(key)
-        .query_async(&mut conn)
-        .await?;
+    let stored: Option<Vec<u8>> = redis::cmd("GET").arg(key).query_async(&mut conn).await?;
     match stored {
         None => Ok(None),
         Some(bytes) => match serde_json::from_slice::<Value>(&bytes) {
@@ -1142,7 +1144,7 @@ impl KafkaSink {
             .key
             .as_ref()
             .and_then(|k| record.data.get(k))
-            .map(|v| value_to_key_bytes(v));
+            .map(value_to_key_bytes);
         let kafka_record = Record {
             key: key_bytes,
             value: Some(json_bytes),
@@ -1175,7 +1177,10 @@ pub struct KafkaSource {
 }
 
 impl KafkaSource {
-    pub fn spawn(self, mut cancel_rx: tokio::sync::watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             use rskafka::client::{
                 partition::{OffsetAt, UnknownTopicHandling},
@@ -1378,11 +1383,7 @@ impl SimulatorSource {
         let mut sent = 0usize;
         loop {
             for item in &self.config.data {
-                if sender
-                    .send(StreamRecord::new(item.clone()))
-                    .await
-                    .is_err()
-                {
+                if sender.send(StreamRecord::new(item.clone())).await.is_err() {
                     return sent;
                 }
                 sent += 1;
@@ -1431,7 +1432,10 @@ fn parse_delimited_token(token: &str) -> Value {
 /// Render a sink `dataTemplate` such as
 /// `{"device": "{{.id}}", "celsius": {{.temp}}}` by substituting `{{.field}}`
 /// placeholders from the record data (strings raw, other values as JSON).
-pub fn apply_data_template(template: &str, data: &serde_json::Map<String, serde_json::Value>) -> String {
+pub fn apply_data_template(
+    template: &str,
+    data: &serde_json::Map<String, serde_json::Value>,
+) -> String {
     let mut result = template.to_string();
     for (k, v) in data {
         let placeholder = format!("{{{{.{}}}}}", k);
@@ -1483,13 +1487,20 @@ impl SqlSink {
             };
             let cols = fields.join(", ");
             let placeholders = vec!["?"; fields.len()].join(", ");
-            let sql = format!("INSERT INTO {} ({}) VALUES ({})", self.config.table, cols, placeholders);
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                self.config.table, cols, placeholders
+            );
             let mut query = sqlx::query(&sql);
             for f in &fields {
-                let val = record.data.get(f).map(|v| match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                }).unwrap_or_default();
+                let val = record
+                    .data
+                    .get(f)
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                    .unwrap_or_default();
                 query = query.bind(val);
             }
             query.execute(&pool).await?;
@@ -1501,11 +1512,19 @@ impl SqlSink {
 /// Point lookup against a SQL database: `SELECT * ... WHERE key_col = ?
 /// LIMIT 1`, mapping the row columns to string values. Returns `None` when
 /// no row matches (or for non-SQLite URLs).
-pub async fn sql_lookup_key(url: &str, table: &str, key_col: &str, key_val: &str) -> Result<Option<serde_json::Value>> {
+pub async fn sql_lookup_key(
+    url: &str,
+    table: &str,
+    key_col: &str,
+    key_val: &str,
+) -> Result<Option<serde_json::Value>> {
     if url.starts_with("sqlite") {
         let pool = sqlx::sqlite::SqlitePool::connect(url).await?;
         let sql = format!("SELECT * FROM {} WHERE {} = ? LIMIT 1", table, key_col);
-        let row = sqlx::query(&sql).bind(key_val).fetch_optional(&pool).await?;
+        let row = sqlx::query(&sql)
+            .bind(key_val)
+            .fetch_optional(&pool)
+            .await?;
         if let Some(r) = row {
             use sqlx::{Column, Row};
             let mut map = serde_json::Map::new();
@@ -1523,8 +1542,8 @@ pub async fn sql_lookup_key(url: &str, table: &str, key_col: &str, key_val: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_kafka_sink_unreachable_errors() {
@@ -1562,7 +1581,10 @@ mod tests {
             "device: d1, temp: 25.5"
         );
         // Unknown placeholders are left untouched.
-        assert_eq!(apply_data_template("x={{.missing}}", &data), "x={{.missing}}");
+        assert_eq!(
+            apply_data_template("x={{.missing}}", &data),
+            "x={{.missing}}"
+        );
     }
 
     #[test]
@@ -1595,8 +1617,7 @@ mod tests {
 
     #[test]
     fn test_redis_sink_config_defaults() {
-        let cfg: RedisSinkConfig =
-            serde_json::from_value(json!({"field": "id"})).unwrap();
+        let cfg: RedisSinkConfig = serde_json::from_value(json!({"field": "id"})).unwrap();
         assert_eq!(cfg.addr, "127.0.0.1:6379");
         assert_eq!(cfg.connection_url(), "redis://127.0.0.1:6379");
         assert_eq!(cfg.data_type, "string");

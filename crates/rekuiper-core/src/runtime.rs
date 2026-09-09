@@ -1,8 +1,8 @@
+use crate::model::StreamRecord;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tokio::sync::broadcast;
-use crate::model::StreamRecord;
 
 pub type StreamSender = broadcast::Sender<StreamRecord>;
 pub type StreamReceiver = broadcast::Receiver<StreamRecord>;
@@ -30,7 +30,11 @@ impl StreamBus {
         }
     }
 
-    pub fn publish(&self, stream_name: &str, record: StreamRecord) -> Result<usize, broadcast::error::SendError<StreamRecord>> {
+    pub fn publish(
+        &self,
+        stream_name: &str,
+        record: StreamRecord,
+    ) -> Result<usize, broadcast::error::SendError<StreamRecord>> {
         let tx = self.get_or_create(stream_name);
         tx.send(record)
     }

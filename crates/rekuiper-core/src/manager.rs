@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use anyhow::{bail, Result};
-use serde_json::Value;
-use parking_lot::RwLock;
-use tokio::task::JoinHandle;
 use crate::model::{RuleDefinition, RuleStatus, StreamDefinition, TableDefinition};
 use crate::runtime::StreamBus;
+use anyhow::{bail, Result};
+use parking_lot::RwLock;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 #[derive(Clone, Default)]
 pub struct StreamManager {
@@ -45,10 +45,12 @@ impl StreamManager {
     }
 }
 
+pub type TableRow = HashMap<String, Value>;
+
 #[derive(Clone, Default)]
 pub struct TableManager {
     tables: Arc<RwLock<HashMap<String, TableDefinition>>>,
-    rows: Arc<RwLock<HashMap<String, Vec<HashMap<String, Value>>>>>,
+    rows: Arc<RwLock<HashMap<String, Vec<TableRow>>>>,
 }
 
 impl TableManager {
@@ -152,11 +154,18 @@ impl RuleManager {
     }
 
     pub fn list_rules(&self) -> Vec<RuleDefinition> {
-        self.rules.read().values().map(|r| r.read().def.clone()).collect()
+        self.rules
+            .read()
+            .values()
+            .map(|r| r.read().def.clone())
+            .collect()
     }
 
     pub fn get_rule_status(&self, id: &str) -> Option<RuleStatus> {
-        self.rules.read().get(id).map(|r| r.read().status.read().clone())
+        self.rules
+            .read()
+            .get(id)
+            .map(|r| r.read().status.read().clone())
     }
 
     pub fn inc_source_records(&self, id: &str, count: u64) {
@@ -182,7 +191,9 @@ impl RuleManager {
 
     pub fn reset_rule_metrics(&self, id: &str) -> Result<()> {
         let map = self.rules.read();
-        let rule_arc = map.get(id).ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
+        let rule_arc = map
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
         let status = rule_arc.read().status.clone();
         let mut guard = status.write();
         guard.source_records_in_total = 0;
@@ -205,7 +216,9 @@ impl RuleManager {
 
     pub fn start_rule(&self, id: &str) -> Result<()> {
         let map = self.rules.read();
-        let rule_arc = map.get(id).ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
+        let rule_arc = map
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
         let rule = rule_arc.write();
         rule.status.write().status = "running".to_string();
         Ok(())
@@ -213,7 +226,9 @@ impl RuleManager {
 
     pub fn stop_rule(&self, id: &str) -> Result<()> {
         let map = self.rules.read();
-        let rule_arc = map.get(id).ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
+        let rule_arc = map
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
         let mut rule = rule_arc.write();
         if let Some(handle) = rule.handle.take() {
             handle.abort();

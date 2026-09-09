@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use anyhow::{bail, Result};
 use crate::ast::{
     BinaryOperator, CreateStreamStmt, CreateTableStmt, Expr, JoinClause, JoinType, OrderByItem,
     SelectStmt, SortOrder, TimeUnit, UnaryOperator, WindowDef,
 };
+use anyhow::{bail, Result};
+use std::collections::HashMap;
 
 pub struct Parser<'a> {
     input: &'a str,
@@ -29,7 +29,9 @@ impl<'a> Parser<'a> {
     fn peek_word(&self) -> Option<String> {
         let remaining = &self.input[self.pos..];
         let trimmed = remaining.trim_start();
-        let end = trimmed.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(trimmed.len());
+        let end = trimmed
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(trimmed.len());
         if end == 0 {
             None
         } else {
@@ -47,7 +49,9 @@ impl<'a> Parser<'a> {
 
     fn expect_keyword(&mut self, kw: &str) -> Result<()> {
         self.skip_whitespace();
-        let word = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected keyword {}, found EOF", kw))?;
+        let word = self
+            .peek_word()
+            .ok_or_else(|| anyhow::anyhow!("Expected keyword {}, found EOF", kw))?;
         if word.eq_ignore_ascii_case(kw) {
             self.skip_whitespace();
             self.pos += word.len();
@@ -84,7 +88,9 @@ impl<'a> Parser<'a> {
         self.expect_keyword("STREAM")?;
         self.skip_whitespace();
 
-        let word = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected stream name"))?;
+        let word = self
+            .peek_word()
+            .ok_or_else(|| anyhow::anyhow!("Expected stream name"))?;
         self.skip_whitespace();
         self.pos += word.len();
         let name = word;
@@ -92,7 +98,9 @@ impl<'a> Parser<'a> {
         self.skip_whitespace();
         // Optional schema definition in parens: ()
         if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
-            let close = self.input[self.pos..].find(')').ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
+            let close = self.input[self.pos..]
+                .find(')')
+                .ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
             self.pos += close + 1;
         }
 
@@ -101,7 +109,9 @@ impl<'a> Parser<'a> {
             self.skip_whitespace();
             if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
                 self.pos += 1;
-                let close = self.input[self.pos..].find(')').ok_or_else(|| anyhow::anyhow!("Unclosed WITH parenthesis"))?;
+                let close = self.input[self.pos..]
+                    .find(')')
+                    .ok_or_else(|| anyhow::anyhow!("Unclosed WITH parenthesis"))?;
                 let with_content = &self.input[self.pos..self.pos + close];
                 self.pos += close + 1;
 
@@ -125,7 +135,9 @@ impl<'a> Parser<'a> {
         self.expect_keyword("TABLE")?;
         self.skip_whitespace();
 
-        let word = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected table name"))?;
+        let word = self
+            .peek_word()
+            .ok_or_else(|| anyhow::anyhow!("Expected table name"))?;
         self.skip_whitespace();
         self.pos += word.len();
         let name = word;
@@ -133,7 +145,9 @@ impl<'a> Parser<'a> {
         self.skip_whitespace();
         // Optional schema definition in parens: ()
         if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
-            let close = self.input[self.pos..].find(')').ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
+            let close = self.input[self.pos..]
+                .find(')')
+                .ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
             self.pos += close + 1;
         }
 
@@ -142,7 +156,9 @@ impl<'a> Parser<'a> {
             self.skip_whitespace();
             if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
                 self.pos += 1;
-                let close = self.input[self.pos..].find(')').ok_or_else(|| anyhow::anyhow!("Unclosed WITH parenthesis"))?;
+                let close = self.input[self.pos..]
+                    .find(')')
+                    .ok_or_else(|| anyhow::anyhow!("Unclosed WITH parenthesis"))?;
                 let with_content = &self.input[self.pos..self.pos + close];
                 self.pos += close + 1;
 
@@ -210,7 +226,9 @@ impl<'a> Parser<'a> {
 
         self.expect_keyword("FROM")?;
         self.skip_whitespace();
-        let from = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected stream name after FROM"))?;
+        let from = self
+            .peek_word()
+            .ok_or_else(|| anyhow::anyhow!("Expected stream name after FROM"))?;
         self.skip_whitespace();
         self.pos += from.len();
 
@@ -219,10 +237,12 @@ impl<'a> Parser<'a> {
         let mut joins = Vec::new();
         loop {
             let is_join = matches!(
-                self.peek_word()
-                    .map(|w| w.to_ascii_uppercase())
-                    .as_deref(),
-                Some("LEFT") | Some("RIGHT") | Some("FULL") | Some("CROSS") | Some("INNER")
+                self.peek_word().map(|w| w.to_ascii_uppercase()).as_deref(),
+                Some("LEFT")
+                    | Some("RIGHT")
+                    | Some("FULL")
+                    | Some("CROSS")
+                    | Some("INNER")
                     | Some("JOIN")
                     | Some("OUTER")
             );
@@ -232,11 +252,7 @@ impl<'a> Parser<'a> {
             // Look ahead: only commit when a JOIN header really follows, so a
             // stream merely named e.g. `left` does not break parsing.
             let saved = self.pos;
-            let prefix = match self
-                .peek_word()
-                .map(|w| w.to_ascii_uppercase())
-                .as_deref()
-            {
+            let prefix = match self.peek_word().map(|w| w.to_ascii_uppercase()).as_deref() {
                 Some("LEFT") | Some("RIGHT") | Some("FULL") | Some("CROSS") | Some("INNER") => {
                     let word = self.peek_word().unwrap_or_default();
                     self.skip_whitespace();
@@ -277,7 +293,11 @@ impl<'a> Parser<'a> {
             if self.match_keyword("ON") {
                 on = Some(self.parse_expr()?);
             }
-            joins.push(JoinClause { join_type, target, on });
+            joins.push(JoinClause {
+                join_type,
+                target,
+                on,
+            });
         }
 
         let mut where_clause = None;
@@ -403,7 +423,11 @@ impl<'a> Parser<'a> {
                 let unit = Self::parse_window_unit(&args[0])?;
                 let length = Self::parse_window_u64(&args[1])?;
                 let interval = Self::parse_window_u64(&args[2])?;
-                Ok(Some(WindowDef::HoppingTime { unit, length, interval }))
+                Ok(Some(WindowDef::HoppingTime {
+                    unit,
+                    length,
+                    interval,
+                }))
             }
             "slidingwindow" => {
                 if args.len() != 2 && args.len() != 3 {
@@ -423,9 +447,9 @@ impl<'a> Parser<'a> {
                         args.len()
                     );
                 }
-                let size = Self::parse_window_usize(&args[0])? as usize;
+                let size = Self::parse_window_usize(&args[0])?;
                 let interval = if args.len() == 2 {
-                    Some(Self::parse_window_usize(&args[1])? as usize)
+                    Some(Self::parse_window_usize(&args[1])?)
                 } else {
                     None
                 };
@@ -450,7 +474,10 @@ impl<'a> Parser<'a> {
             "mi" => Ok(TimeUnit::Mi),
             "ss" => Ok(TimeUnit::Ss),
             "ms" => Ok(TimeUnit::Ms),
-            _ => bail!("Unknown time unit '{}', expected one of dd, hh, mi, ss, ms", s),
+            _ => bail!(
+                "Unknown time unit '{}', expected one of dd, hh, mi, ss, ms",
+                s
+            ),
         }
     }
 
@@ -470,7 +497,10 @@ impl<'a> Parser<'a> {
                     if f.is_finite() && f >= 0.0 && f.trunc() == f {
                         return Ok(f as u64);
                     }
-                    bail!("Window length/interval must be a non-negative integer, got {}", f);
+                    bail!(
+                        "Window length/interval must be a non-negative integer, got {}",
+                        f
+                    );
                 }
                 bail!("Window length/interval must be an integer")
             }
@@ -843,7 +873,9 @@ impl<'a> Parser<'a> {
         if rem.starts_with('\'') || rem.starts_with('"') {
             let quote = rem.chars().next().unwrap();
             let rest = &rem[quote.len_utf8()..];
-            let end = rest.find(quote).ok_or_else(|| anyhow::anyhow!("Unterminated string literal"))?;
+            let end = rest
+                .find(quote)
+                .ok_or_else(|| anyhow::anyhow!("Unterminated string literal"))?;
             let s = &rest[..end];
             self.pos += quote.len_utf8() + end + quote.len_utf8();
             return Ok(Expr::Literal(serde_json::Value::String(s.to_string())));
@@ -854,7 +886,9 @@ impl<'a> Parser<'a> {
             return self.parse_number();
         }
 
-        let word = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected expression token"))?;
+        let word = self
+            .peek_word()
+            .ok_or_else(|| anyhow::anyhow!("Expected expression token"))?;
         // Consume word: pos is at word start after skip_whitespace
         self.skip_whitespace();
         self.pos += word.len();
@@ -889,7 +923,9 @@ impl<'a> Parser<'a> {
                                 self.pos += 1;
                                 args.push(Expr::Wildcard);
                                 self.skip_whitespace();
-                                if self.pos < self.input.len() && self.input[self.pos..].starts_with(',') {
+                                if self.pos < self.input.len()
+                                    && self.input[self.pos..].starts_with(',')
+                                {
                                     self.pos += 1;
                                     continue;
                                 } else {
@@ -919,7 +955,10 @@ impl<'a> Parser<'a> {
                         partition_by = Some(Box::new(self.parse_expr()?));
                     }
                     self.expect_char(')')?;
-                    return Ok(Expr::Over { call: Box::new(call_expr), partition_by });
+                    return Ok(Expr::Over {
+                        call: Box::new(call_expr),
+                        partition_by,
+                    });
                 }
                 return Ok(call_expr);
             }
@@ -930,7 +969,9 @@ impl<'a> Parser<'a> {
                 if self.pos < self.input.len() && self.input[self.pos..].starts_with('.') {
                     self.pos += 1;
                     self.skip_whitespace();
-                    let field = self.peek_word().ok_or_else(|| anyhow::anyhow!("Expected field name after '.'"))?;
+                    let field = self
+                        .peek_word()
+                        .ok_or_else(|| anyhow::anyhow!("Expected field name after '.'"))?;
                     self.skip_whitespace();
                     self.pos += field.len();
                     expr = Expr::FieldAccess {
@@ -975,7 +1016,11 @@ impl<'a> Parser<'a> {
         };
         self.expect_keyword("END")?;
 
-        Ok(Expr::Case { operand, when_clauses, else_clause })
+        Ok(Expr::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        })
     }
 
     fn is_number_start(s: &str) -> bool {

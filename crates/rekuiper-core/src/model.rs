@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamRecord {
@@ -273,7 +273,9 @@ mod tests {
             GraphNode {
                 node_category: "operator".to_string(),
                 node_type: "pick".to_string(),
-                props: [("fields".to_string(), json!(["temp"]))].into_iter().collect(),
+                props: [("fields".to_string(), json!(["temp"]))]
+                    .into_iter()
+                    .collect(),
             },
         );
         nodes.insert(

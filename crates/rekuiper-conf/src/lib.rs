@@ -1,22 +1,13 @@
-use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KuiperConfig {
     #[serde(default)]
     pub basic: BasicConfig,
     #[serde(default)]
     pub store: StoreConfig,
-}
-
-impl Default for KuiperConfig {
-    fn default() -> Self {
-        Self {
-            basic: BasicConfig::default(),
-            store: StoreConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,14 +37,30 @@ pub struct BasicConfig {
     pub prometheus_port: u16,
 }
 
-fn default_ip() -> String { "127.0.0.1".to_string() }
-fn default_port() -> u16 { 20498 }
-fn default_rest_ip() -> String { "0.0.0.0".to_string() }
-fn default_rest_port() -> u16 { 9081 }
-fn default_log_level() -> String { "info".to_string() }
-fn default_true() -> bool { true }
-fn default_timezone() -> String { "Local".to_string() }
-fn default_prometheus_port() -> u16 { 20499 }
+fn default_ip() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_port() -> u16 {
+    20498
+}
+fn default_rest_ip() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_rest_port() -> u16 {
+    9081
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_timezone() -> String {
+    "Local".to_string()
+}
+fn default_prometheus_port() -> u16 {
+    20499
+}
 
 impl Default for BasicConfig {
     fn default() -> Self {
@@ -80,7 +87,9 @@ pub struct StoreConfig {
     pub r#type: String,
 }
 
-fn default_store_type() -> String { "memory".to_string() }
+fn default_store_type() -> String {
+    "memory".to_string()
+}
 
 impl Default for StoreConfig {
     fn default() -> Self {
@@ -119,7 +128,10 @@ impl PathConfig {
     pub fn load_config(&self) -> Result<KuiperConfig> {
         let conf_file = self.etc_dir.join("kuiper.yaml");
         if !conf_file.exists() {
-            tracing::warn!("Configuration file {:?} not found, using defaults", conf_file);
+            tracing::warn!(
+                "Configuration file {:?} not found, using defaults",
+                conf_file
+            );
             return Ok(KuiperConfig::default());
         }
 

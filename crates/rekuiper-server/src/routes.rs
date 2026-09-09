@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -13,10 +10,6 @@ use axum::{
     Json, Router,
 };
 use parking_lot::RwLock;
-use serde::Deserialize;
-use serde_json::{json, Value};
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
-use tokio::sync::broadcast;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
     apply_data_template, FileSink, HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink,
@@ -32,6 +25,13 @@ use rekuiper_core::{
 use rekuiper_sql::{
     Evaluator, Expr, JoinClause, JoinType, Parser, RuleState, SelectStmt, TimeUnit, WindowDef,
 };
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -114,7 +114,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules/:name/restart", post(restart_rule))
         .route("/rules/:name/reset_state", put(reset_rule_state))
         .route("/rules/:id/schema", get(get_rule_schema))
-        .route("/rules/:name/tags", put(empty_ok).patch(empty_ok).delete(empty_ok))
+        .route(
+            "/rules/:name/tags",
+            put(empty_ok).patch(empty_ok).delete(empty_ok),
+        )
         .route("/v2/rules/:name/status", get(get_rule_status))
         .route("/ruletest", post(create_ruletest))
         .route("/ruletest/:name/start", post(start_ruletest))
@@ -152,8 +155,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metadata/connections", get(list_metadata_connections))
         .route("/metadata/resource", get(list_metadata_resources))
         .route("/metadata/resources", get(list_metadata_resources))
-        .route("/connections", get(list_connections).post(create_connection))
-        .route("/connections/:id", get(get_connection).delete(delete_connection))
+        .route(
+            "/connections",
+            get(list_connections).post(create_connection),
+        )
+        .route(
+            "/connections/:id",
+            get(get_connection).delete(delete_connection),
+        )
         .route("/plugins/sources", get(empty_array))
         .route("/plugins/sources/prebuild", get(empty_array))
         .route(
@@ -178,7 +187,10 @@ pub fn create_router(state: AppState) -> Router {
                 .put(validated_empty_ok)
                 .delete(validated_empty_ok),
         )
-        .route("/plugins/functions/:name/register", post(validated_empty_ok))
+        .route(
+            "/plugins/functions/:name/register",
+            post(validated_empty_ok),
+        )
         .route("/plugins/portables", get(empty_array))
         .route(
             "/plugins/portables/:name",
@@ -186,7 +198,10 @@ pub fn create_router(state: AppState) -> Router {
                 .put(validated_empty_ok)
                 .delete(validated_empty_ok),
         )
-        .route("/plugins/portables/:name/status", get(validated_empty_object))
+        .route(
+            "/plugins/portables/:name/status",
+            get(validated_empty_object),
+        )
         .route("/plugins/udfs", get(empty_array))
         .route("/plugins/udfs/:name", get(validated_empty_object))
         .route("/services", get(empty_array))
@@ -319,16 +334,17 @@ async fn create_stream(
             return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
         }
         state.stream_bus.get_or_create(&name);
-        (StatusCode::CREATED, format!("Stream {} is created.\n", name)).into_response()
+        (
+            StatusCode::CREATED,
+            format!("Stream {} is created.\n", name),
+        )
+            .into_response()
     } else {
         (StatusCode::BAD_REQUEST, "Missing sql or name in request").into_response()
     }
 }
 
-async fn get_stream(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_stream(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -339,10 +355,7 @@ async fn get_stream(
     }
 }
 
-async fn delete_stream(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn delete_stream(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -461,10 +474,7 @@ async fn create_table(
     }
 }
 
-async fn get_table(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_table(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -475,10 +485,7 @@ async fn get_table(
     }
 }
 
-async fn delete_table(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -503,10 +510,7 @@ async fn get_stream_details(State(state): State<AppState>) -> impl IntoResponse 
     Json(defs)
 }
 
-async fn get_stream_schema(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_stream_schema(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Some(def) = state.stream_manager.get_stream(&name) {
         Json(json!({ "name": def.name, "options": def.options })).into_response()
     } else {
@@ -514,10 +518,7 @@ async fn get_stream_schema(
     }
 }
 
-async fn get_table_schema(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_table_schema(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Some(def) = state.table_manager.get_table(&name) {
         Json(json!({ "name": def.name, "options": def.options })).into_response()
     } else {
@@ -593,22 +594,32 @@ async fn create_rule(
     );
 
     // HTTP pull source streams poll a remote endpoint into the stream bus.
-    if let Some(conf) =
-        resolve_httppull_config(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
-    {
+    if let Some(conf) = resolve_httppull_config(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        &rule_id,
+    ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
             .insert(rule_id.clone(), cancel_tx);
-        HttpPullSource { config: conf, tx: stream_tx }.spawn(cancel_rx);
+        HttpPullSource {
+            config: conf,
+            tx: stream_tx,
+        }
+        .spawn(cancel_rx);
     }
 
     // WebSocket source streams forward incoming messages into the stream bus.
-    if let Some(url) =
-        resolve_websocket_url(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
-    {
+    if let Some(url) = resolve_websocket_url(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        &rule_id,
+    ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
@@ -619,29 +630,44 @@ async fn create_rule(
     }
 
     // Redis subscription streams forward channel messages into the stream bus.
-    if let Some((url, channel)) =
-        resolve_redissub_source(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
-    {
+    if let Some((url, channel)) = resolve_redissub_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        &rule_id,
+    ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
             .insert(rule_id.clone(), cancel_tx);
-        RedisSubSource { url, channel, tx: stream_tx }.spawn(cancel_rx);
+        RedisSubSource {
+            url,
+            channel,
+            tx: stream_tx,
+        }
+        .spawn(cancel_rx);
     }
 
     // Kafka source streams consume a topic partition into the stream bus.
-    if let Some(config) =
-        resolve_kafka_source(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
-    {
+    if let Some(config) = resolve_kafka_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        &rule_id,
+    ) {
         let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
             .insert(rule_id.clone(), cancel_tx);
-        KafkaSource { config, tx: stream_tx }.spawn(cancel_rx);
+        KafkaSource {
+            config,
+            tx: stream_tx,
+        }
+        .spawn(cancel_rx);
     }
 
     // Simulator source streams replay configured data into the stream bus.
@@ -660,8 +686,7 @@ async fn create_rule(
                             let stream_name = select_stmt.from.clone();
                             let bus = state.stream_bus.clone();
                             tokio::spawn(async move {
-                                let (tx, mut rx) =
-                                    tokio::sync::mpsc::channel::<StreamRecord>(1024);
+                                let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamRecord>(1024);
                                 let sim_handle = tokio::spawn(async move {
                                     SimulatorSource::new(conf).run(tx).await
                                 });
@@ -798,14 +823,20 @@ fn resolve_websocket_url(
     if ds.starts_with("ws://") || ds.starts_with("wss://") {
         Some(ds.to_string())
     } else {
-        Some(format!("ws://127.0.0.1:8080/{}", ds.trim_start_matches('/')))
+        Some(format!(
+            "ws://127.0.0.1:8080/{}",
+            ds.trim_start_matches('/')
+        ))
     }
 }
 
 /// Resolve a Redis server address from a stored source config value, which
 /// may be a full object (`{"addr": ...}`) or a bare address string.
 /// Falls back to the local default when absent or unparseable.
-fn resolve_redis_addr(source_configs: &Arc<RwLock<HashMap<String, Value>>>, conf_key: &str) -> String {
+fn resolve_redis_addr(
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    conf_key: &str,
+) -> String {
     const DEFAULT: &str = "127.0.0.1:6379";
     if conf_key.is_empty() {
         return DEFAULT.to_string();
@@ -955,6 +986,7 @@ fn resolve_source_topic(stream_manager: &StreamManager, stream_name: &str) -> St
 
 /// Subscribe to the rule's source stream and spawn its window-aware
 /// execution task, registering the join handle on the rule manager.
+#[allow(clippy::too_many_arguments)]
 fn spawn_rule_task(
     rule_manager: &RuleManager,
     stream_bus: &StreamBus,
@@ -1090,11 +1122,7 @@ async fn dispatch_rule_actions(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "[RULE {}] invalid file action options: {}",
-                            rule_id,
-                            e
-                        );
+                        tracing::warn!("[RULE {}] invalid file action options: {}", rule_id, e);
                         rule_mgr.inc_exceptions(rule_id, 1);
                     }
                 },
@@ -1108,10 +1136,7 @@ async fn dispatch_rule_actions(
                             Some(tpl) => {
                                 http_client
                                     .post(url)
-                                    .header(
-                                        reqwest::header::CONTENT_TYPE,
-                                        "application/json",
-                                    )
+                                    .header(reqwest::header::CONTENT_TYPE, "application/json")
                                     .body(apply_data_template(
                                         tpl,
                                         &record_template_map(&output.data),
@@ -1149,26 +1174,20 @@ async fn dispatch_rule_actions(
                             }
                         }
                         Err(e) => {
-                            tracing::warn!(
-                                "[RULE {}] mqtt action connect failed: {}",
-                                rule_id,
-                                e
-                            );
+                            tracing::warn!("[RULE {}] mqtt action connect failed: {}", rule_id, e);
                             rule_mgr.inc_exceptions(rule_id, 1);
                         }
                     },
                     Err(e) => {
-                        tracing::warn!(
-                            "[RULE {}] invalid mqtt action options: {}",
-                            rule_id,
-                            e
-                        );
+                        tracing::warn!("[RULE {}] invalid mqtt action options: {}", rule_id, e);
                         rule_mgr.inc_exceptions(rule_id, 1);
                     }
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
                     Ok(ws_cfg) => {
-                        let sink = WebSocketSink { url: ws_cfg.target_url() };
+                        let sink = WebSocketSink {
+                            url: ws_cfg.target_url(),
+                        };
                         let res = match action_template(opts) {
                             Some(tpl) => {
                                 sink.send_text(&apply_data_template(
@@ -1221,11 +1240,7 @@ async fn dispatch_rule_actions(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "[RULE {}] invalid kafka action options: {}",
-                            rule_id,
-                            e
-                        );
+                        tracing::warn!("[RULE {}] invalid kafka action options: {}", rule_id, e);
                         rule_mgr.inc_exceptions(rule_id, 1);
                     }
                 },
@@ -1238,11 +1253,7 @@ async fn dispatch_rule_actions(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "[RULE {}] invalid sql action options: {}",
-                            rule_id,
-                            e
-                        );
+                        tracing::warn!("[RULE {}] invalid sql action options: {}", rule_id, e);
                         rule_mgr.inc_exceptions(rule_id, 1);
                     }
                 },
@@ -1309,7 +1320,11 @@ fn join_key_parts(
         }
     }
     let (left, right) = match join.on.as_ref()? {
-        Expr::BinaryOp { left, op: rekuiper_sql::BinaryOperator::Eq, right } => (left, right),
+        Expr::BinaryOp {
+            left,
+            op: rekuiper_sql::BinaryOperator::Eq,
+            right,
+        } => (left, right),
         _ => return None,
     };
     let (table_expr, key_expr) = match (
@@ -1320,7 +1335,10 @@ fn join_key_parts(
         (_, 1) => (right, left),
         _ => return None,
     };
-    Some((column_name(table_expr)?, scalarize(Evaluator::eval_val(key_expr, combined))?))
+    Some((
+        column_name(table_expr)?,
+        scalarize(Evaluator::eval_val(key_expr, combined))?,
+    ))
 }
 
 /// Derive the point-lookup key value for a Redis table join.
@@ -1455,7 +1473,15 @@ async fn apply_lookup_joins(
     combined.insert(select_stmt.from.clone(), as_object(record));
     for join in &select_stmt.joins {
         let mut matched: Option<HashMap<String, Value>> = None;
-        for row in lookup_candidates(table_manager, source_configs, &select_stmt.from, join, &combined).await {
+        for row in lookup_candidates(
+            table_manager,
+            source_configs,
+            &select_stmt.from,
+            join,
+            &combined,
+        )
+        .await
+        {
             let mut probe = combined.clone();
             for (k, v) in &row {
                 probe.entry(k.clone()).or_insert(v.clone());
@@ -1492,9 +1518,7 @@ async fn enqueue_sink_record(
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
     output_record: StreamRecord,
 ) {
-    if let Err(tokio::sync::mpsc::error::TrySendError::Full(rec)) =
-        sink.try_send(output_record)
-    {
+    if let Err(tokio::sync::mpsc::error::TrySendError::Full(rec)) = sink.try_send(output_record) {
         // Queue under backpressure: await send
         let _ = sink.send(rec).await;
     }
@@ -1521,13 +1545,9 @@ async fn run_stateless_rule(
                     continue;
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
-                let Some(joined) = apply_lookup_joins(
-                    &table_manager,
-                    &source_configs,
-                    &select_stmt,
-                    &record.data,
-                )
-                .await
+                let Some(joined) =
+                    apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
+                        .await
                 else {
                     // Inner join without a matching table row: drop the record.
                     continue;
@@ -1642,10 +1662,7 @@ async fn run_tumbling_window_rule(
     }
 }
 
-async fn get_rule(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1656,10 +1673,7 @@ async fn get_rule(
     }
 }
 
-async fn get_rule_status(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_rule_status(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1687,38 +1701,28 @@ async fn validate_rule(Json(rule): Json<RuleDefinition>) -> Response {
                 Ok((sql, _)) => {
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
-                        Ok(_) => (
-                            StatusCode::OK,
-                            "The rule has been validated successfully\n",
-                        )
+                        Ok(_) => (StatusCode::OK, "The rule has been validated successfully\n")
                             .into_response(),
-                        Err(e) => {
-                            (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
-                                .into_response()
-                        }
+                        Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
+                            .into_response(),
                     }
                 }
-                Err(e) => {
-                    (StatusCode::BAD_REQUEST, format!("Invalid rule graph: {}", e)).into_response()
-                }
+                Err(e) => (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid rule graph: {}", e),
+                )
+                    .into_response(),
             };
         }
     }
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
-        Ok(_) => (
-            StatusCode::OK,
-            "The rule has been validated successfully\n",
-        )
-            .into_response(),
+        Ok(_) => (StatusCode::OK, "The rule has been validated successfully\n").into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response(),
     }
 }
 
-async fn get_rule_topo(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_rule_topo(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1756,10 +1760,7 @@ async fn get_rule_topo(
     .into_response()
 }
 
-async fn get_rule_explain(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_rule_explain(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1806,7 +1807,11 @@ fn window_to_string(window: &WindowDef) -> String {
         WindowDef::TumblingTime { unit, length } => {
             format!("TUMBLINGWINDOW({}, {})", time_unit_to_string(unit), length)
         }
-        WindowDef::HoppingTime { unit, length, interval } => format!(
+        WindowDef::HoppingTime {
+            unit,
+            length,
+            interval,
+        } => format!(
             "HOPPINGWINDOW({}, {}, {})",
             time_unit_to_string(unit),
             length,
@@ -1844,24 +1849,41 @@ fn expr_to_string(expr: &Expr) -> String {
                 rekuiper_sql::BinaryOperator::Mod => "%",
                 rekuiper_sql::BinaryOperator::Like => "LIKE",
             };
-            format!("{} {} {}", expr_to_string(left), op_str, expr_to_string(right))
+            format!(
+                "{} {} {}",
+                expr_to_string(left),
+                op_str,
+                expr_to_string(right)
+            )
         }
         Expr::UnaryOp { op, expr } => match op {
             rekuiper_sql::UnaryOperator::Not => format!("NOT {}", expr_to_string(expr)),
             rekuiper_sql::UnaryOperator::Neg => format!("-{}", expr_to_string(expr)),
         },
-        Expr::Between { expr, low, high, negated } => format!(
+        Expr::Between {
+            expr,
+            low,
+            high,
+            negated,
+        } => format!(
             "{} {}BETWEEN {} AND {}",
             expr_to_string(expr),
             if *negated { "NOT " } else { "" },
             expr_to_string(low),
             expr_to_string(high)
         ),
-        Expr::InList { expr, list, negated } => format!(
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => format!(
             "{} {}IN ({})",
             expr_to_string(expr),
             if *negated { "NOT " } else { "" },
-            list.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+            list.iter()
+                .map(expr_to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::IsNull { expr, negated } => format!(
             "{} IS {}NULL",
@@ -1874,17 +1896,17 @@ fn expr_to_string(expr: &Expr) -> String {
         Expr::Call { name, args } => format!(
             "{}({})",
             name,
-            args.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(expr_to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Case { .. } => "CASE ... END".to_string(),
         Expr::Over { call, .. } => format!("{} OVER (...)", expr_to_string(call)),
     }
 }
 
-async fn start_rule(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1894,10 +1916,7 @@ async fn start_rule(
     }
 }
 
-async fn stop_rule(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1910,10 +1929,7 @@ async fn stop_rule(
     }
 }
 
-async fn restart_rule(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn restart_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1925,10 +1941,7 @@ async fn restart_rule(
     }
 }
 
-async fn delete_rule(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -1972,10 +1985,7 @@ async fn export_ruleset(State(state): State<AppState>) -> impl IntoResponse {
 /// Unified ruleset import: creates streams, tables and rules from an export
 /// payload. Also accepts the legacy `{name: sql}` map form for streams and
 /// tables. Existing entities are left untouched.
-async fn import_ruleset(
-    State(state): State<AppState>,
-    Json(payload): Json<Value>,
-) -> Response {
+async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
     if let Some(streams) = payload.get("streams") {
         if let Some(defs) = streams.as_array() {
             for item in defs {
@@ -2074,16 +2084,12 @@ async fn import_ruleset(
 // ---------------------------------------------------------------------------
 
 fn named_entries(names: &[&str]) -> Value {
-    Value::Array(
-        names
-            .iter()
-            .map(|n| json!({ "name": n }))
-            .collect(),
-    )
+    Value::Array(names.iter().map(|n| json!({ "name": n })).collect())
 }
 
 /// Rejects resource names carrying characters that break routing or the
 /// manager UI (mirrors eKuiper's validation FVT expectations).
+#[allow(clippy::result_large_err)]
 fn check_valid_name(name: &str) -> Result<(), Response> {
     if name.contains(' ')
         || name.contains("%20")
@@ -2091,10 +2097,11 @@ fn check_valid_name(name: &str) -> Result<(), Response> {
         || name.contains('/')
         || name.contains('\\')
     {
-        return Err(
-            (StatusCode::BAD_REQUEST, format!("name '{}' contains invalid characters", name))
-                .into_response(),
-        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("name '{}' contains invalid characters", name),
+        )
+            .into_response());
     }
     Ok(())
 }
@@ -2149,10 +2156,7 @@ async fn empty_yaml() -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"yaml": ""})))
 }
 
-async fn get_rule_schema(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Response {
+async fn get_rule_schema(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&id) {
         return resp;
     }
@@ -2194,9 +2198,30 @@ async fn list_sink_metadata() -> impl IntoResponse {
 
 async fn list_function_metadata() -> impl IntoResponse {
     Json(named_entries(&[
-        "abs", "ceil", "ceiling", "floor", "round", "sqrt", "power", "pow", "concat",
-        "lower", "upper", "length", "trim", "substr", "substring", "startswith",
-        "endswith", "cast", "coalesce", "count", "sum", "avg", "min", "max",
+        "abs",
+        "ceil",
+        "ceiling",
+        "floor",
+        "round",
+        "sqrt",
+        "power",
+        "pow",
+        "concat",
+        "lower",
+        "upper",
+        "length",
+        "trim",
+        "substr",
+        "substring",
+        "startswith",
+        "endswith",
+        "cast",
+        "coalesce",
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max",
     ]))
 }
 
@@ -2247,10 +2272,7 @@ async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
     Json(conns)
 }
 
-async fn create_connection(
-    State(state): State<AppState>,
-    Json(payload): Json<Value>,
-) -> Response {
+async fn create_connection(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
     let id = payload
         .get("id")
         .and_then(|v| v.as_str())
@@ -2268,25 +2290,27 @@ async fn create_connection(
         .into_response()
 }
 
-async fn get_connection(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Response {
+async fn get_connection(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if let Some(conn) = state.connections.read().get(&id).cloned() {
         Json(conn).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Connection {} not found", id)).into_response()
+        (
+            StatusCode::NOT_FOUND,
+            format!("Connection {} not found", id),
+        )
+            .into_response()
     }
 }
 
-async fn delete_connection(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Response {
+async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if state.connections.write().remove(&id).is_some() {
         (StatusCode::OK, format!("Connection {} is dropped.\n", id)).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Connection {} not found", id)).into_response()
+        (
+            StatusCode::NOT_FOUND,
+            format!("Connection {} not found", id),
+        )
+            .into_response()
     }
 }
 
@@ -2305,10 +2329,7 @@ async fn bulk_stop_rules(State(state): State<AppState>) -> impl IntoResponse {
     (StatusCode::OK, Json(json!({})))
 }
 
-async fn reset_rule_state(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn reset_rule_state(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -2377,13 +2398,11 @@ pub async fn prometheus_metrics_handler(State(state): State<AppState>) -> impl I
     latency.push_str("# TYPE kuiper_sink_process_latency_us gauge\n");
 
     let mut source_in = String::new();
-    source_in
-        .push_str("# HELP kuiper_source_records_in_total total number of messages read in\n");
+    source_in.push_str("# HELP kuiper_source_records_in_total total number of messages read in\n");
     source_in.push_str("# TYPE kuiper_source_records_in_total counter\n");
 
     let mut source_out = String::new();
-    source_out
-        .push_str("# HELP kuiper_source_records_out_total total number of messages output\n");
+    source_out.push_str("# HELP kuiper_source_records_out_total total number of messages output\n");
     source_out.push_str("# TYPE kuiper_source_records_out_total counter\n");
 
     for rule in state.rule_manager.list_rules() {
@@ -2402,7 +2421,10 @@ pub async fn prometheus_metrics_handler(State(state): State<AppState>) -> impl I
         };
         // This engine tracks no per-record latency yet; export 0.
         let latency_us: u64 = 0;
-        rule_lines.push_str(&format!("kuiper_rule_status{{rule=\"{}\"}} {}\n", rule.id, code));
+        rule_lines.push_str(&format!(
+            "kuiper_rule_status{{rule=\"{}\"}} {}\n",
+            rule.id, code
+        ));
         sink_in.push_str(&format!(
             "kuiper_sink_records_in_total{{rule=\"{}\"}} {}\n",
             rule.id, status.source_records_in_total
@@ -2429,8 +2451,14 @@ pub async fn prometheus_metrics_handler(State(state): State<AppState>) -> impl I
         ));
     }
 
-    out.push_str(&format!("kuiper_rule_count{{status=\"running\"}} {}\n", running));
-    out.push_str(&format!("kuiper_rule_count{{status=\"stop\"}} {}\n", stopped));
+    out.push_str(&format!(
+        "kuiper_rule_count{{status=\"running\"}} {}\n",
+        running
+    ));
+    out.push_str(&format!(
+        "kuiper_rule_count{{status=\"stop\"}} {}\n",
+        stopped
+    ));
     out.push_str(&rule_lines);
     out.push_str(&sink_in);
     out.push_str(&sink_out);
@@ -2481,7 +2509,10 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
         match serde_json::from_slice(&body) {
             Ok(p) => p,
             Err(e) => {
-                return (StatusCode::BAD_REQUEST, format!("Invalid ruletest payload: {}", e))
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid ruletest payload: {}", e),
+                )
                     .into_response();
             }
         }
@@ -2504,10 +2535,7 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
         .into_response()
 }
 
-async fn start_ruletest(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn start_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     let Some(session) = state.ruletests.read().get(&name).cloned() else {
         // Keep the endpoint total: unknown sessions are still acknowledged.
         return (StatusCode::OK, "started\n").into_response();
@@ -2534,20 +2562,18 @@ async fn start_ruletest(
     (StatusCode::OK, "started\n").into_response()
 }
 
-async fn delete_ruletest(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn delete_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     state.ruletests.write().remove(&name);
     (StatusCode::OK, "dropped\n").into_response()
 }
 
-async fn sse_ruletest(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     let Some(session) = state.ruletests.read().get(&name).cloned() else {
-        return (StatusCode::NOT_FOUND, format!("Ruletest {} not found", name)).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Ruletest {} not found", name),
+        )
+            .into_response();
     };
     let rx = session.output_tx.subscribe();
     let stream = futures::stream::unfold(rx, |mut rx| async move {
@@ -2556,5 +2582,7 @@ async fn sse_ruletest(
             Err(_) => None,
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::new()).into_response()
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new())
+        .into_response()
 }

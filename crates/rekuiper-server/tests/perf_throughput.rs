@@ -1,13 +1,15 @@
-use std::collections::HashMap;
-use serde_json::{json, Value};
-use tokio::net::TcpListener;
 use rekuiper_conf::KuiperConfig;
-use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
 use rekuiper_core::model::StreamRecord;
+use rekuiper_core::{RuleManager, StreamBus, StreamManager, TableManager};
 use rekuiper_server::routes::{create_router, AppState};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>, AppState) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("Failed to bind ephemeral port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind ephemeral port");
     let local_addr = listener.local_addr().unwrap();
 
     let stream_bus = StreamBus::new();
@@ -71,11 +73,16 @@ async fn test_high_throughput_streaming_pipeline() {
     for _chunk in 0..100 {
         for _ in 0..500 {
             let n = sent;
-            let data: HashMap<String, Value> = serde_json::from_str(
-                &format!(r#"{{"id": "dev_{}", "temp": {}}}"#, n, 25.0 + (n % 10) as f64),
-            )
+            let data: HashMap<String, Value> = serde_json::from_str(&format!(
+                r#"{{"id": "dev_{}", "temp": {}}}"#,
+                n,
+                25.0 + (n % 10) as f64
+            ))
             .unwrap();
-            let _ = tx.send(StreamRecord { timestamp: n as i64, data });
+            let _ = tx.send(StreamRecord {
+                timestamp: n as i64,
+                data,
+            });
             sent += 1;
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
