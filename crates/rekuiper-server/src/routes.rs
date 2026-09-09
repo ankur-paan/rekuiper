@@ -1298,12 +1298,13 @@ fn spawn_rule_task(
             confs,
             sink_tx,
         )),
-        Some(WindowDef::Count { size, .. }) => tokio::spawn(run_count_window_rule(
+        Some(WindowDef::Count { size, interval }) => tokio::spawn(run_count_window_rule(
             rule_mgr,
             rule_id.clone(),
             select_stmt,
             rx,
             size,
+            interval,
             sink_tx,
         )),
         Some(WindowDef::TumblingTime { unit, length }) => {
@@ -1862,9 +1863,13 @@ async fn run_count_window_rule(
     select_stmt: SelectStmt,
     mut rx: broadcast::Receiver<StreamRecord>,
     size: usize,
+    interval: Option<usize>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
 ) {
+    let count = size.max(1);
+    let hop = interval.unwrap_or(count).max(1);
     let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    let mut events_since_trigger: usize = 0;
     loop {
         match rx.recv().await {
             Ok(record) => {
@@ -1873,13 +1878,35 @@ async fn run_count_window_rule(
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
                 buffer.push(record.data);
-                if buffer.len() >= size.max(1) {
-                    if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
-                        let output_record = StreamRecord::new(output);
-                        enqueue_sink_record(&sink, output_record).await;
-                        rule_mgr.inc_sink_records(&rule_id, 1);
+                events_since_trigger += 1;
+                if hop <= count {
+                    // Standard count window (tumbling when hop == count, overlapping when hop < count)
+                    if buffer.len() >= count {
+                        let batch = &buffer[0..count];
+                        if let Some(output) = Evaluator::eval_aggregate(&select_stmt, batch) {
+                            let output_record = StreamRecord::new(output);
+                            enqueue_sink_record(&sink, output_record).await;
+                            rule_mgr.inc_sink_records(&rule_id, 1);
+                        }
+                        // Discard only the oldest `hop` records; retain the rest for overlapping windows
+                        buffer.drain(0..hop.min(buffer.len()));
                     }
-                    buffer.clear();
+                } else {
+                    // Sparsely sampled count window with gap (hop > count)
+                    if buffer.len() > count {
+                        buffer.remove(0);
+                    }
+                    if events_since_trigger >= hop {
+                        if !buffer.is_empty() {
+                            if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
+                                let output_record = StreamRecord::new(output);
+                                enqueue_sink_record(&sink, output_record).await;
+                                rule_mgr.inc_sink_records(&rule_id, 1);
+                            }
+                        }
+                        events_since_trigger = 0;
+                        buffer.clear();
+                    }
                 }
             }
             Err(broadcast::error::RecvError::Lagged(_)) => continue,

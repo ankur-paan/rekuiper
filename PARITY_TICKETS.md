@@ -15,10 +15,10 @@ No item may be marked complete without:
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
-| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 2 | 1 |
+| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **11** | **6** |
+| **Total** | | **17 Tasks** | **12** | **5** |
 
 ---
 
@@ -76,12 +76,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. `WindowDef::SlidingTime` gained `delay: Option<u64>` (parser accepts 2- or 3-arg form; explain renders both). New `run_sliding_window_rule` actor loop: event-driven (no clock ticks) — each arrival buffers with timestamp, optionally sleeps `delay`, then prunes to the trailing horizon `[eval_time - length, eval_time]` and aggregates. Covered by `test_sliding_window_event_triggered_execution` in `fvt_compat.rs` (300ms window proving per-event firing, overlap accumulation, and full expiration).
   - **Files**: `crates/rekuiper-sql/src/ast.rs`, `crates/rekuiper-sql/src/parser.rs`, `crates/rekuiper-sql/tests/sql_test.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 3.3: Count Window Hop Processing (`COUNTWINDOW(count, hop)`)**
-  - **Problem**: `run_count_window_rule` in `routes.rs` accepts only `size` and clears the entire buffer on each batch, ignoring the `hop` parameter.
-  - **Requirements**:
-    - If `hop` is specified, when buffer reaches `size`, emit aggregate and discard only the oldest `hop` records (retaining `size - hop` records for overlapping count windows).
-  - **Files**: `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test `COUNTWINDOW(4, 2)` producing overlapping 4-record aggregates every 2 records.
+- [x] **Ticket 3.3: Count Window Hop Processing (`COUNTWINDOW(count, hop)`)**
+  - **Status**: Completed & Verified. `spawn_rule_task` passes `interval` through and `run_count_window_rule` implements hop semantics: tumbling when `hop >= size` (drain-all, preserving prior behavior), overlapping `drain(0..hop)` otherwise, plus a sparse-sampling path for `hop > size`. Covered by `test_count_window_hopping_overlap` in `fvt_compat.rs` (`COUNTWINDOW(4, 2)` proving 30/40 retention across hops, then sliding to 50-80).
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 
