@@ -2759,3 +2759,103 @@ async fn test_hopping_window_overlapping_execution() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_sliding_window_event_triggered_execution() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM slide_stream () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // Subscribe before the rule exists so no window output is lost.
+    let mut sink_rx = state.stream_bus.subscribe("slide_sink_topic");
+
+    // Trailing 300ms horizon, fired per event (no delay).
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_slide_test",
+            "sql": "SELECT count(*) AS cnt, sum(val) AS total FROM slide_stream GROUP BY SLIDINGWINDOW(ms, 300)",
+            "actions": [{"memory": {"topic": "slide_sink_topic"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    async fn post_val(client: &reqwest::Client, base_url: &str, val: i64) {
+        let resp = client
+            .post(format!("{}/streams/slide_stream/data", base_url))
+            .json(&json!({"val": val}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    async fn recv_output(
+        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
+    ) -> serde_json::Value {
+        tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for window output")
+            .expect("slide_sink_topic closed")
+            .data
+            .into_iter()
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into()
+    }
+
+    // Each arrival immediately emits over its trailing horizon.
+    post_val(&client, &base_url, 10).await;
+    let hop1 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop1["cnt"], json!(1), "event 1 output: {}", hop1);
+    assert_eq!(hop1["total"], json!(10), "event 1 output: {}", hop1);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    post_val(&client, &base_url, 20).await;
+    let hop2 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop2["cnt"], json!(2), "event 2 output: {}", hop2);
+    assert_eq!(hop2["total"], json!(30), "event 2 output: {}", hop2);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    post_val(&client, &base_url, 30).await;
+    let hop3 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop3["cnt"], json!(3), "event 3 output: {}", hop3);
+    assert_eq!(hop3["total"], json!(60), "event 3 output: {}", hop3);
+
+    // After 350ms all three are past the horizon: a fresh event sees only itself.
+    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+    post_val(&client, &base_url, 40).await;
+    let hop4 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop4["cnt"], json!(1), "event 4 output: {}", hop4);
+    assert_eq!(hop4["total"], json!(40), "event 4 output: {}", hop4);
+
+    // Metrics: four source records, four window emissions.
+    let status: serde_json::Value = client
+        .get(format!("{}/rules/rule_slide_test/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["sourceRecordsInTotal"], json!(4));
+    assert_eq!(status["sinkRecordsOutTotal"], json!(4));
+
+    // Delete the rule cleanly.
+    let resp = client
+        .delete(format!("{}/rules/rule_slide_test", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}

@@ -96,6 +96,7 @@ pub enum WindowDef {
     SlidingTime {
         unit: TimeUnit,
         length: u64,
+        delay: Option<u64>,
     },
     Count {
         size: usize,

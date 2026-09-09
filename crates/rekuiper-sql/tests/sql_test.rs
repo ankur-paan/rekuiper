@@ -795,7 +795,8 @@ fn test_parse_window_syntax() {
         stmt.window,
         Some(WindowDef::SlidingTime {
             unit: TimeUnit::Mi,
-            length: 1
+            length: 1,
+            delay: None,
         })
     );
     assert_eq!(stmt.group_by.len(), 1);

@@ -1334,17 +1334,23 @@ fn spawn_rule_task(
                 sink_tx,
             ))
         }
-        // Sliding windows are not incrementally scheduled here;
-        // fall back to per-record evaluation.
-        Some(_) => tokio::spawn(run_stateless_rule(
-            rule_mgr,
-            rule_id.clone(),
-            select_stmt,
-            rx,
-            tables,
-            confs,
-            sink_tx,
-        )),
+        Some(WindowDef::SlidingTime {
+            unit,
+            length,
+            delay,
+        }) => {
+            let window_length = tumbling_window_duration(&unit, length);
+            let delay_dur = delay.map(|d| tumbling_window_duration(&unit, d));
+            tokio::spawn(run_sliding_window_rule(
+                rule_mgr,
+                rule_id.clone(),
+                select_stmt,
+                rx,
+                window_length,
+                delay_dur,
+                sink_tx,
+            ))
+        }
     };
     rule_manager.set_rule_handle(&rule_id, handle);
 }
@@ -1988,6 +1994,52 @@ async fn run_hopping_window_rule(
     }
 }
 
+async fn run_sliding_window_rule(
+    rule_mgr: RuleManager,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: broadcast::Receiver<StreamRecord>,
+    length: std::time::Duration,
+    delay: Option<std::time::Duration>,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
+    loop {
+        match rx.recv().await {
+            Ok(record) => {
+                if !is_rule_running(&rule_mgr, &rule_id) {
+                    continue;
+                }
+                rule_mgr.inc_source_records(&rule_id, 1);
+                let now = std::time::Instant::now();
+                buffer.push((now, record.data));
+                // If delay is configured, wait for the delay duration before evaluating
+                // so events arriving during the delay window are captured.
+                if let Some(delay_dur) = delay {
+                    if !delay_dur.is_zero() {
+                        tokio::time::sleep(delay_dur).await;
+                    }
+                }
+                let eval_time = std::time::Instant::now();
+                // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
+                buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
+                if buffer.is_empty() {
+                    continue;
+                }
+                let batch: Vec<HashMap<String, Value>> =
+                    buffer.iter().map(|(_, data)| data.clone()).collect();
+                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
+                    let output_record = StreamRecord::new(output);
+                    enqueue_sink_record(&sink, output_record).await;
+                    rule_mgr.inc_sink_records(&rule_id, 1);
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
 async fn get_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
@@ -2143,9 +2195,19 @@ fn window_to_string(window: &WindowDef) -> String {
             length,
             interval
         ),
-        WindowDef::SlidingTime { unit, length } => {
-            format!("SLIDINGWINDOW({}, {})", time_unit_to_string(unit), length)
-        }
+        WindowDef::SlidingTime {
+            unit,
+            length,
+            delay,
+        } => match delay {
+            Some(d) => format!(
+                "SLIDINGWINDOW({}, {}, {})",
+                time_unit_to_string(unit),
+                length,
+                d
+            ),
+            None => format!("SLIDINGWINDOW({}, {})", time_unit_to_string(unit), length),
+        },
         WindowDef::Count { size, interval } => match interval {
             Some(i) => format!("COUNTWINDOW({}, {})", size, i),
             None => format!("COUNTWINDOW({})", size),

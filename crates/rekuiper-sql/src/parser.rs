@@ -445,13 +445,22 @@ impl<'a> Parser<'a> {
             "slidingwindow" => {
                 if args.len() != 2 && args.len() != 3 {
                     bail!(
-                        "SLIDINGWINDOW expects 2 arguments (unit, length), got {}",
+                        "SLIDINGWINDOW expects 2 or 3 arguments (unit, length[, delay]), got {}",
                         args.len()
                     );
                 }
                 let unit = Self::parse_window_unit(&args[0])?;
                 let length = Self::parse_window_u64(&args[1])?;
-                Ok(Some(WindowDef::SlidingTime { unit, length }))
+                let delay = if args.len() == 3 {
+                    Some(Self::parse_window_u64(&args[2])?)
+                } else {
+                    None
+                };
+                Ok(Some(WindowDef::SlidingTime {
+                    unit,
+                    length,
+                    delay,
+                }))
             }
             "countwindow" => {
                 if args.len() != 1 && args.len() != 2 {

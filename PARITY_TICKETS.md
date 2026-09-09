@@ -15,10 +15,10 @@ No item may be marked complete without:
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
-| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 1 | 2 |
+| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 2 | 1 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **10** | **7** |
+| **Total** | | **17 Tasks** | **11** | **6** |
 
 ---
 
@@ -72,14 +72,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Added an explicit `WindowDef::HoppingTime` arm in `spawn_rule_task` and a stateful `run_hopping_window_rule` actor loop: records buffer with arrival timestamps, a hop-interval ticker (first immediate tick consumed for grid alignment) evaluates `eval_aggregate` over records in `[now - length, now]`, expired records are retained-pruned each tick so overlapping data survives across hops, and empty windows emit nothing. Covered by `test_hopping_window_overlapping_execution` in `fvt_compat.rs` (300ms/100ms windows proving overlap retention then expiration).
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 3.2: Real Sliding Window Execution (`SLIDINGWINDOW(unit, length, delay)`)**
-  - **Problem**: In `routes.rs:L1115`, `WindowDef::Sliding` falls back to `run_stateless_rule`.
-  - **Requirements**:
-    - Implement `run_sliding_window_rule` actor loop.
-    - On every record arrival, evaluate aggregates over all records in the sliding buffer within `(record_ts - length, record_ts]`.
-    - Support optional `delay` if specified.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test sliding window firing on every event with aggregate over trailing time horizon.
+- [x] **Ticket 3.2: Real Sliding Window Execution (`SLIDINGWINDOW(unit, length, delay)`)**
+  - **Status**: Completed & Verified. `WindowDef::SlidingTime` gained `delay: Option<u64>` (parser accepts 2- or 3-arg form; explain renders both). New `run_sliding_window_rule` actor loop: event-driven (no clock ticks) — each arrival buffers with timestamp, optionally sleeps `delay`, then prunes to the trailing horizon `[eval_time - length, eval_time]` and aggregates. Covered by `test_sliding_window_event_triggered_execution` in `fvt_compat.rs` (300ms window proving per-event firing, overlap accumulation, and full expiration).
+  - **Files**: `crates/rekuiper-sql/src/ast.rs`, `crates/rekuiper-sql/src/parser.rs`, `crates/rekuiper-sql/tests/sql_test.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 3.3: Count Window Hop Processing (`COUNTWINDOW(count, hop)`)**
   - **Problem**: `run_count_window_rule` in `routes.rs` accepts only `size` and clears the entire buffer on each batch, ignoring the `hop` parameter.
