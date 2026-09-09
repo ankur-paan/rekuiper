@@ -1,0 +1,21 @@
+coverage:
+  precision: 2
+  round: nearest
+  range: "60...70"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+
+fixes:
+  - "v2/::"
+  - "ekuiper/ekuiper/::ekuiper/"
+  - "/home/runner/work/ekuiper/ekuiper/::"
+
+ignore:
+  - "**/main.go"
+  - "**/**__.go"
+  - "**/test/**"
+  - "test"
+  - "fvt"

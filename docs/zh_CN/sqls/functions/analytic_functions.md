@@ -1,0 +1,526 @@
+# 分析函数
+
+分析函数会保持状态来做分析工作。在流式处理规则中，分析函数会首先被执行，这样它们就不会受到 WHERE 子句的影响而必不更新状态。
+
+分析函数完整使用格式如下，其中 over 子句为可选子句。
+
+```text
+AnalyticFuncName(<arguments>...) OVER ([PARTITION BY <partition key>] [WHEN <Expression> [UNTIL <Expression>]])
+```
+
+分析函数的计算是在当前查询输入的所有输入事件上进行的，可以选择限制分析函数只考虑符合 PARTITION BY 子句的事件。
+分析函数可以使用 PARTITION BY 子句，语法如下：
+
+```text
+AnalyticFuncName(<arguments>...) OVER ([PARTITION BY <partition key>])
+```
+
+分析函数可以使用 WHEN 条件判断子句，根据是否满足条件来确定当前事件是否为有效事件。
+当为有效事件时，根据分析函数语意计算结果并更新状态。当为无效事件时，忽略事件值，复用保存的状态值。
+
+```text
+AnalyticFuncName(<arguments>...) OVER ([WHEN <Expression>])
+```
+
+## LAG
+
+```text
+lag(expr, [offset], [default value], [ignore null])
+```
+
+返回指定偏移量处表达式的先前结果。
+
+**参数说明:**
+
+- `expr`: 要计算的表达式
+- `offset` (可选): 向历史回溯的有效值数量（默认: 1）。如果指定了 `WHEN`，所在行须满足该条件；如果 `ignore null` 为 true，值还须不为 null，才会计为有效值。
+- `default value` (可选): 当偏移量处没有值时返回的值 (默认: nil)
+- `ignore null` (可选): 回溯时是否忽略空值 (默认: true)
+
+**行为说明:**
+
+- 使用 `WHEN` 时，`lag(expr, 1)` 返回最近第 1 个有效值，`lag(expr, 2)` 返回最近第 2 个有效值；不满足 `WHEN` 的行不会消耗 offset。
+- 如果指定偏移量处没有有效值，则返回默认值
+- 如果未指定默认值，则返回 nil
+- 当偏移量和默认值都未指定时，默认使用 偏移量=1 和 默认值=nil
+
+示例1：获取之前温度值的函数
+
+```text
+lag(temperature)
+```
+
+示例2：获取相同设备之前温度值的函数
+
+```text
+lag(temperature) OVER (PARTITION BY deviceId)
+```
+
+示例3：ts为时间戳，获取设备状态 statusCode1 和 statusCode2 不相等持续时间
+
+```text
+select lag(Status) as Status, ts - lag(ts, 1, ts, true) OVER (WHEN had_changed(true, statusCode)) as duration from demo
+```
+
+## LEAD
+
+```text
+lead(expr, [offset], [default value], [ignore null])
+  OVER ([PARTITION BY <partition key>] [WHEN <Expression> [UNTIL <Expression>]])
+```
+
+返回后续输入行中 `expr` 的计算结果。`offset` 默认为 1，`default value` 默认为 nil，`ignore null` 默认为 true，与 `lag` 保持一致。offset 统计未来的有效值：如果指定了 `WHEN`，所在行须满足该条件；如果 `ignore null` 为 true，值还须不为 null，才会计为有效值。例如，`lead(expr, 2) OVER (WHEN condition)` 返回未来第 2 个有效值；不满足 `WHEN` 的行不会消耗 offset。因为结果依赖未来输入，当前行会被缓存，直到找到指定的未来值、`UNTIL` 为 true 或输入结束。
+
+`WHEN` 用于选择未来候选行。offset 是成功匹配条件，并不限制 LEAD 最多等待多久或检查多少输入行；`UNTIL` 提供独立的停止等待条件。`UNTIL` 是 eKuiper 扩展，只能与 `WHEN` 同时使用；系统会先于 `WHEN`，针对每条缓存行独立计算 `UNTIL`。在 `UNTIL` 中，普通字段引用新到达的探测行，`current_row(expr)` 则在被缓存的原始行上计算 `expr`。若 `UNTIL` 为 true，该请求返回默认值。`current_row` 只能在此上下文使用。
+
+```sql
+lead(candidate_t2) OVER (
+  WHEN isNull(b) = false
+  UNTIL ts - current_row(ts) > 5
+)
+```
+
+`UNTIL` 由数据驱动，仅在新输入到达时检查，不会创建处理时间定时器或事件时间水位线。需要定时触发的时间限制属于后续 `WITHIN` 的语义。
+
+对于事件时间规则，`LEAD` 会将下游水位线限制在缓存行之前，避免窗口在这些行到达前关闭。缓存行释放后，水位线可随后续输入继续推进。
+
+只有在检查 `UNTIL` 后仍有请求需要候选值时，才计算 `WHEN` 和候选表达式。如果探测行求值失败，该行的所有 `LEAD` 决策都不会提交，也不会将该行加入等待队列；后续有效输入仍可继续完成已有请求。
+
+### 最佳实践
+
+- 当未来匹配不一定出现时，建议显式添加 `UNTIL`，尤其是 `WHEN` 条件较难满足的场景。如果所有后续行都可作为候选，但仍需要终止条件，可以使用 `WHEN true`。
+- 根据预期输入速率配置终止条件，让待处理请求数保持较小。例如，数值字段 `ts` 的单位为毫秒时，`UNTIL ts - current_row(ts) > 1000` 会在探测行超过原始行一秒后终止等待。这是数据驱动的限制，并非定时器或缓存大小的硬上限。
+- 可按每个分区的“每秒输入行数 × 平均等待秒数”估算待处理请求数。输入速率很高时，即使等待时间很短也可能积压大量请求。优先使用简单的条件，并在预期峰值负载下验证。
+- `UNTIL` 只在同一分区有新输入时检查，空闲分区不会自行结束等待。输出保持全局输入顺序，因此较早的未完成行也可能阻塞其他分区已经完成的行。
+
+每条探测行都会检查其分区内尚未完成的请求。等待队列越长，CPU 和内存开销越大；添加 `UNTIL` 只有在实际缩短等待队列时才有帮助。checkpoint 快照开销也会随缓存状态增大。
+
+## LATEST
+
+```text
+latest(expr, [default value])
+```
+
+返回表达式最新的非空值。如果没有找到，则返回默认值。否则，返回 nil 。
+
+## CHANGED_COL
+
+```text
+changed_col(true, col)
+```
+
+返回列的相比上次执行后的变化值。若未变化则返回 null 。
+
+## HAD_CHANGED
+
+```text
+had_changed(true, expr1, expr2, ...)
+```
+
+返回是否上次运行后列的值有变化。 其参数可以为 * 以方便地监测所有列。
+
+## 监控变化的函数
+
+### Changed_col 函数
+
+该函数为普通的标量函数，因此可在任意的子句，包括 SELECT 和 WHERE 中使用。
+
+**语法**
+
+```CHANGED_COL(<ignoreNull>, <expr>)```
+
+**参数**
+
+**ignoreNull**:  判断变化时是否忽略 null 值。若为 true，则收到 null 值或未收到值不会触发变化。
+
+**expr**: 用来监控变化状态和输出变化值的表达式。
+
+**返回值**
+
+返回变化后的值或者 null （未变化）。与所有标量函数相同，该函数默认返回的列名未函数的名字 changed_col 。可使用 `as alias` 赋别名。
+
+### Changed_cols 函数
+
+该函数返回多个列的结果，因此只能在 SELECT 子句中使用。
+
+**语法**
+
+```CHANGED_COLS (<prefix>, <ignoreNull>, <expr> [,...,<exprN>])```
+
+**参数**
+
+**prefix**: 返回的列名的前缀。默认情况下，返回的变化列名与原列名相同，例如 `CHANGED_COLS("", true, col1)` 返回 `col1`
+。如果设置了前缀参数，则返回的列名将加上前缀以区别于普通的列，例如 `CHANGED_COLS("changed_", true, col1)`
+将返回 `changed_col1`。
+
+**ignoreNull**: 判断变化时是否忽略 null 值。若为 true，则收到 null 值或未收到值不会触发变化。
+
+**expr**: 用来监控变化状态和输出变化值的表达式。可以为任何可在 SELECT 子句中使用的表达式。若表达式为 `*` 则会返回所有列的变化。
+
+**返回值**
+
+返回所有与上一次运行的值有变化的表达式的新值。如果在普通规则中使用，则与上次事件触发时的值比较。如果在窗口规则中使用，则与上次窗口输出的值比较。
+
+首次运行时，返回所有表达式的值，因为没有前一次的运行，所有表达式都判定为有变化。
+
+在接下来的运行中，如果选择的所有表达式都没有值变化，则返回空值。
+
+**注意事项**
+
+多列函数仅可在 select 子句中使用。其选出的值不能用于 WHERE 或其他子句中。若需要根据变化值做过滤，则应使用 CHANGED_COL
+函数，或者将 CHANGED_COLS 的规则作为规则流水线的前置规则。
+
+函数返回的列命别名仅能通过 prefix 参数做全局的设置。若需要给每个列设置单独的别名，则需要使用 CHANGED_COL 函数。
+
+### Had_changed 函数
+
+该函数为向量函数，支持不定长度参数。
+
+```HAD_CHANGED (<ignoreNull>, <expr> [,...,<exprN>])```
+
+**参数**
+
+**ignoreNull**: 判断变化时是否忽略 null 值。若为 true，则收到 null 值或未收到值不会触发变化。
+
+**expr**: 用来监控变化状态和输出变化值的表达式。可以为任何可在 SELECT 子句中使用的表达式。若表达式为 `*` 则监测所有列的变化。
+
+**返回值**
+
+返回一个 bool 值，表示上次运行后的变化状态。多参数版本与用或连接使用单个参数的版本相同，即 HAD_CHANGED(expr1) OR
+HAD_CHANGED(expr2) ... OR HAD_CHANGED(exprN) 。若需要监测别的关系，可单独使用此函数。例如，监测是否所有值都有变化，可使用
+HAD_CHANGED(expr1) AND HAD_CHANGED(expr2) ... AND HAD_CHANGED(exprN) 。
+
+### 范例
+
+创建流 demo，并给与如下输入。
+
+```json lines
+{
+  "ts": 1,
+  "temperature": 23,
+  "humidity": 88
+}
+{
+  "ts": 2,
+  "temperature": 23,
+  "humidity": 88
+}
+{
+  "ts": 3,
+  "temperature": 23,
+  "humidity": 88
+}
+{
+  "ts": 4,
+  "temperature": 25,
+  "humidity": 88
+}
+{
+  "ts": 5,
+  "temperature": 25,
+  "humidity": 90
+}
+{
+  "ts": 6,
+  "temperature": 25,
+  "humidity": 91
+}
+{
+  "ts": 7,
+  "temperature": 25,
+  "humidity": 91
+}
+{
+  "ts": 8,
+  "temperature": 25,
+  "humidity": 91
+}
+```
+
+获取 temperature 变化值的规则:
+
+```text
+SQL: SELECT CHANGED_COLS("", true, temperature) FROM demo
+___________________________________________________
+{"temperature":23}
+{"temperature":25}
+```
+
+获取 temperature 或 humidity 的变化值并添加名称前缀的规则:
+
+```text
+SQL: SELECT CHANGED_COLS("c_", true, temperature, humidity) FROM demo
+_________________________________________________________
+{"c_temperature":23,"c_humidity":88}
+{"c_temperature":25}
+{"c_humidity":90}
+{"c_humidity":91}
+```
+
+获取所有列的变化值并且不忽略 null 值的规则:
+
+```text
+SQL: SELECT CHANGED_COLS("c_", false, *) FROM demo
+_________________________________________________________
+{"c_ts":1, "c_temperature":23, "c_humidity":88}
+{"c_ts":2}
+{"c_ts":3}
+{"c_ts":4, "c_temperature":25}
+{"c_ts":5, "c_humidity":90}
+{"c_ts":6, "c_humidity":91}
+{"c_ts":7}
+{"c_ts":8}
+```
+
+获取窗口中平均值变化的规则:
+
+```text
+SQL: SELECT CHANGED_COLS("t", true, avg(temperature)) FROM demo GROUP BY CountWindow(2)
+_________________________________________________________________
+{"tavg":23}
+{"tavg":24}
+{"tavg":25}
+```
+
+当 temperature 或者 humidity 变化时获取数据:
+
+```text
+SQL: SELECT ts, temperature, humidity FROM demo
+WHERE HAD_CHANGED(true, temperature, humidity) = true
+_________________________________________________________
+{"ts":1,temperature":23,"humidity":88}
+{"ts":4,temperature":25,"humidity":88}
+{"ts":5,temperature":25,"humidity":90}
+{"ts":6,temperature":25,"humidity":91}
+```
+
+当 temperature 变化且 humidity 未变化时获取数据:
+
+```text
+SQL: SELECT ts, temperature, humidity FROM demo
+WHERE HAD_CHANGED(true, temperature) = true AND HAD_CHANGED(true, humidity) = false
+_________________________________________________________
+{"ts":4,temperature":25,"humidity":88}
+```
+
+获取 temperature 和 humidity 的变化值并赋自定义名:
+
+```text
+SQL: SELECT CHANGED_COL(true, temperature) AS myTemp, CHANGED_COL(true, humidity) AS myHum FROM demo
+_________________________________________________________
+{"myTemp":23,"myHum":88}
+{"myTemp":25}
+{"myHum":90}
+{"myHum":91}
+```
+
+当 temperature 值变化后大于 24 时获取数据:
+
+```text
+SQL: SELECT ts, temperature, humidity FROM demo
+WHERE CHANGED_COL(true, temperature) > 24
+_________________________________________________________
+{"ts":4,temperature":25,"humidity":88}
+```
+
+## ACC 函数
+
+ACC 函数全称为 accumulate function，该函数将会根据所得的参数进行累计计算，累计范围为该规则的整个生命周期。
+
+对于接下来的 acc 函数，我们将用以下数据进行模拟输入输出:
+
+```text
+a
+```
+
+依次输入 3 条数据，分别为 1,2,3。
+
+### ACC_SUM
+
+```text
+acc_sum(expr)
+```
+
+acc_sum 函数对表达式结果进行累计加和，返回累计加和结果。
+
+示例1：使用 acc_sum 进行累计加和
+
+```text
+acc_sum(a)
+```
+
+结果为分别为: 1 3 6
+
+### ACC_MAX
+
+```text
+acc_max(expr)
+```
+
+acc_max 函数对表达式结果进行累计比较取较大值，返回累计比较取较大值的结果。
+
+示例1：使用 acc_max 进行累计比较取较大值
+
+```text
+acc_max(a)
+```
+
+结果为分别为: 1 2 3
+
+### ACC_MIN
+
+```text
+acc_min(expr)
+```
+
+acc_min 函数对表达式结果进行累计比较取较小值，返回累计比较取较小值的结果。
+
+示例1：使用 acc_min 进行累计比较取较小值
+
+```text
+acc_min(a)
+```
+
+结果为分别为: 1 1 1
+
+### ACC_COUNT
+
+```text
+acc_count(expr)
+```
+
+acc_count 函数对表达式结果进行累计个数统计，返回累计个数值。
+
+示例1：使用 acc_count 进行累计个数统计
+
+```text
+acc_count(a)
+```
+
+结果为分别为: 1 2 3
+
+### ACC_AVG
+
+```text
+acc_avg(expr)
+```
+
+acc_avg 函数对表达式结果进行累计平均值统计，返回累计平均值。
+
+示例1：使用 acc_count 进行累计平均值统计
+
+```text
+acc_avg(a)
+```
+
+结果为分别为: 1 1.5 2
+
+### ACC_COLLECT
+
+```text
+acc_collect(expr)
+```
+
+acc_collect 函数将非空的表达式结果收集到一个数组中，按插入顺序保留。
+
+示例1：使用 acc_collect 进行数据收集
+
+```text
+acc_collect(a)
+```
+
+结果为分别为: [1] [1,2] [1,2,3]
+
+### ACC_MAX_BY
+
+```text
+acc_max_by(value, compare_value)
+```
+
+`acc_max_by` 累计比较 `compare_value`，返回其最大值对应的 `value`。当 `compare_value` 相等时，使用最新一条数据对应的 `value`。当没有有效的 `compare_value` 时，返回 `nil`。
+
+示例：获取累计最高温度对应的采集时间。
+
+```text
+acc_max_by(ts, temp) over (partition by soc)
+```
+
+### ACC_MIN_BY
+
+```text
+acc_min_by(value, compare_value)
+```
+
+`acc_min_by` 累计比较 `compare_value`，返回其最小值对应的 `value`。当 `compare_value` 相等时，使用最新一条数据对应的 `value`。当没有有效的 `compare_value` 时，返回 `nil`。
+
+示例：获取累计最低温度对应的采集时间。
+
+```text
+acc_min_by(ts, temp) over (partition by soc)
+```
+
+### ACC_MAP_AGG
+
+```text
+acc_map_agg(key, value)
+```
+
+`acc_map_agg` 将输入累计组织为 key-value 数组。`key` 会转换为字符串；当 key 重复时，使用最新的 value 覆盖原 value，并保持 key 首次出现时的顺序。
+
+返回结果中的每一项均为包含 `key` 和 `value` 字段的对象。
+
+示例：
+
+```text
+acc_map_agg(soc, object_construct(
+    'max_temp', max_temp,
+    'max_temp_ts', max_temp_ts
+))
+```
+
+返回结果示例：
+
+```json
+[
+  {"key": "18", "value": {"max_temp": 30, "max_temp_ts": 1788000060000}},
+  {"key": "19", "value": {"max_temp": 31, "max_temp_ts": 1788000090000}}
+]
+```
+
+### 带有条件的 ACC 函数
+
+ACC 函数可以通过额外接受表达式参数的方式来定义累计计算的开始点和重置点，具体用法如下
+
+```text
+acc_count(a,expr1,expr2)
+```
+
+其中 expr1 代表了累计计算的开始点，expr2 代表了累计计算的重置点。
+
+示例：使用 acc_count 进行带有条件的累计个数统计
+
+```text
+acc_count(a, a > 1, a < 0)
+```
+
+此时分别来了以下数据:
+
+```text
+a = 1
+a = 2
+a = 1
+a = 3
+a = -1
+a = 1
+```
+
+结果如下:
+
+```text
+0
+1
+2
+3
+4
+0
+```

@@ -1,0 +1,50 @@
+{
+  "about": {
+    "trial": true,
+    "author": {
+      "name": "EMQ",
+      "email": "contact@emqx.io",
+      "company": "EMQ Technologies Co., Ltd",
+      "website": "https://www.emqx.io"
+    },
+    "helpUrl": {
+      "en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/memory.html",
+      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/memory.html"
+    },
+    "description": {
+      "en_US": "The source subscribes to topics to consume events from memory sink to form a rule pipeline.",
+      "zh_CN": "内存源可通过订阅主题来消费内存sink里的消息，从而实现规则流水线。"
+    }
+  },
+  "libs": [],
+  "dataSource": {
+    "default": "topic1",
+    "hint": {
+      "en_US": "The memory topic to subscribe to, e.g. topic1. It is similar to MQTT topic.",
+      "zh_CN": "将要订阅的内存主题， 例如 topic1。类似 MQTT 主题"
+    },
+    "label": {
+      "en_US": "Data Source (Topic)",
+      "zh_CN": "数据源（主题）"
+    }
+  },
+  "properties": {
+  },
+  "outputs": [
+    {
+      "label": {
+        "en_US": "Output",
+        "zh_CN": "输出"
+      },
+      "value": "signal"
+    }
+  ],
+  "node": {
+    "category": "source",
+    "icon": "iconPath",
+    "label": {
+      "en_US": "Memory",
+      "zh_CN": "Memory"
+    }
+  }
+}

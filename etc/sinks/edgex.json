@@ -1,0 +1,441 @@
+{
+  "about": {
+    "trial": false,
+    "author": {
+      "name": "EMQ",
+      "email": "contact@emqx.io",
+      "company": "EMQ Technologies Co., Ltd",
+      "website": "https://www.emqx.io"
+    },
+    "helpUrl": {
+      "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/builtin/edgex.html",
+      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sinks/builtin/edgex.html"
+    },
+    "description": {
+      "en_US": "The action is used for publishing output message into EdgeX message bus.",
+      "zh_CN": "该操作用于将输出消息发布到 EdgeX 消息总线"
+    }
+  },
+  "properties": [
+    {
+      "name": "connectionSelector",
+      "default": "",
+      "optional": true,
+      "control": "select",
+      "type": "string",
+      "values": [],
+      "hint": {
+        "en_US": "specify the source to reuse the connection defined in connection configuration.",
+        "zh_CN": "复用 connection 中定义的连接"
+      },
+      "label": {
+        "en_US": "Connection selector",
+        "zh_CN": "复用连接信息"
+      }
+    },
+    {
+      "name": "protocol",
+      "default": "redis",
+      "optional": true,
+      "control": "select",
+      "connection_related": true,
+      "values": [
+        "tcp",
+        "redis"
+      ],
+      "type": "string",
+      "hint": {
+        "en_US": "The protocol. If it's not specified, then use default value 'redis'.",
+        "zh_CN": "协议，如未指定，使用缺省值 redis。"
+      },
+      "label": {
+        "en_US": "Protocol",
+        "zh_CN": "协议"
+      }
+    },
+    {
+      "name": "server",
+      "optional": true,
+      "control": "text",
+      "default": "localhost",
+      "type": "string",
+      "connection_related": true,
+      "hint": {
+        "en_US": "The host of message bus. If not specified, then use default value 'localhost'",
+        "zh_CN": "消息总线主机地址，使用缺省值 localhost."
+      },
+      "label": {
+        "en_US": "Binding host",
+        "zh_CN": "绑定主机"
+      }
+    },
+    {
+      "name": "port",
+      "optional": true,
+      "control": "text",
+      "default": 6379,
+      "type": "int",
+      "connection_related": true,
+      "hint": {
+        "en_US": "The port of message bus",
+        "zh_CN": "消息总线端口号"
+      },
+      "label": {
+        "en_US": "Port",
+        "zh_CN": "端口"
+      }
+    },
+    {
+      "name": "topic",
+      "default": "application",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The topic to be published. If not specified, then use default value 'application'.",
+        "zh_CN": "发布的主题名称，如未指定，使用缺省值 application."
+      },
+      "label": {
+        "en_US": "Topic",
+        "zh_CN": "主题"
+      }
+    },
+    {
+      "name": "topicPrefix",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The prefix of a dynamic topic to be published. The topic will become a concatenation of `$topicPrefix/$profileName/$deviceName/$sourceName`",
+        "zh_CN": " 发布的主题的前缀。发送的主题将采用动态拼接，格式为`$topicPrefix/$profileName/$deviceName/$sourceName` 。"
+      },
+      "label": {
+        "en_US": "Topic Prefix",
+        "zh_CN": "主题前缀"
+      }
+    },
+    {
+      "name": "type",
+      "default": "redis",
+      "optional": true,
+      "control": "select",
+      "connection_related": true,
+      "values": [
+        "mqtt",
+        "zero",
+        "redis",
+        "nats-jetstream",
+        "nats-core"
+      ],
+      "type": "string",
+      "hint": {
+        "en_US": "The message bus type, two types of message buses are supported,'redis', 'zero' or 'mqtt', and 'redis' is the default value.",
+        "zh_CN": "消息总线类型，目前支持两种类型的消息总线，'redis', 'zero' 或者 'mqtt'，其中 'redis' 为缺省类型。"
+      },
+      "label": {
+        "en_US": "Message bus type",
+        "zh_CN": "消息总线类型"
+      }
+    },
+    {
+      "name": "messageType",
+      "default": "event",
+      "optional": true,
+      "control": "select",
+      "values": [
+        "event",
+        "request"
+      ],
+      "type": "string",
+      "hint": {
+        "en_US": "The EdgeX message model type. To publish the message as an event like EdgeX application service, use `event`. Otherwise, to publish the message as an event request like EdgeX device service or core data service, use `request`. If not specified, then use the default value `event`.",
+        "zh_CN": "EdgeX 消息模型类型。若要将消息发送为类似 apllication service 的 event 类型，则应设置为 `event`。否则，若要将消息发送为类似 device service 或者 core data service 的 event request 类型，则应设置为 `request`。如未指定，使用缺省值 `event` 。"
+      },
+      "label": {
+        "en_US": "Message type",
+        "zh_CN": "消息类型"
+      }
+    },
+    {
+      "name": "contentType",
+      "default": "application/json",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The content type of message to be published. If not specified, then use the default value 'application/json'.",
+        "zh_CN": "发布消息的内容类型，如未指定，则使用缺省值 application/json."
+      },
+      "label": {
+        "en_US": "Content type",
+        "zh_CN": "内容类型"
+      }
+    },
+    {
+      "name": "metadata",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The property is a field name that allows user to specify a field name of SQL  select clause,  the field name should use meta(*) AS xxx  to select all of EdgeX metadata from message.",
+        "zh_CN": "该属性为一个字段名称，该字段是 SQL SELECT 子句的一个字段名称，这个字段应该类似于 meta(*) AS xxx ，用于选出消息中所有的 EdgeX 元数据."
+      },
+      "label": {
+        "en_US": "Metadata field name",
+        "zh_CN": "元数据字段名"
+      }
+    },
+    {
+      "name": "deviceName",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "Allows user to specify the device name in the event structure that are sent from eKuiper.",
+        "zh_CN": "允许用户指定设备名称，该名称将作为从 eKuiper 中发送出来的 Event 结构体的设备名称"
+      },
+      "label": {
+        "en_US": "Device name",
+        "zh_CN": "设备名称"
+      }
+    },
+    {
+      "name": "profileName",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "Allows user to specify the profile name in the event structure that are sent from eKuiper. The profileName in the meta take precedence if specified.",
+        "zh_CN": "允许用户指定设备名称，该名称将作为从 eKuiper 中发送出来的 Event 结构体的 profile 名称。若在 metadata 中设置了 profileName 将会优先采用。"
+      },
+      "label": {
+        "en_US": "Profile name",
+        "zh_CN": "Profile 名称"
+      }
+    },
+    {
+      "name": "sourceName",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "Allows user to specify the source name in the event structure that are sent from eKuiper. The sourceName in the meta take precedence if specified.",
+        "zh_CN": "允许用户指定源名称，该名称将作为从 eKuiper 中发送出来的 Event 结构体的源名称。若在 metadata 中设置了 sourceName 将会优先采用。"
+      },
+      "label": {
+        "en_US": "Source name",
+        "zh_CN": "源名称"
+      }
+    },
+    {
+      "name": "optional",
+      "optional": true,
+      "control": "list",
+      "type": "object",
+      "connection_related": true,
+      "hint": {
+        "en_US": "If MQTT message bus is used, some other optional configurations can be specified. Please notice that all of values in optional are string type, so values for these configurations should be string - such as KeepAlive: \"5000\".",
+        "zh_CN": "如果使用了 MQTT 消息总线，还可以指定别的一些可选配置项。请注意，所有在可选的配置项里指定的值都必须为**字符类型**，因此这里出现的所有的配置应该是字符类型的 - 例如 KeepAlive: \"5000\"。"
+      },
+      "label": {
+        "en_US": "Optional",
+        "zh_CN": "选项"
+      },
+      "default": {
+        "ClientId": {
+          "name": "ClientId",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT clientID",
+            "zh_CN": "MQTT 客户端 ID"
+          },
+          "label": {
+            "en_US": "MQTT clientID",
+            "zh_CN": "MQTT 客户端 ID"
+          }
+        },
+        "Username": {
+          "name": "Username",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT username",
+            "zh_CN": "MQTT 用户名"
+          },
+          "label": {
+            "en_US": "MQTT username",
+            "zh_CN": "MQTT 用户名"
+          }
+        },
+        "Password": {
+          "name": "Password",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT password",
+            "zh_CN": "MQTT 密码"
+          },
+          "label": {
+            "en_US": "MQTT password",
+            "zh_CN": "MQTT 密码"
+          }
+        },
+        "Qos": {
+          "name": "Qos",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT QoS",
+            "zh_CN": "MQTT 服务质量"
+          },
+          "label": {
+            "en_US": "MQTT QoS",
+            "zh_CN": "MQTT 服务质量"
+          }
+        },
+        "KeepAlive": {
+          "name": "KeepAlive",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT keepalive",
+            "zh_CN": "MQTT keepalive"
+          },
+          "label": {
+            "en_US": "MQTT keepalive",
+            "zh_CN": "MQTT keepalive"
+          }
+        },
+        "Retained": {
+          "name": "Retained",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT retained",
+            "zh_CN": "MQTT retained"
+          },
+          "label": {
+            "en_US": "MQTT retained",
+            "zh_CN": "MQTT retained"
+          }
+        },
+        "ConnectionPayload": {
+          "name": "ConnectionPayload",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT connection payload",
+            "zh_CN": "MQTT connection payload"
+          },
+          "label": {
+            "en_US": "MQTT connection payload",
+            "zh_CN": "MQTT connection payload"
+          }
+        },
+        "CertFile": {
+          "name": "CertFile",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT cert file",
+            "zh_CN": "MQTT cert file"
+          },
+          "label": {
+            "en_US": "MQTT cert file",
+            "zh_CN": "MQTT cert file"
+          }
+        },
+        "KeyFile": {
+          "name": "KeyFile",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT key file",
+            "zh_CN": "MQTT key file"
+          },
+          "label": {
+            "en_US": "MQTT key file",
+            "zh_CN": "MQTT key file"
+          }
+        },
+        "CertPEMBlock": {
+          "name": "CertPEMBlock",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT cert PEM block",
+            "zh_CN": "MQTT cert PEM block"
+          },
+          "label": {
+            "en_US": "MQTT cert PEM block",
+            "zh_CN": "MQTT cert PEM block"
+          }
+        },
+        "KeyPEMBlock": {
+          "name": "KeyPEMBlock",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT key PEM block",
+            "zh_CN": "MQTT key PEM block"
+          },
+          "label": {
+            "en_US": "MQTT key PEM block",
+            "zh_CN": "MQTT key PEM block"
+          }
+        },
+        "SkipCertVerify": {
+          "name": "SkipCertVerify",
+          "default": "",
+          "optional": true,
+          "control": "text",
+          "type": "string",
+          "hint": {
+            "en_US": "MQTT skip cert verify",
+            "zh_CN": "MQTT skip cert verify"
+          },
+          "label": {
+            "en_US": "MQTT skip cert verify",
+            "zh_CN": "MQTT skip cert verify"
+          }
+        }
+      }
+    }
+  ],
+  "node": {
+    "category": "sink",
+    "icon": "iconPath",
+    "label": {
+      "en": "EdgeX Foundry",
+      "zh": "EdgeX Foundry"
+    }
+  }
+}

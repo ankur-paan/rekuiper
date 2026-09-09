@@ -1,0 +1,75 @@
+name: Release Builds & Assets
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Release Binaries
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Release Assets
+        shell: bash
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          PKG_NAME="rekuiper-${TAG_NAME}-${{ matrix.target }}"
+          mkdir -p "dist/${PKG_NAME}/bin" "dist/${PKG_NAME}/etc"
+
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp "target/${{ matrix.target }}/release/kuiperd.exe" "dist/${PKG_NAME}/bin/"
+            cp "target/${{ matrix.target }}/release/kuiper.exe" "dist/${PKG_NAME}/bin/"
+            cp -r etc/* "dist/${PKG_NAME}/etc/"
+            cp LICENSE README.md RELEASE_NOTES.md "dist/${PKG_NAME}/"
+            cd dist
+            7z a "${PKG_NAME}.zip" "${PKG_NAME}"
+            certutil -hashfile "${PKG_NAME}.zip" SHA256 | findstr -v "hash" | findstr -v "CertUtil" | tr -d " \r\n" > "${PKG_NAME}.zip.sha256"
+          else
+            cp "target/${{ matrix.target }}/release/kuiperd" "dist/${PKG_NAME}/bin/"
+            cp "target/${{ matrix.target }}/release/kuiper" "dist/${PKG_NAME}/bin/"
+            cp -r etc/* "dist/${PKG_NAME}/etc/"
+            cp LICENSE README.md RELEASE_NOTES.md "dist/${PKG_NAME}/"
+            cd dist
+            tar -czvf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
+            shasum -a 256 "${PKG_NAME}.tar.gz" | cut -d ' ' -f 1 > "${PKG_NAME}.tar.gz.sha256"
+          fi
+
+      - name: Upload Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256

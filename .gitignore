@@ -1,0 +1,58 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+/target/
+/bin/*
+!/bin/README.md
+
+# Test binary, build with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
+.glide/
+data/*
+log/*
+plugins/sources/*
+plugins/sinks/*
+plugins/functions/*
+tools/failpoint/bin
+
+.git/
+.idea/
+.DS_Store
+_book
+node_modules/
+
+_build
+_packages
+_plugins
+jmeter_logs
+kuiper_conf_util
+corss_build.tar
+corss_build_for_rpm.tar
+
+*.swp
+*.history
+
+*/**/*.db
+
+.vscode/
+tools/lint/bin/
+go.work.sum
+pycache
+fix_cve.md
+ekuiper240b5.csv
+tmp
+
+# Management keys (never commit private keys)
+etc/mgmt/*
+!etc/mgmt/README.md
+
+# Scratch directory
+scratch/
+

@@ -1,0 +1,20 @@
+[package]
+name = "rekuiper-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Streaming SQL parser, planner, and evaluator with windowing functions for rekuiper"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+parking_lot = { workspace = true }
+rekuiper-core = { workspace = true }

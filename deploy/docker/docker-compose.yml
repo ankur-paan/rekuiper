@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  rekuiper:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: idacslabs/rekuiper:0.420-beta
+    container_name: rekuiper
+    ports:
+      - "9081:9081"   # REST API & OpenAPI docs
+      - "20499:20499" # Prometheus metrics
+    volumes:
+      - rekuiper-data:/kuiper/data
+      - rekuiper-etc:/kuiper/etc
+    depends_on:
+      - mqtt-broker
+    environment:
+      - KUIPER__BASIC__CONSOLELOG=true
+      - KUIPER__BASIC__PROMETHEUS=true
+      - KUIPER__BASIC__PROMETHEUSPORT=20499
+      - RUST_LOG=info
+    restart: unless-stopped
+
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: rekuiper-mosquitto
+    ports:
+      - "1883:1883"
+    environment:
+      - MOSQUITTO_USER=test
+    command: sh -c "echo 'listener 1883 0.0.0.0' > /mosquitto.conf && echo 'allow_anonymous true' >> /mosquitto.conf && /usr/sbin/mosquitto -c /mosquitto.conf"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: rekuiper-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  rekuiper-data:
+  rekuiper-etc:

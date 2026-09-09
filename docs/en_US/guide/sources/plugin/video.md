@@ -1,0 +1,85 @@
+# Video Source
+
+<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
+<span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
+
+The source will query video streams such as RTSP encoded stream by `ffmpeg` command to get images.
+
+## Compile & deploy plugin
+
+```shell
+# cd $eKuiper_src
+# go build -trimpath --buildmode=plugin -o plugins/sources/Video.so extensions/sources/video/video.go
+# cp plugins/sources/Video.so $eKuiper_install/plugins/sources
+# cp plugins/sources/video.json $eKuiper_install/etc/sources
+# cp plugins/sources/video.yaml $eKuiper_install/etc/sources
+```
+
+Restart the eKuiper server to activate the plugin.
+
+## Configuration
+
+The configuration for this source is `$ekuiper/etc/sources/video.yaml`. The format is as below:
+
+```yaml
+default:
+  url: http://localhost:8080
+  interval: 1000
+
+ext:
+  interval: 10000
+
+dedup:
+  interval: 100
+
+```
+
+### Global configurations
+
+Use can specify the global video source settings here. The configuration items specified in `default` section will be taken as default settings for the source when running this source.
+
+> [!NOTE]
+> Breaking change: since 2.4.0, the `vformat` configuration is removed. The source will now automatically use `image2pipe` format to support streaming. Any existing `vformat` configuration will be ignored.
+
+### url
+
+The url address for the video streaming.
+
+### interval
+
+The interval (ms) to issue a message.
+
+### codec
+
+The video codec. Check https://www.ffmpeg.org/general.html#Video-Codecs for all supported codec, default to 'mjpeg'
+
+### debugResp
+
+Whether to output the ffmpeg response to the log for debugging. Default to `false`.
+
+### inputArgs
+
+A map of input arguments to pass to ffmpeg input. This allows customizing ffmpeg input options like `-rtsp_transport`,
+`-fflags`, etc. For example:
+
+```yaml
+default:
+  url: rtsp://localhost:8554/stream
+  inputArgs:
+    rtsp_transport: tcp
+    fflags: nobuffer
+```
+
+## Override the default settings
+
+If you have a specific connection that need to overwrite the default settings, you can create a customized section. In the previous sample, we create a specific setting named with `ext`.  Then you can specify the configuration with option `CONF_KEY` when creating the stream definition (see [stream specs](../../../sqls/streams.md) for more info).
+
+## Sample usage
+
+```text
+demo (
+    ...
+  ) WITH (FORMAT="JSON", CONF_KEY="ext", TYPE="video");
+```
+
+The configuration keys "ext" will be used.

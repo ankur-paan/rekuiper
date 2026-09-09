@@ -1,0 +1,4 @@
+#Global httppush configurations
+default:
+  # the http method to use
+  method: "POST"

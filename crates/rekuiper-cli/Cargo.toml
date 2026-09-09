@@ -1,0 +1,24 @@
+[package]
+name = "rekuiper-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line interface (kuiper) for the rekuiper stream processing engine"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "kuiper"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

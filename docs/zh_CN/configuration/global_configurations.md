@@ -1,0 +1,372 @@
+# 基本配置
+
+eKuiper 的配置文件位于 `$eKuiper/etc/kuiper.yaml` 中。 配置文件为 yaml 格式。应用程序可以通过环境变量进行配置。环境变量优先于 yaml 文件中的对应项。为了对给定的配置使用 env 变量，我们必须使用如下格式： `KUIPER__` 前缀 + 由 `__` 连接的路径元素。例如，在配置的情况下：
+
+```yaml
+basic:
+  # debug | info | warn | error | fatal | panic
+  loglevel: info 
+  # true|false, with debug level, it prints more debug info
+  debug: false
+  # true|false, if it's set to true, then the log will be print to console
+  consoleLog: false
+  # true|false, if it's set to true, then the log will be print to log file
+  fileLog: true
+  # syslog settings
+  syslog:
+    # true|false, if it's set to true, then the log will be print to syslog
+    enable: false
+    # The syslog protocol, tcp or udp; Leave empty if no remote syslog server is used
+    network: udp
+    # The syslog server address; Leave empty if no remote syslog server is used
+    address: localhost:514
+    # The syslog level, supports debug, info, warn, error
+    level: info
+    # The syslog tag; Leave empty if no tag is used
+    tag: kuiper
+  # Maximum file size in bytes, if this is set, maxAge will be ignored
+  rotateSize: 10485760 # 10 MB
+  # Maximum log file count
+  rotateCount: 3
+  # How many hours to split the file
+  rotateTime: 24
+  # Maximum file storage hours
+  maxAge: 72
+  # Whether to ignore case in SQL processing. Note that, the name of customized function by plugins are case-sensitive.
+  ignoreCase: true
+  sql:
+    # maxConnections indicates the max connections for the certain database instance group by driver and dsn sharing between the sources/sinks
+    # 0 indicates unlimited
+    maxConnections: 0
+  # rulePatrolInterval indicates the patrol interval for the internal checker to reconcile the scheudle rule
+  rulePatrolInterval: 10s
+  # cfgStorageType indicates the storage type to store the config, support `file` and `kv`. When `cfgStorageType` is file, it will save configuration into File. When `cfgStorageType` is `kv`, it will save configuration into the storage defined in `store`
+  cfgStorageType: file
+  # If it is enabled, each REST API call will print logs
+  enableRestAuditLog: false
+  # If it is enabled, the rule functions can access the private network.
+  enablePrivateNet: false
+  # If it is enabled, APIs can access files outside the data/uploads directory.
+  allowExternalFileAccess: false
+```
+
+配置项 **enablePrivateNet** 用于指定规则函数（例如 valid func、sinks）是否可以访问私有网络（例如 localhost、127.0.0.1）。如果为
+true，则可以访问私有网络。出于安全考虑，默认为 false。
+
+> [!WARNING]
+> 自版本 v2.4.0 起，`enablePrivateNet` 的默认值为 `false`，这意味着默认情况下会阻止访问私有网络地址。如果您的规则依赖于访问本地资源（例如本地
+> REST 服务、本地文件），您必须将此配置设置为 `true`。
+
+配置项 **allowExternalFileAccess** 用于指定文件访问 API（例如插件/模式中的 file:// URL）是否可以访问 `data/uploads` 目录之外的文件。为了安全，默认值为 false - 只有上传目录中的文件可以被访问。这可以防止路径遍历攻击。
+
+> [!WARNING]
+> 当 `allowExternalFileAccess` 为 `false`（默认值）时，所有 file:// URL 访问都限制在 `data/uploads` 目录内。仅当您需要从文件系统的其他位置访问文件时才设置为 `true`。
+
+将basic项目下debug的值设置为true是有效的 `KUIPER__BASIC__DEBUG=true`。
+
+配置项 **ignoreCase** 用于指定 SQL 处理中是否大小写无关。若为 true，则输入数据的列名大小写可以与 SQL 中的定义不同。如果 SQL 语句中，流定义以及输入数据中可以保证列名大小写完全一致，则建议设置该值为 false 以获得更优的性能。在 1.10 版本之前，其默认值为 true ， 以兼容标准 SQL ；在 1.10 及之后版本中，默认值改为 false ，以获得更优的性能。
+
+## 日志级别
+
+```yaml
+basic:
+  # debug | info | warn | error | fatal | panic
+  loglevel: info 
+  # true|false, with debug level, it prints more debug info
+  debug: false
+  # true|false, if it's set to true, then the log will be print to console
+  consoleLog: false
+  # true|false, if it's set to true, then the log will be print to log file
+  fileLog: true
+  # Whether to disable the log timestamp, useful when output is redirected to logging system like syslog that already adds timestamps.
+  logDisableTimestamp: false
+  # How many hours to split the file
+  rotateTime: 24
+  # Maximum file storage hours
+  maxAge: 168
+  # Whether to ignore case in SQL processing. Note that, the name of customized function by plugins are case-sensitive.
+  ignoreCase: false
+```
+
+当 debug 为 false 时，eKuiper 的日志级别可以通过 logLevel 控制，当 debug 为 true 时，eKuiper 的日志级别将固定为 debug。
+
+## 系统日志
+
+用户将名为 KuiperSyslogKey 的环境变量的值设置为 true 或者 syslog enable 配置为 true 时，日志将打印到系统日志中。更多
+syslog 配置选项如下所示：
+
+```yaml
+# syslog settings
+syslog:
+  # true|false, if it's set to true, then the log will be print to syslog
+  enable: false
+  # The syslog protocol, tcp or udp; Leave empty if no remote syslog server is used
+  network: udp
+  # The syslog server address; Leave empty if no remote syslog server is used
+  address: localhost:514
+  # The syslog level, supports debug, info, warn, error
+  level: info
+  # The syslog tag; Leave empty if no tag is used
+  tag: kuiper
+```
+
+以上选项均为可选。若未设置网络和地址，则使用本地 syslog。若未设置级别，则默认值为 info。若未设置标签，则不使用标签。
+
+syslog 已经有自己的时间戳，可以通过将 `logDisableTimestamp` 设置为 true 来禁用日志消息中的时间戳。
+
+## 日志文件轮转
+
+如果 `fileLog` 设置为 `true`，日志将打印到日志文件中。日志文件轮转支持按大小或时间进行。
+
+### 按大小轮转
+
+以下设置用于控制按大小进行日志文件轮转：
+
+```yaml
+  # 最大文件大小（以字节为单位），如果设置了此项，将忽略 maxAge
+  rotateSize: 10485760 # 10 MB
+  # 最大日志文件数量
+  rotateCount: 3
+```
+
+如果 `rotateSize` 设置为正值，当日志文件的大小超过 `rotateSize` 时，将轮转日志文件。`rotateCount`
+用于控制保留的最大日志文件数量。如果 `rotateCount` 设置为 0，将禁用按大小轮转日志文件。
+
+### 按时间轮转
+
+这些设置用于控制按时间进行日志文件轮转：
+
+```yaml
+  # 分割文件的小时数
+  rotateTime: 24
+  # 最大文件存储小时数
+  maxAge: 72
+```
+
+如果 `rotateTime` 设置为正值，日志文件将每隔 `rotateTime` 小时进行轮转。`maxAge`
+用于控制保留日志文件的最大小时数。如果 `maxAge` 设置为 0，将禁用按时间轮转日志文件。
+
+## 时区配置
+
+```yaml
+# The global time zone from the IANA time zone database, or UTC if not set.
+timezone: UTC
+```
+
+基于 [IANA 时区数据库](https://www.iana.org/time-zones)的全局时区配置，如果留空则使用 `UTC` 作为默认时区，设置为 `Local` 时则使用系统时区。
+
+> 注意：在基于 alpine 的环境里使用时区配置，需要确保已经正确安装（`apk add tzdata`）了时区数据。
+
+## Cli 地址
+
+```yaml
+basic:
+  # CLI 绑定 IP
+  ip: 0.0.0.0
+  # CLI port
+  port: 20498
+```
+
+## REST 服务配置
+
+```yaml
+basic:
+  # REST service 绑定 IP
+  restIp: 0.0.0.0
+  # REST service port
+  restPort: 9081
+  restTls:
+    certfile: /var/https-server.crt
+    keyfile: /var/https-server.key
+```
+
+### restPort
+
+REST http 服务器监听端口
+
+### restTls
+
+TLS 证书 cert 文件和 key 文件位置。如果 restTls 选项未配置，则 REST 服务器将启动为 http 服务器，否则启动为 https 服务器。
+
+## authentication
+
+当 `authentication` 选项为 true 时，eKuiper 将为 rest api 请求检查 `Token` 。请检查此文件以获取 [更多信息](../api/restapi/authentication.md)。
+
+```yaml
+basic:
+  authentication: false
+```
+
+## 巡检规则配置
+
+```yaml
+basic:
+  rulePatrolInterval: "10s"
+```
+
+## Prometheus 配置
+
+如果 `prometheus` 参数设置为 true，eKuiper 将把运行指标暴露到 prometheus。Prometheus 将运行在 `prometheusPort` 参数指定的端口上。
+
+```yaml
+basic:
+  prometheus: true
+  prometheusPort: 20499
+```
+
+在如上默认配置中，eKuiper 暴露于 Prometheus 运行指标可通过 `http://localhost:20499/metrics` 访问。
+
+Prometheus 端口可设置为与 eKuiper 的 REST 服务端口相同。这样设置的话，两个服务将运行在同一个 HTTP 服务中。
+
+## Pluginhosts 配置
+
+默认在 `packages.emqx.net` 托管所有预构建 [native 插件](../extension/native/overview.md)。
+
+所有插件列表如下：
+
+| 插件类型     | 预构建插件列表                                                        |
+|----------|----------------------------------------------------------------|
+| source   | random zmq                                                     |
+| sink     | file image influx redis tdengine zmq                           |
+| function | accumulateWordCount countPlusOne echo geohash image labelImage |
+
+用户可以通过以下 Rest-API 获取所有预构建插件的名称和地址：
+
+```shell
+GET http://localhost:9081/plugins/sources/prebuild
+GET http://localhost:9081/plugins/sinks/prebuild
+GET http://localhost:9081/plugins/functions/prebuild
+```
+
+获取插件信息后，用户可以尝试这些插件，[更多信息](../api/restapi/plugins.md)
+
+**注意：只有官方发布的基于 debian 的 docker 镜像支持以上操作。**
+
+## 规则配置
+
+配置规则选项的默认属性。所有的配置都可以在规则层面上被覆盖。查看[规则选项](../guide/rules/overview.md#选项)了解详情。
+
+## Sink 配置
+
+配置 sink 的默认属性，目前主要用于配置[缓存策略](../guide/sinks/overview.md#缓存)。在规则层有同样的配置选项，可以覆盖这些默认配置。
+
+```yaml
+  # 是否开启缓存
+  enableCache: false
+
+  # 内存缓存的最大存储条数
+  memoryCacheThreshold: 1024
+
+  # 磁盘缓存的最大存储条数
+  maxDiskCache: 1024000
+
+  # 读写磁盘的缓存页条数，作为磁盘读写的基本单位
+  bufferPageSize: 256
+
+  # 重发的间隔时间，单位为毫秒
+  resendInterval: 0
+
+  # 规则停止后是否清除缓存
+  cleanCacheAtStop: false
+```
+
+## 存储配置
+
+可通过配置修改创建的流和规则等状态的存储方式。默认情况下，程序状态存储在 sqlite 数据库中。把存储类型改成 redis，可使用 redis 作为存储方式。
+
+### 配置存储
+
+```yaml
+basic:
+  cfgStorageType: kv
+```
+
+当 basic.cfgStorageType 为 kv 时，他所用的底层存储将会变为 store.type，而 configurations 的文件内容将会以键值对的形式存储在所指定的存储中。
+
+### Sqlite
+
+可配置如下属性：
+
+* name - 数据库文件名。若为空，则设置为默认名字 `sqliteKV.db`。
+
+### Redis
+
+可配置如下属性：
+
+* host     - redis 服务器地址。
+* port     - redis 服务器端口。
+* password - redis 服务器密码。若 redis 未配置认证系统，则可不设置密码。
+* timeout  - 连接超时时间。
+* connectionSelector - 重用 etc/connections/connection.yaml 中定义的连接信息, 主要用在 edgex redis 配置了认证系统时
+  * 只适用于 edgex redis 的连接信息
+  * 连接信息中的 server，port 和 password 会覆盖以上定义的 host，port 和 password
+  * [具体信息可参考](../guide/sources/builtin/edgex.md#连接重用)
+
+### 外部状态
+
+还有一个名为 `extStateType` 的配置项。 这个配置的用途是用户可以预先在数据库中存储一些信息，当流处理规则需要这些信息时，他们可以通过
+SQL 中的 [get_keyed_state](../sqls/functions/other_functions.md#getkeyedstate) 函数轻松获取它们。
+*注意*：`type` 和 `extStateType` 可以使用不同的存储配置。
+
+### 配置示例
+
+```yaml
+    store:
+      #Type of store that will be used for keeping state of the application
+      type: sqlite
+      extStateType: redis
+      redis:
+        host: localhost
+        port: 6379
+        password: kuiper
+        #Timeout in ms
+        timeout: 1000
+      sqlite:
+        #Sqlite file name, if left empty name of db will be sqliteKV.db
+        name:
+```
+
+## Portable 插件配置
+
+配置 portable 插件的运行时属性。
+
+```yaml
+  portable:
+      # 配置 python 可执行文件的位置或命令。
+      # 若系统中有多个 python 版本，可通过此配置指定具体的 python 地址。
+      pythonBin: python
+      # 控制插件初始化超时时间，单位为毫秒。eKuiper portable 插件运行时会等待插件初始化以完成握手，若超时则终止插件进程
+      initTimeout: 5000
+      # 控制插件发送消息的超时时间，单位为毫秒
+      sendTimeout: 5000
+      # 控制插件接收消息的超时时间，单位为毫秒
+      recvTimeout: 5000
+```
+
+## 初始化规则集
+
+支持基于文件的流和规则的启动时配置。用户可以将名为 `init.json` 的[规则集](../api/restapi/ruleset.md#规则集格式)文件放入
+`etc` 目录，以初始化规则集。该规则集只在eKuiper 第一次启动时被导入。
+
+## 配置 FoundationDB 作为存储
+
+eKuiper 默认使用 sqlite 来存储一些元信息，同时 eKuiper 也支持使用 FoundationDB 来作为元存储数据，我们可以通过以下步骤实现:
+
+* 确认 eKuiper 所在环境已经安装并启动 FoundationDB，并确认 FoundationDB 所使用的存储 Path. 可参考[官方文档](https://apple.github.io/foundationdb/administration.html#default-cluster-file)
+* 确认 eKuiper 宿主机所使用的 fdb c 语言库的 APIVersion 版本，并将 eKuiper 依赖库替换为相应版本，以 APIVersion 6.2.0 为例，在 eKuiper 主目录执行以下命令:
+
+```shell
+go get github.com/apple/foundationdb/bindings/go@6.2.0
+```
+
+* 执行 `make build_with_fdb` 编译 kuiperd
+* 在配置中按照如下修改:
+
+```yaml
+    store:
+      #Type of store that will be used for keeping state of the application
+      type: fdb
+      extStateType: fdb
+      fdb:
+        path: <path-of-fdb-cluster-file>
+```

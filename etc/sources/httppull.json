@@ -1,0 +1,426 @@
+{
+	"libs": [],
+	"about": {
+		"trial": false,
+		"author": {
+			"name": "EMQ",
+			"email": "contact@emqx.io",
+			"company": "EMQ Technologies Co., Ltd",
+			"website": "https://www.emqx.io"
+		},
+		"helpUrl": {
+			"en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/http_pull.html",
+			"zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/http_pull.html"
+		},
+		"description": {
+			"en_US": "eKuiper provides built-in support for pulling HTTP source stream, which can pull the message from HTTP server broker and feed into the eKuiper processing pipeline.",
+			"zh_CN": "eKuiper 为提取 HTTP 源流提供了内置支持，该支持可从 HTTP 服务器代理提取消息并输入 eKuiper 处理管道。"
+		}
+	},
+	"dataSource": {
+		"hint": {
+			"en_US": "The URL endpoint to concatenate with the URL property to form the complete URL, e.g. /api/data",
+			"zh_CN": "URL 的路径部分，与 URL 属性拼接成最终 URL， 例如 /api/data"
+		},
+		"label": {
+			"en_US": "Data Source (URL Endpoint)",
+			"zh_CN": "数据源（URL 拼接路径）"
+		}
+	},
+	"properties": {
+		"default": [{
+			"name": "url",
+			"default": "http://127.0.0.1:5536",
+			"optional": false,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The URL where to get the result.",
+				"zh_CN": "获取结果的 URL"
+			},
+			"label": {
+				"en_US": "URL",
+				"zh_CN": "路径"
+			}
+		}, {
+			"name": "method",
+			"default": "get",
+			"optional": false,
+			"control": "select",
+			"type": "string",
+			"values": ["post", "get", "put", "delete"],
+			"hint": {
+				"en_US": "HTTP method, it could be post, get, put & delete.",
+				"zh_CN": "HTTP 方法，它可以是 post、get、put 和 delete。"
+			},
+			"label": {
+				"en_US": "HTTP method",
+				"zh_CN": "HTTP 方法"
+			}
+		}, {
+			"name": "interval",
+			"default": 1000,
+			"optional": true,
+			"control": "text",
+			"type": "int",
+			"hint": {
+				"en_US": "The interval between the requests, time unit is ms.",
+				"zh_CN": "请求之间的间隔时间，单位为 ms"
+			},
+			"label": {
+				"en_US": "Interval",
+				"zh_CN": "间隔时间"
+			}
+		}, {
+			"name": "timeout",
+			"default": 5000,
+			"optional": true,
+			"control": "text",
+			"type": "int",
+			"hint": {
+				"en_US": "The timeout for http request, time unit is ms.",
+				"zh_CN": "http 请求的超时时间，单位为 ms"
+			},
+			"label": {
+				"en_US": "Timeout",
+				"zh_CN": "超时时间"
+			}
+		}, {
+			"name": "incremental",
+			"default": false,
+			"optional": true,
+			"control": "radio",
+			"type": "bool",
+			"hint": {
+				"en_US": "If it's set to true, then will compare with last result; If response of two requests are the same, then will skip sending out the result.",
+				"zh_CN": "如果将其设置为 true，则将与最后的结果进行比较； 如果两个请求的响应相同，则将跳过发送结果。"
+			},
+			"label": {
+				"en_US": "Incremental",
+				"zh_CN": "递增"
+			}
+		}, {
+			"name": "body",
+			"default": "",
+			"optional": true,
+			"control": "textarea",
+			"type": "string",
+			"hint": {
+				"en_US": "The body of request",
+				"zh_CN": "请求的正文"
+			},
+			"label": {
+				"en_US": "Body",
+				"zh_CN": "正文"
+			}
+		}, {
+			"name": "bodyType",
+			"default": "json",
+			"optional": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "Body type, it could be none|text|json|html|xml|javascript|format.",
+				"zh_CN": "正文类型,可以是 none|text|json|html|xml|javascript| 格式"
+			},
+			"label": {
+				"en_US": "Body type",
+				"zh_CN": "正文类型"
+			}
+		}, {
+			"name": "certificationPath",
+			"default": "",
+			"optional": true,
+			"connection_related": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The location of certification path. It can be an absolute path, or a relative path.",
+				"zh_CN": "证书路径。可以为绝对路径，也可以为相对路径。如果指定的是相对路径，那么父目录为执行 server 命令的路径。"
+			},
+			"label": {
+				"en_US": "Certification path",
+				"zh_CN": "证书路径"
+			}
+		}, {
+			"name": "privateKeyPath",
+			"default": "",
+			"optional": true,
+			"connection_related": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The location of private key path. It can be an absolute path, or a relative path. ",
+				"zh_CN": "私钥路径。可以为绝对路径，也可以为相对路径。"
+			},
+			"label": {
+				"en_US": "Private key path",
+				"zh_CN": "私钥路径"
+			}
+		}, {
+			"name": "rootCaPath",
+			"default": "",
+			"optional": true,
+			"connection_related": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The location of root ca path. It can be an absolute path, or a relative path. ",
+				"zh_CN": "根证书路径，用以验证服务器证书。可以为绝对路径，也可以为相对路径。"
+			},
+			"label": {
+				"en_US": "Root CA path",
+				"zh_CN": "根证书路径"
+			}
+		}, {
+			"name": "certficationRaw",
+			"default": "",
+			"optional": true,
+			"connection_related": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "base64 encoded original text of the cert",
+				"zh_CN": "经过 base64 编码的证书原文"
+			},
+			"label": {
+				"en_US": "Raw Cert",
+				"zh_CN": "证书原文"
+			}
+		},
+			{
+				"name": "privateKeyRaw",
+				"default": "",
+				"optional": true,
+				"connection_related": true,
+				"control": "text",
+				"type": "string",
+				"hint": {
+					"en_US": "base64 encoded original text of the key",
+					"zh_CN": "经过 base64 编码的密钥原文"
+				},
+				"label": {
+					"en_US": "Raw Key",
+					"zh_CN": "密钥原文"
+				}
+			},
+			{
+				"name": "rootCARaw",
+				"default": "",
+				"optional": true,
+				"connection_related": true,
+				"control": "text",
+				"type": "string",
+				"hint": {
+					"en_US": "base64 encoded original text of the ca",
+					"zh_CN": "经过 Base64 编码的密钥原文"
+				},
+				"label": {
+					"en_US": "Raw CA",
+					"zh_CN": "根证书原文"
+				}
+			}, {
+			"name": "insecureSkipVerify",
+			"default": true,
+			"optional": true,
+			"control": "radio",
+			"type": "bool",
+			"hint": {
+				"en_US": "Control if to skip the certification verification. If it is set to true, then skip certification verification; Otherwise, verify the certification.",
+				"zh_CN": "控制是否跳过证书认证。如果被设置为 true，那么跳过证书认证；否则进行证书验证。"
+			},
+			"label": {
+				"en_US": "Skip Certification verification",
+				"zh_CN": "跳过证书验证"
+			}
+		}, {
+			"name": "headers",
+			"default": {},
+			"optional": true,
+			"control": "list",
+			"type": "object",
+			"hint": {
+				"en_US": "The HTTP request headers that you want to send along with the HTTP request.",
+				"zh_CN": "需要与 HTTP 请求一起发送的 HTTP 请求标头。"
+			},
+			"label": {
+				"en_US": "HTTP headers",
+				"zh_CN": "HTTP 标头"
+			}
+		},
+		{
+			"name": "responseType",
+			"default": "code",
+			"optional": true,
+			"control": "select",
+			"type": "string",
+			"values": [
+				"code",
+				"body"
+			],
+			"hint": {
+				"en_US": "Response type, could be `code` or `body`. If it is `code`, then eKuiper will check the HTTP response code for response status. If it is `body`, then eKuiper will check the HTTP response body with JSON format and examine the value of the code field.",
+				"zh_CN": "响应类型,可以是 `code` 或者 `body`，如果是 `code`，那么 eKuiper 会检查 HTTP 响应码来判断响应状态。如果是 `body`，那么 eKuiper 会检查 HTTP 响应正文，要求其为 JSON 格式，并且检查 code 字段的值。"
+			},
+			"label": {
+				"en_US": "Response type",
+				"zh_CN": "响应类型"
+			}
+		},
+		{
+				"name": "oauth",
+				"optional": true,
+				"control": "list",
+				"type": "object",
+				"hint": {
+					"en_US": "Configure the oauth authentication flow.",
+					"zh_CN": "配置 OAuth 验证流程。"
+				},
+				"label": {
+					"en_US": "OAuth",
+					"zh_CN": "OAuth"
+				},
+				"default":{
+					"access": {
+						"name": "access",
+						"optional": true,
+						"control": "list",
+						"type": "object",
+						"hint": {
+							"en_US": "Configure how to fetch the access token.",
+							"zh_CN": "配置如何获取访问令牌。"
+						},
+						"label": {
+							"en_US": "Access token request",
+							"zh_CN": "访问令牌请求"
+						},
+						"default": {
+							"url": {
+								"name": "url",
+								"default": "",
+								"optional": true,
+								"control": "text",
+								"type": "string",
+								"hint": {
+									"en_US": "The URL where to get the access token.",
+									"zh_CN": "获取访问令牌的 URL"
+								},
+								"label": {
+									"en_US": "Access Token URL",
+									"zh_CN": "访问令牌 URL"
+								}
+							},
+							"body": {
+								"name": "body",
+								"default": "",
+								"optional": true,
+								"control": "textarea",
+								"type": "string",
+								"hint": {
+									"en_US": "The body of access token request",
+									"zh_CN": "访问令牌请求的正文"
+								},
+								"label": {
+									"en_US": "Access Token Request Body",
+									"zh_CN": "访问令牌请求的正文"
+								}
+							},
+							"expire": {
+								"name": "expire",
+								"default": "",
+								"optional": true,
+								"control": "text",
+								"type": "string",
+								"hint": {
+									"en_US": "The expire time or expire time template",
+									"zh_CN": "过期时间"
+								},
+								"label": {
+									"en_US": "Expire Time",
+									"zh_CN": "过期时间"
+								}
+							}
+						}
+					},
+					"refresh":{
+						"name": "refresh",
+						"optional": true,
+						"control": "list",
+						"type": "object",
+						"hint": {
+							"en_US": "Configure how to refresh token after expiration.",
+							"zh_CN": "配置令牌过期后如何更新令牌。"
+						},
+						"label": {
+							"en_US": "Refresh token request",
+							"zh_CN": "更新令牌请求"
+						},
+						"default": {
+							"url":{
+								"name": "url",
+								"default": "",
+								"optional": true,
+								"control": "text",
+								"type": "string",
+								"hint": {
+									"en_US": "The URL where to get the refresh token.",
+									"zh_CN": "获取更新令牌的 URL"
+								},
+								"label": {
+									"en_US": "Refresh Token URL",
+									"zh_CN": "更新令牌 URL"
+								}
+							},
+							"headers":{
+								"name": "headers",
+								"optional": true,
+								"control": "list",
+								"type": "object",
+								"hint": {
+									"en_US": "The HTTP request headers that you want to send along with the HTTP refresh request.",
+									"zh_CN": "需要与刷新 Token HTTP 请求一起发送的 HTTP 请求标头。"
+								},
+								"label": {
+									"en_US": "Refresh token request headers",
+									"zh_CN": "刷新令牌请求标头"
+								}
+							},
+							"body":{
+								"name": "body",
+								"default": "",
+								"optional": true,
+								"control": "textarea",
+								"type": "string",
+								"hint": {
+									"en_US": "The body of refresh token request",
+									"zh_CN": "刷新令牌请求的正文"
+								},
+								"label": {
+									"en_US": "Refresh token request body",
+									"zh_CN": "刷新令牌请求的正文"
+								}
+							}
+						}
+					}
+				}
+			}
+		]
+	},
+	"outputs": [
+		{
+			"label": {
+				"en_US": "Output",
+				"zh_CN": "输出"
+			},
+			"value": "signal"
+		}
+	],
+	"node": {
+		"category": "source",
+		"icon": "iconPath",
+		"label": {
+			"en_US": "HTTP PULL",
+			"zh_CN": "HTTP PULL"
+		}
+	}
+}

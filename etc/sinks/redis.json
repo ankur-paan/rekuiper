@@ -1,0 +1,175 @@
+{
+	"about": {
+		"trial": false,
+		"author": {
+			"name": "DengFeng HE",
+			"email": "894220128@qq.com",
+			"company": "personal",
+			"website": "https://github.com/feng-crazy"
+		},
+		"helpUrl": {
+          "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/plugin/reids.html",
+          "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sinks/plugin/reids.html"
+        },
+		"description": {
+			"en_US": "This a sink for Redis, it can be used for saving the analysis data into Redis.",
+			"zh_CN": "为 Redis 的持久化插件，可以用于将分析数据存入 Redis 中"
+		}
+	},
+	"libs": [
+		"github.com/go-redis/redis/v7"
+	],
+	"properties": [
+		{
+			"name": "addr",
+			"default": "127.0.0.1:6379",
+			"optional": false,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The addr of the Redis,example: 10.122.48.17:6379",
+				"zh_CN": "Redis的地址, 例如: 127.0.0.1:6379"
+			},
+			"label": {
+				"en_US": "Address",
+				"zh_CN": "地址"
+			}
+		},
+		{
+			"name": "password",
+			"default": "",
+			"optional": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "The Redis login password",
+				"zh_CN": "Redis 登陆密码"
+			},
+			"label": {
+				"en_US": "Password",
+				"zh_CN": "密码"
+			}
+		},
+		{
+			"name": "db",
+			"default": 0,
+			"optional": false,
+			"control": "text",
+			"type": "int",
+			"hint": {
+				"en_US": "The database of the Redis,example: 0",
+				"zh_CN": "Redis 的数据库，例如 0"
+			},
+			"label": {
+				"en_US": "DataBase name",
+				"zh_CN": "数据库名"
+			}
+		},
+		{
+			"name": "key",
+			"default": "key",
+			"optional": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "Select one of the Key, Key and field of Redis data and give priority to field",
+				"zh_CN": "Redis 数据的 Key， key 与 field 选择其中一个，优先 field"
+			},
+			"label": {
+				"en_US": "Key",
+				"zh_CN": "Key"
+			}
+		},
+		{
+			"name": "field",
+			"default": "deviceName",
+			"optional": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "This field must exist and be of type string. Otherwise, use the field character as the key. Note: Do not use a data template to configure this value",
+				"zh_CN": "JSON 数据某一个属性，配置它作为 redis 数据的 key 值, 例如 deviceName,该字段必须存在且为 string 类型，否则以 field 字符作为 key,注意:配置该值不要使用数据模板"
+			},
+			"label": {
+				"en_US": "Key Field",
+				"zh_CN": "Key 字段"
+			}
+		},
+		{
+			"name": "keyType",
+      "default": "single",
+			"optional": true,
+			"control": "select",
+			"type": "string",
+			"values": [
+				"single",
+				"multiple"
+			],
+			"hint": {
+				"en_US": "Store the payload as single or multiple",
+				"zh_CN": "以整体形式或者拆分形式保存结果到 redis。"
+			},
+			"label": {
+				"en_US": "Store single or multiple",
+				"zh_CN": "整体或者拆分保存"
+			}
+		},
+		{
+			"name": "dataType",
+			"default": "string",
+			"optional": false,
+			"control": "select",
+			"type": "string",
+			"values": [
+				"string",
+				"list"
+			],
+			"hint": {
+				"en_US": "The default Redis data type is string. Note that the original key must be deleted after the Redis data type is changed. Otherwise, the modification is invalid。",
+				"zh_CN": "Redis 数据的类型, 默认是 string, 注意修改类型之后，需在 redis 中删除原有 key，否则修改无效。"
+			},
+			"label": {
+				"en_US": "Data type",
+				"zh_CN": "数据类型"
+			}
+		},
+		{
+			"name": "expiration",
+			"default": -1,
+			"optional": false,
+			"control": "text",
+			"type": "int",
+			"hint": {
+				"en_US": "Timeout duration of Redis data. This parameter is valid only for string data in seconds. The default value is -1 ",
+				"zh_CN": "Redis 数据的超时时间，仅在 string 类型数据有效，单位是秒，默认是永久保存（-1）"
+			},
+			"label": {
+				"en_US": "Expiration",
+				"zh_CN": "超时时间"
+			}
+		},
+		{
+			"name": "rowkindField",
+			"default": "",
+			"optional": true,
+			"control": "text",
+			"type": "string",
+			"hint": {
+				"en_US": "Specify which field represents the action like insert or update. If not specified, all rows are default to insert",
+				"zh_CN": "指定哪个字段表示操作，例如插入或更新。如果不指定，默认所有的数据都是插入操作"
+			},
+			"label": {
+				"en_US": "Rowkind Field",
+				"zh_CN": "动作字段"
+			}
+		}
+	],
+	"node": {
+		"category": "sink",
+		"icon": "iconPath",
+		"label": {
+			"en": "Redis",
+			"zh": "Redis"
+		}
+	}
+}

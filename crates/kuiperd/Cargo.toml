@@ -1,0 +1,24 @@
+[package]
+name = "kuiperd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "High-performance edge stream processing engine daemon (100% eKuiper drop-in replacement)"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "kuiperd"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+rekuiper-conf = { workspace = true }
+rekuiper-server = { workspace = true }

@@ -1,0 +1,2560 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+use axum::{
+    body::Bytes,
+    extract::{Path, State},
+    http::StatusCode,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
+    routing::{delete, get, post, put},
+    Json, Router,
+};
+use parking_lot::RwLock;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tokio::sync::broadcast;
+use rekuiper_conf::KuiperConfig;
+use rekuiper_connectors::{
+    apply_data_template, FileSink, HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink,
+    KafkaSource, MqttConfig, MqttSink, RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig,
+    SimulatorSource, Sink, SqlConnectorConfig, SqlSink, WebSocketConfig, WebSocketSink,
+    WebSocketSource,
+};
+use rekuiper_core::{
+    model::{compile_graph_to_sql_and_actions, StreamRecord},
+    RuleDefinition, RuleManager, StreamBus, StreamDefinition, StreamManager, TableDefinition,
+    TableManager,
+};
+use rekuiper_sql::{
+    Evaluator, Expr, JoinClause, JoinType, Parser, RuleState, SelectStmt, TimeUnit, WindowDef,
+};
+
+#[derive(Clone)]
+pub struct AppState {
+    pub start_time: Instant,
+    pub version: String,
+    pub config: KuiperConfig,
+    pub stream_manager: StreamManager,
+    pub table_manager: TableManager,
+    pub rule_manager: RuleManager,
+    pub stream_bus: StreamBus,
+    pub connections: Arc<RwLock<HashMap<String, Value>>>,
+    pub source_configs: Arc<RwLock<HashMap<String, Value>>>,
+    pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
+    pub source_cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+    pub http_client: reqwest::Client,
+}
+
+/// An interactive rule-simulation session: mock source data is replayed
+/// through the rule SQL and output rows stream out over SSE.
+#[derive(Clone)]
+pub struct RuletestSession {
+    pub id: String,
+    pub sql: String,
+    pub mock_source: HashMap<String, SimulatorConfig>,
+    pub output_tx: tokio::sync::broadcast::Sender<String>,
+}
+
+impl AppState {
+    pub fn new(
+        version: String,
+        config: KuiperConfig,
+        stream_manager: StreamManager,
+        table_manager: TableManager,
+        rule_manager: RuleManager,
+        stream_bus: StreamBus,
+    ) -> Self {
+        Self {
+            start_time: Instant::now(),
+            version,
+            config,
+            stream_manager,
+            table_manager,
+            rule_manager,
+            stream_bus,
+            connections: Arc::new(RwLock::new(HashMap::new())),
+            source_configs: Arc::new(RwLock::new(HashMap::new())),
+            http_client: reqwest::Client::builder()
+                .tcp_nodelay(true)
+                .build()
+                .unwrap_or_default(),
+            ruletests: Arc::new(RwLock::new(HashMap::new())),
+            source_cancels: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
+
+pub fn create_router(state: AppState) -> Router {
+    Router::new()
+        .route("/ping", get(ping_handler))
+        .route("/", get(root_handler).post(root_handler))
+        .route("/streams", get(list_streams).post(create_stream))
+        .route("/streams/:name", get(get_stream).delete(delete_stream))
+        .route("/streams/:name/data", post(push_stream_data))
+        .route("/streams/:name/schema", get(get_stream_schema))
+        .route("/tables", get(list_tables).post(create_table))
+        .route("/tables/:name", get(get_table).delete(delete_table))
+        .route("/tables/:name/data", post(push_table_data))
+        .route("/tables/:name/schema", get(get_table_schema))
+        .route("/tabledetails", get(get_table_details))
+        .route("/streamdetails", get(get_stream_details))
+        .route("/rules", get(list_rules).post(create_rule))
+        .route("/rules/validate", post(validate_rule))
+        .route("/rules/status/all", get(get_all_rule_status))
+        .route("/rules/:name", get(get_rule).delete(delete_rule))
+        .route("/rules/:name/status", get(get_rule_status))
+        .route("/rules/:name/topo", get(get_rule_topo))
+        .route("/rules/:name/explain", get(get_rule_explain))
+        .route("/rules/:name/start", post(start_rule))
+        .route("/rules/:name/stop", post(stop_rule))
+        .route("/rules/:name/restart", post(restart_rule))
+        .route("/rules/:name/reset_state", put(reset_rule_state))
+        .route("/rules/:id/schema", get(get_rule_schema))
+        .route("/rules/:name/tags", put(empty_ok).patch(empty_ok).delete(empty_ok))
+        .route("/v2/rules/:name/status", get(get_rule_status))
+        .route("/ruletest", post(create_ruletest))
+        .route("/ruletest/:name/start", post(start_ruletest))
+        .route("/ruletest/:name", delete(delete_ruletest))
+        .route("/test/:name", get(sse_ruletest))
+        .route("/rules/:name/trace/start", post(empty_ok))
+        .route("/rules/:name/trace/stop", post(empty_ok))
+        .route("/trace/rule/:rule_id", get(empty_array))
+        .route("/trace/:id", get(empty_object))
+        .route("/tracer", post(empty_ok))
+        .route("/async/data/import", post(async_task_started))
+        .route("/async/task/:id", get(async_task_status))
+        .route("/async/task/:id/cancel", post(async_task_cancelled))
+        .route("/batch/req", post(empty_array))
+        .route("/rules/bulkstart", post(bulk_start_rules))
+        .route("/rules/bulkstop", post(bulk_stop_rules))
+        .route("/rules/usage/cpu", get(rule_cpu_usage))
+        .route("/rules/tags/match", get(rule_tags_match))
+        .route("/configs", get(get_configs))
+        .route("/config/uploads", get(get_config_uploads))
+        .route("/config/uploads/:name", delete(empty_ok))
+        .route("/stop", get(stop_server).post(stop_server))
+        .route("/data/import", post(import_ruleset))
+        .route("/data/export", get(export_ruleset))
+        .route("/v2/data/import", post(import_ruleset))
+        .route("/v2/data/export", get(export_ruleset))
+        .route("/ruleset/import", post(import_ruleset))
+        .route("/ruleset/export", get(export_ruleset).post(export_ruleset))
+        .route("/metadata/sources", get(list_source_metadata))
+        .route("/metadata/sources/:name", get(get_source_metadata))
+        .route("/metadata/sinks", get(list_sink_metadata))
+        .route("/metadata/sinks/:name", get(get_sink_metadata))
+        .route("/metadata/functions", get(list_function_metadata))
+        .route("/metadata/operators", get(list_operator_metadata))
+        .route("/metadata/connections", get(list_metadata_connections))
+        .route("/metadata/resource", get(list_metadata_resources))
+        .route("/metadata/resources", get(list_metadata_resources))
+        .route("/connections", get(list_connections).post(create_connection))
+        .route("/connections/:id", get(get_connection).delete(delete_connection))
+        .route("/plugins/sources", get(empty_array))
+        .route("/plugins/sources/prebuild", get(empty_array))
+        .route(
+            "/plugins/sources/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/plugins/sinks", get(empty_array))
+        .route("/plugins/sinks/prebuild", get(empty_array))
+        .route(
+            "/plugins/sinks/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/plugins/functions", get(empty_array))
+        .route("/plugins/functions/prebuild", get(empty_array))
+        .route(
+            "/plugins/functions/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/plugins/functions/:name/register", post(validated_empty_ok))
+        .route("/plugins/portables", get(empty_array))
+        .route(
+            "/plugins/portables/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/plugins/portables/:name/status", get(validated_empty_object))
+        .route("/plugins/udfs", get(empty_array))
+        .route("/plugins/udfs/:name", get(validated_empty_object))
+        .route("/services", get(empty_array))
+        .route(
+            "/services/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/services/functions", get(empty_array))
+        .route("/services/functions/:name", get(validated_empty_object))
+        .route("/udf/javascript", get(empty_array))
+        .route(
+            "/udf/javascript/:id",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/schemas/:kind", get(validated_empty_array))
+        .route(
+            "/schemas/:kind/:name",
+            get(validated_empty_object)
+                .put(validated_empty_ok)
+                .delete(validated_empty_ok),
+        )
+        .route("/schemas/:kind/:name/upload", put(validated_empty_ok))
+        .route("/metadata/connections/:name", get(get_source_metadata))
+        .route("/metadata/sources/yaml/:name", get(empty_yaml))
+        .route(
+            "/metadata/sources/:name/confKeys/:conf_key",
+            put(save_source_conf_key)
+                .post(save_source_conf_key)
+                .delete(empty_ok),
+        )
+        .route("/metadata/sinks/yaml/:name", get(empty_yaml))
+        .route(
+            "/metadata/sinks/:name/confKeys/:conf_key",
+            put(empty_ok).delete(empty_ok),
+        )
+        .route("/metadata/connections/yaml/:name", get(empty_yaml))
+        .route(
+            "/metadata/connections/:name/confKeys/:conf_key",
+            put(empty_ok).delete(empty_ok),
+        )
+        .route("/metadata/sources/connection/:name", post(empty_ok))
+        .route("/metadata/sinks/connection/:name", post(empty_ok))
+        .route("/metadata/lookups/connection/:name", post(empty_ok))
+        .route("/data/import/status", get(import_status))
+        .route("/metrics/dump", get(metrics_dump))
+        .route("/metrics/dump/check", get(metrics_dump))
+        .route("/metrics", get(prometheus_metrics_handler))
+        .with_state(state)
+}
+
+async fn ping_handler() -> impl IntoResponse {
+    (StatusCode::OK, "pong")
+}
+
+async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
+    sys.refresh_all();
+
+    let uptime = state.start_time.elapsed().as_secs();
+    let cpu_usage = sys.global_cpu_info().cpu_usage();
+    let memory_used = sys.used_memory();
+    let memory_total = sys.total_memory();
+
+    let info = json!({
+        "version": state.version,
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "upTimeSeconds": uptime,
+        "cpuUsage": cpu_usage,
+        "memoryUsed": memory_used,
+        "memoryTotal": memory_total,
+    });
+
+    (StatusCode::OK, Json(info))
+}
+
+#[derive(Deserialize)]
+struct CreateStreamPayload {
+    #[serde(default)]
+    sql: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
+    let streams = state.stream_manager.list_streams();
+    Json(streams)
+}
+
+async fn create_stream(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateStreamPayload>,
+) -> Response {
+    if let Some(sql) = payload.sql {
+        let mut parser = Parser::new(&sql);
+        match parser.parse_create_stream() {
+            Ok(stmt) => {
+                let stream_def = StreamDefinition {
+                    name: stmt.name.clone(),
+                    sql: sql.clone(),
+                    options: stmt.options,
+                };
+                if let Err(e) = state.stream_manager.create_stream(stream_def) {
+                    return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+                }
+                state.stream_bus.get_or_create(&stmt.name);
+                (
+                    StatusCode::CREATED,
+                    format!("Stream {} is created.\n", stmt.name),
+                )
+                    .into_response()
+            }
+            Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
+        }
+    } else if let Some(name) = payload.name {
+        let stream_def = StreamDefinition {
+            name: name.clone(),
+            sql: "".to_string(),
+            options: HashMap::new(),
+        };
+        if let Err(e) = state.stream_manager.create_stream(stream_def) {
+            return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+        }
+        state.stream_bus.get_or_create(&name);
+        (StatusCode::CREATED, format!("Stream {} is created.\n", name)).into_response()
+    } else {
+        (StatusCode::BAD_REQUEST, "Missing sql or name in request").into_response()
+    }
+}
+
+async fn get_stream(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(def) = state.stream_manager.get_stream(&name) {
+        Json(def).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response()
+    }
+}
+
+async fn delete_stream(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.stream_manager.delete_stream(&name) {
+        Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.\n", name)).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+/// HTTP push source following the eKuiper REST API.
+///
+/// Accepts either a single JSON object or an array of JSON objects and
+/// publishes each one to the stream bus.
+async fn push_stream_data(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(payload): Json<Value>,
+) -> Response {
+    if state.stream_manager.get_stream(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response();
+    }
+
+    let objects: Vec<Value> = match payload {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![payload],
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON object or an array of JSON objects",
+            )
+                .into_response();
+        }
+    };
+
+    for item in objects {
+        let Value::Object(map) = item else {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON object or an array of JSON objects",
+            )
+                .into_response();
+        };
+        let data: HashMap<String, Value> = map.into_iter().collect();
+        let record = rekuiper_core::model::StreamRecord::new(data);
+        // No subscribers (e.g. no rules yet) is fine for ingestion.
+        let _ = state.stream_bus.publish(&name, record);
+    }
+
+    (StatusCode::OK, "Data ingested successfully.\n").into_response()
+}
+
+async fn list_tables(State(state): State<AppState>) -> impl IntoResponse {
+    let tables = state.table_manager.list_tables();
+    Json(tables)
+}
+
+/// Table lookup ingestion: accepts a single JSON object or an array of
+/// objects and appends each as a lookup row for the table.
+async fn push_table_data(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let objects: Vec<Value> = match payload {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![payload],
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON object or an array of JSON objects",
+            )
+                .into_response();
+        }
+    };
+
+    for item in objects {
+        let Value::Object(map) = item else {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Expected a JSON object or an array of JSON objects",
+            )
+                .into_response();
+        };
+        let row: HashMap<String, Value> = map.into_iter().collect();
+        state.table_manager.insert_table_row(&name, row);
+    }
+
+    (StatusCode::OK, "Table data ingested successfully.\n").into_response()
+}
+
+async fn create_table(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateStreamPayload>,
+) -> Response {
+    let Some(sql) = payload.sql else {
+        return (StatusCode::BAD_REQUEST, "Missing sql in request").into_response();
+    };
+    let mut parser = Parser::new(&sql);
+    match parser.parse_create_table() {
+        Ok(stmt) => {
+            let table_def = TableDefinition {
+                name: stmt.name.clone(),
+                sql: sql.clone(),
+                options: stmt.options,
+            };
+            if let Err(e) = state.table_manager.create_table(table_def) {
+                return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            }
+            (
+                StatusCode::CREATED,
+                format!("Table {} is created.\n", stmt.name),
+            )
+                .into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
+    }
+}
+
+async fn get_table(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(def) = state.table_manager.get_table(&name) {
+        Json(def).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Table {} not found", name)).into_response()
+    }
+}
+
+async fn delete_table(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.table_manager.delete_table(&name) {
+        Ok(_) => (StatusCode::OK, format!("Table {} is dropped.\n", name)).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn get_table_details(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.table_manager.list_table_definitions())
+}
+
+async fn get_stream_details(State(state): State<AppState>) -> impl IntoResponse {
+    let defs: Vec<StreamDefinition> = {
+        let names = state.stream_manager.list_streams();
+        names
+            .iter()
+            .filter_map(|n| state.stream_manager.get_stream(n))
+            .collect()
+    };
+    Json(defs)
+}
+
+async fn get_stream_schema(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Some(def) = state.stream_manager.get_stream(&name) {
+        Json(json!({ "name": def.name, "options": def.options })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response()
+    }
+}
+
+async fn get_table_schema(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Some(def) = state.table_manager.get_table(&name) {
+        Json(json!({ "name": def.name, "options": def.options })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Table {} not found", name)).into_response()
+    }
+}
+
+async fn list_rules(State(state): State<AppState>) -> impl IntoResponse {
+    let rules = state.rule_manager.list_rules();
+    let summaries: Vec<Value> = rules
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "name": r.id,
+                "sql": r.sql,
+            })
+        })
+        .collect();
+    Json(summaries)
+}
+
+async fn create_rule(
+    State(state): State<AppState>,
+    Json(mut rule): Json<RuleDefinition>,
+) -> Response {
+    // Graph rules carry no SQL: compile the DAG into SQL + actions first.
+    if rule.sql.trim().is_empty() {
+        if let Some(ref graph) = rule.graph {
+            match compile_graph_to_sql_and_actions(graph) {
+                Ok((sql, actions)) => {
+                    rule.sql = sql;
+                    if rule.actions.is_empty() {
+                        rule.actions = actions;
+                    }
+                }
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("Invalid rule graph: {}", e),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+    let mut parser = Parser::new(&rule.sql);
+    let select_stmt = match parser.parse_select() {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
+        }
+    };
+
+    let rule_id = rule.id.clone();
+
+    if let Err(e) = state.rule_manager.create_rule(rule.clone()) {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+
+    // Spawn window-aware rule execution task and register its handle so
+    // stop/delete can abort it cleanly.
+    spawn_rule_task(
+        &state.rule_manager,
+        &state.stream_bus,
+        &state.stream_manager,
+        &state.table_manager,
+        &state.source_configs,
+        &state.http_client,
+        rule_id.clone(),
+        select_stmt.clone(),
+        rule.actions.clone(),
+    );
+
+    // HTTP pull source streams poll a remote endpoint into the stream bus.
+    if let Some(conf) =
+        resolve_httppull_config(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
+    {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.clone(), cancel_tx);
+        HttpPullSource { config: conf, tx: stream_tx }.spawn(cancel_rx);
+    }
+
+    // WebSocket source streams forward incoming messages into the stream bus.
+    if let Some(url) =
+        resolve_websocket_url(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
+    {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.clone(), cancel_tx);
+        WebSocketSource { url, tx: stream_tx }.spawn(cancel_rx);
+    }
+
+    // Redis subscription streams forward channel messages into the stream bus.
+    if let Some((url, channel)) =
+        resolve_redissub_source(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
+    {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.clone(), cancel_tx);
+        RedisSubSource { url, channel, tx: stream_tx }.spawn(cancel_rx);
+    }
+
+    // Kafka source streams consume a topic partition into the stream bus.
+    if let Some(config) =
+        resolve_kafka_source(&state.stream_manager, &state.source_configs, &select_stmt.from, &rule_id)
+    {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.clone(), cancel_tx);
+        KafkaSource { config, tx: stream_tx }.spawn(cancel_rx);
+    }
+
+    // Simulator source streams replay configured data into the stream bus.
+    // Stream options are upper-cased by the SQL parser.
+    if let Some(def) = state.stream_manager.get_stream(&select_stmt.from) {
+        let is_simulator = def
+            .options
+            .get("TYPE")
+            .is_some_and(|t| t.eq_ignore_ascii_case("simulator"));
+        if is_simulator {
+            if let Some(key) = def.options.get("CONF_KEY").cloned() {
+                let lookup = format!("simulator/{}", key);
+                if let Some(conf_val) = state.source_configs.read().get(&lookup).cloned() {
+                    match serde_json::from_value::<SimulatorConfig>(conf_val) {
+                        Ok(conf) => {
+                            let stream_name = select_stmt.from.clone();
+                            let bus = state.stream_bus.clone();
+                            tokio::spawn(async move {
+                                let (tx, mut rx) =
+                                    tokio::sync::mpsc::channel::<StreamRecord>(1024);
+                                let sim_handle = tokio::spawn(async move {
+                                    SimulatorSource::new(conf).run(tx).await
+                                });
+                                while let Some(record) = rx.recv().await {
+                                    let _ = bus.publish(&stream_name, record);
+                                }
+                                let _ = sim_handle.await;
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "[RULE {}] invalid simulator config '{}': {}",
+                                rule_id,
+                                lookup,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (
+        StatusCode::CREATED,
+        format!("Rule {} was created successfully.\n", rule_id),
+    )
+        .into_response()
+}
+
+/// Resolve the HTTP pull configuration for a rule whose source stream
+/// declares `TYPE="httppull"` (or `"http_pull"`).
+///
+/// Looks up `httppull/{conf_key}` then `http_pull/{conf_key}` in the stored
+/// source configs; when no key matches, falls back to the stream's
+/// `DATASOURCE` property as the poll URL with default method/interval.
+fn resolve_httppull_config(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<HttpPullConfig> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !(kind.eq_ignore_ascii_case("httppull") || kind.eq_ignore_ascii_case("http_pull")) {
+        return None;
+    }
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.is_empty() {
+            for prefix in ["httppull", "http_pull"] {
+                let lookup = format!("{}/{}", prefix, key);
+                if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                    match serde_json::from_value::<HttpPullConfig>(conf_val) {
+                        Ok(conf) => return Some(conf),
+                        Err(e) => {
+                            tracing::warn!(
+                                "[RULE {}] invalid http pull config '{}': {}",
+                                rule_id,
+                                lookup,
+                                e
+                            );
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let url = def.options.get("DATASOURCE").cloned().unwrap_or_default();
+    if url.is_empty() {
+        tracing::warn!(
+            "[RULE {}] http pull stream '{}' has neither CONF_KEY config nor DATASOURCE url",
+            rule_id,
+            stream_name
+        );
+        return None;
+    }
+    Some(HttpPullConfig {
+        url,
+        method: "get".to_string(),
+        interval: 1000,
+        headers: HashMap::new(),
+        body: None,
+    })
+}
+
+/// Resolve the WebSocket URL for a rule whose source stream declares
+/// `TYPE="websocket"`.
+///
+/// Looks up `websocket/{conf_key}` in the stored source configs and builds
+/// the URL from it; otherwise parses `DATASOURCE` (used directly when it
+/// starts with `ws://` or `wss://`, else treated as a path on the default
+/// local endpoint).
+fn resolve_websocket_url(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<String> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !kind.eq_ignore_ascii_case("websocket") {
+        return None;
+    }
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.is_empty() {
+            let lookup = format!("websocket/{}", key);
+            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                match serde_json::from_value::<WebSocketConfig>(conf_val) {
+                    Ok(conf) => return Some(conf.target_url()),
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid websocket config '{}': {}",
+                            rule_id,
+                            lookup,
+                            e
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    let datasource = def.options.get("DATASOURCE").cloned().unwrap_or_default();
+    if datasource.is_empty() {
+        tracing::warn!(
+            "[RULE {}] websocket stream '{}' has neither CONF_KEY config nor DATASOURCE",
+            rule_id,
+            stream_name
+        );
+        return None;
+    }
+    let ds = datasource.trim();
+    if ds.starts_with("ws://") || ds.starts_with("wss://") {
+        Some(ds.to_string())
+    } else {
+        Some(format!("ws://127.0.0.1:8080/{}", ds.trim_start_matches('/')))
+    }
+}
+
+/// Resolve a Redis server address from a stored source config value, which
+/// may be a full object (`{"addr": ...}`) or a bare address string.
+/// Falls back to the local default when absent or unparseable.
+fn resolve_redis_addr(source_configs: &Arc<RwLock<HashMap<String, Value>>>, conf_key: &str) -> String {
+    const DEFAULT: &str = "127.0.0.1:6379";
+    if conf_key.is_empty() {
+        return DEFAULT.to_string();
+    }
+    let stored = source_configs
+        .read()
+        .get(&format!("redis/{}", conf_key))
+        .cloned();
+    match stored {
+        Some(Value::Object(map)) => map
+            .get("addr")
+            .or_else(|| map.get("address"))
+            .or_else(|| map.get("url"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT)
+            .to_string(),
+        Some(Value::String(s)) if !s.is_empty() => s,
+        _ => DEFAULT.to_string(),
+    }
+}
+
+/// Resolve the `(url, channel)` pair for a rule whose source stream declares
+/// `TYPE="redissub"` (or `"redis_sub"`): the channel comes from the stream
+/// `DATASOURCE`, the server URL from `CONF_KEY` (or the local default).
+fn resolve_redissub_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<(String, String)> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !(kind.eq_ignore_ascii_case("redissub") || kind.eq_ignore_ascii_case("redis_sub")) {
+        return None;
+    }
+    let channel = def.options.get("DATASOURCE").cloned().unwrap_or_default();
+    if channel.is_empty() {
+        tracing::warn!(
+            "[RULE {}] redissub stream '{}' has no DATASOURCE channel",
+            rule_id,
+            stream_name
+        );
+        return None;
+    }
+    let conf_key = def.options.get("CONF_KEY").cloned().unwrap_or_default();
+    let addr = resolve_redis_addr(source_configs, &conf_key);
+    let url = if addr.contains("://") {
+        addr
+    } else {
+        format!("redis://{}", addr)
+    };
+    Some((url, channel))
+}
+
+/// Resolve the [`KafkaConfig`] for a rule whose source stream declares
+/// `TYPE="kafka"`: the topic comes from the stream `DATASOURCE` (falling back
+/// to the config topic), brokers and friends from `kafka/{conf_key}` (or
+/// defaults when no key matches).
+fn resolve_kafka_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<KafkaConfig> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !kind.eq_ignore_ascii_case("kafka") {
+        return None;
+    }
+    let mut config = KafkaConfig {
+        brokers: "127.0.0.1:9092".to_string(),
+        topic: None,
+        group_id: None,
+        partition: 0,
+        key: None,
+    };
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.is_empty() {
+            let lookup = format!("kafka/{}", key);
+            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                match serde_json::from_value::<KafkaConfig>(conf_val) {
+                    Ok(parsed) => config = parsed,
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid kafka config '{}': {}",
+                            rule_id,
+                            lookup,
+                            e
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    match def.options.get("DATASOURCE").cloned() {
+        Some(topic) if !topic.is_empty() => config.topic = Some(topic),
+        _ if config.topic.as_deref().is_some_and(|t| !t.is_empty()) => {}
+        _ => {
+            tracing::warn!(
+                "[RULE {}] kafka stream '{}' has no DATASOURCE topic",
+                rule_id,
+                stream_name
+            );
+            return None;
+        }
+    }
+    if config.broker_list().is_empty() {
+        tracing::warn!(
+            "[RULE {}] kafka stream '{}' has no brokers configured",
+            rule_id,
+            stream_name
+        );
+        return None;
+    }
+    Some(config)
+}
+
+/// Signal cancellation to a rule's background source poller (HTTP pull,
+/// WebSocket, Redis subscription or Kafka consumer), if one is registered.
+fn cancel_httppull(state: &AppState, rule_id: &str) {
+    if let Some(tx) = state.source_cancels.write().remove(rule_id) {
+        let _ = tx.send(true);
+    }
+}
+
+/// Resolve the bus topic a rule actually subscribes to: memory-type streams
+/// (`TYPE="memory"`) re-export another topic via `DATASOURCE`, mirroring the
+/// eKuiper memory source (used to chain rules through memory sinks).
+fn resolve_source_topic(stream_manager: &StreamManager, stream_name: &str) -> String {
+    if let Some(def) = stream_manager.get_stream(stream_name) {
+        if def
+            .options
+            .get("TYPE")
+            .is_some_and(|t| t.eq_ignore_ascii_case("memory"))
+        {
+            if let Some(ds) = def.options.get("DATASOURCE") {
+                if !ds.is_empty() {
+                    return ds.clone();
+                }
+            }
+        }
+    }
+    stream_name.to_string()
+}
+
+/// Subscribe to the rule's source stream and spawn its window-aware
+/// execution task, registering the join handle on the rule manager.
+fn spawn_rule_task(
+    rule_manager: &RuleManager,
+    stream_bus: &StreamBus,
+    stream_manager: &StreamManager,
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    http_client: &reqwest::Client,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    actions: Vec<HashMap<String, Value>>,
+) {
+    let rx = stream_bus.subscribe(&resolve_source_topic(stream_manager, &select_stmt.from));
+    let rule_mgr = rule_manager.clone();
+    let window = select_stmt.window.clone();
+    let tables = table_manager.clone();
+    let confs = source_configs.clone();
+
+    // Bounded decoupled sink queue: the streaming evaluation loop never blocks
+    // on sink network/disk I/O. Dropping `sink_tx` (rule end/cancel) lets the
+    // worker flush remaining outputs and exit cleanly.
+    let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(10_000);
+    let sink_actions = actions;
+    let sink_rule_id = rule_id.clone();
+    let sink_rule_mgr = rule_manager.clone();
+    let sink_stream_bus = stream_bus.clone();
+    let sink_http_client = http_client.clone();
+    tokio::spawn(async move {
+        while let Some(output_record) = sink_rx.recv().await {
+            dispatch_rule_actions(
+                &sink_actions,
+                &output_record,
+                &sink_rule_id,
+                &sink_rule_mgr,
+                &sink_stream_bus,
+                &sink_http_client,
+            )
+            .await;
+        }
+    });
+
+    let handle = match window {
+        None => tokio::spawn(run_stateless_rule(
+            rule_mgr,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            tables,
+            confs,
+            sink_tx,
+        )),
+        Some(WindowDef::Count { size, .. }) => tokio::spawn(run_count_window_rule(
+            rule_mgr,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            size,
+            sink_tx,
+        )),
+        Some(WindowDef::TumblingTime { unit, length }) => {
+            let duration = tumbling_window_duration(&unit, length);
+            tokio::spawn(run_tumbling_window_rule(
+                rule_mgr,
+                rule_id.clone(),
+                select_stmt,
+                rx,
+                duration,
+                sink_tx,
+            ))
+        }
+        // Hopping/sliding windows are not incrementally scheduled here;
+        // fall back to per-record evaluation.
+        Some(_) => tokio::spawn(run_stateless_rule(
+            rule_mgr,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            tables,
+            confs,
+            sink_tx,
+        )),
+    };
+    rule_manager.set_rule_handle(&rule_id, handle);
+}
+
+fn is_rule_running(rule_mgr: &RuleManager, rule_id: &str) -> bool {
+    match rule_mgr.get_rule_status(rule_id) {
+        Some(status) => status.status == "running",
+        // Rule deleted mid-flight: stop processing.
+        None => false,
+    }
+}
+
+/// Optional sink `dataTemplate` from action options, rendered against the
+/// output record before transmission.
+fn action_template(opts: &Value) -> Option<&str> {
+    opts.get("dataTemplate").and_then(|v| v.as_str())
+}
+
+fn record_template_map(data: &HashMap<String, Value>) -> serde_json::Map<String, Value> {
+    data.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+async fn dispatch_rule_actions(
+    actions: &[HashMap<String, Value>],
+    output: &StreamRecord,
+    rule_id: &str,
+    rule_mgr: &RuleManager,
+    stream_bus: &StreamBus,
+    http_client: &reqwest::Client,
+) {
+    for action in actions {
+        for (kind, opts) in action {
+            match kind.as_str() {
+                "log" => {
+                    tracing::info!("[RULE {}] Matched record: {:?}", rule_id, output.data);
+                }
+                "nop" => {}
+                "file" => match serde_json::from_value::<FileSink>(opts.clone()) {
+                    Ok(sink) => {
+                        let res = match action_template(opts) {
+                            Some(tpl) => {
+                                sink.send_text(&apply_data_template(
+                                    tpl,
+                                    &record_template_map(&output.data),
+                                ))
+                                .await
+                            }
+                            None => sink.send(output).await,
+                        };
+                        if let Err(e) = res {
+                            tracing::warn!("[RULE {}] file action failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid file action options: {}",
+                            rule_id,
+                            e
+                        );
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    }
+                },
+                "rest" | "http" => {
+                    let url = opts.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    if url.is_empty() {
+                        tracing::warn!("[RULE {}] rest action missing url", rule_id);
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    } else {
+                        let res = match action_template(opts) {
+                            Some(tpl) => {
+                                http_client
+                                    .post(url)
+                                    .header(
+                                        reqwest::header::CONTENT_TYPE,
+                                        "application/json",
+                                    )
+                                    .body(apply_data_template(
+                                        tpl,
+                                        &record_template_map(&output.data),
+                                    ))
+                                    .send()
+                                    .await
+                            }
+                            None => http_client.post(url).json(&output.data).send().await,
+                        };
+                        if let Err(e) = res {
+                            tracing::warn!("[RULE {}] rest action failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                }
+                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
+                    Ok(cfg) => match MqttSink::new(cfg) {
+                        Ok(sink) => {
+                            let res = match action_template(opts) {
+                                Some(tpl) => {
+                                    sink.send_raw(
+                                        apply_data_template(
+                                            tpl,
+                                            &record_template_map(&output.data),
+                                        )
+                                        .into_bytes(),
+                                    )
+                                    .await
+                                }
+                                None => sink.send(output).await,
+                            };
+                            if let Err(e) = res {
+                                tracing::warn!("[RULE {}] mqtt action failed: {}", rule_id, e);
+                                rule_mgr.inc_exceptions(rule_id, 1);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "[RULE {}] mqtt action connect failed: {}",
+                                rule_id,
+                                e
+                            );
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid mqtt action options: {}",
+                            rule_id,
+                            e
+                        );
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    }
+                },
+                "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
+                    Ok(ws_cfg) => {
+                        let sink = WebSocketSink { url: ws_cfg.target_url() };
+                        let res = match action_template(opts) {
+                            Some(tpl) => {
+                                sink.send_text(&apply_data_template(
+                                    tpl,
+                                    &record_template_map(&output.data),
+                                ))
+                                .await
+                            }
+                            None => sink.send(output).await,
+                        };
+                        if let Err(e) = res {
+                            tracing::warn!("[RULE {}] websocket action failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid websocket action options: {}",
+                            rule_id,
+                            e
+                        );
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    }
+                },
+                "redis" | "redispub" | "redisPub" => {
+                    match serde_json::from_value::<RedisSinkConfig>(opts.clone()) {
+                        Ok(cfg) => {
+                            let sink = RedisSink { config: cfg };
+                            if let Err(e) = sink.send(output).await {
+                                tracing::warn!("[RULE {}] redis action failed: {}", rule_id, e);
+                                rule_mgr.inc_exceptions(rule_id, 1);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "[RULE {}] invalid redis action options: {}",
+                                rule_id,
+                                e
+                            );
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                }
+                "kafka" => match serde_json::from_value::<KafkaConfig>(opts.clone()) {
+                    Ok(cfg) => {
+                        let sink = KafkaSink { config: cfg };
+                        if let Err(e) = sink.send(output).await {
+                            tracing::warn!("[RULE {}] kafka action failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid kafka action options: {}",
+                            rule_id,
+                            e
+                        );
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    }
+                },
+                "sql" => match serde_json::from_value::<SqlConnectorConfig>(opts.clone()) {
+                    Ok(cfg) => {
+                        let sink = SqlSink { config: cfg };
+                        if let Err(e) = sink.insert_record(output).await {
+                            tracing::warn!("[RULE {}] sql action failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid sql action options: {}",
+                            rule_id,
+                            e
+                        );
+                        rule_mgr.inc_exceptions(rule_id, 1);
+                    }
+                },
+                "memory" => {
+                    let topic = opts
+                        .get("topic")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default");
+                    // Broadcast send fails only when nobody listens; the data
+                    // has still been produced, so never count it as an exception.
+                    let _ = stream_bus.publish(topic, output.clone());
+                }
+                other => {
+                    tracing::debug!("[RULE {}] unknown action '{}', ignoring", rule_id, other);
+                }
+            }
+        }
+    }
+}
+
+/// Resolve lookup JOINs for one stream record against table rows.
+///
+/// Starts from the base record (exposed both under bare field names and
+/// `{from}.{field}` qualifiers) and folds each join clause in: the first
+/// table row whose `ON` condition holds over the combined map wins and is
+/// merged in (bare keys keep stream values via `or_insert`, plus
+/// `{target}.{field}` qualifiers). Returns `None` when an `Inner` (or
+/// `Right`/`Full`/`Cross` without match) join finds no row and the record
+/// must be skipped; `Left` joins fall through un-joined.
+/// Derive the point-lookup key for an external table join from an equality
+/// `ON` condition between the stream side and the table side (either order).
+/// Returns `(table_column, key_value)`; `None` when no usable key exists.
+fn join_key_parts(
+    join: &JoinClause,
+    from: &str,
+    combined: &HashMap<String, Value>,
+) -> Option<(String, String)> {
+    fn side(expr: &Expr, from: &str, target: &str) -> u8 {
+        match expr {
+            // 0 = stream side, 1 = table side, 2 = unknown.
+            Expr::FieldAccess { parent, .. } => match parent.as_ref() {
+                Expr::Identifier(name) if name == target => 1,
+                Expr::Identifier(name) if name == from => 0,
+                _ => 2,
+            },
+            Expr::Identifier(_) => 0,
+            _ => 2,
+        }
+    }
+    fn column_name(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::FieldAccess { field, .. } => Some(field.clone()),
+            Expr::Identifier(name) => Some(name.clone()),
+            _ => None,
+        }
+    }
+    fn scalarize(value: Value) -> Option<String> {
+        match value {
+            Value::Null => None,
+            Value::String(s) => Some(s),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        }
+    }
+    let (left, right) = match join.on.as_ref()? {
+        Expr::BinaryOp { left, op: rekuiper_sql::BinaryOperator::Eq, right } => (left, right),
+        _ => return None,
+    };
+    let (table_expr, key_expr) = match (
+        side(left, from, &join.target),
+        side(right, from, &join.target),
+    ) {
+        (1, _) => (left, right),
+        (_, 1) => (right, left),
+        _ => return None,
+    };
+    Some((column_name(table_expr)?, scalarize(Evaluator::eval_val(key_expr, combined))?))
+}
+
+/// Derive the point-lookup key value for a Redis table join.
+fn extract_lookup_key(
+    join: &JoinClause,
+    from: &str,
+    combined: &HashMap<String, Value>,
+) -> Option<String> {
+    join_key_parts(join, from, combined).map(|(_, value)| value)
+}
+
+/// Build a single candidate row from a fetched lookup value: objects map to
+/// rows directly, scalars bind under `"value"`.
+fn lookup_value_to_row(value: Value) -> HashMap<String, Value> {
+    match value {
+        Value::Object(map) => map.into_iter().collect(),
+        scalar => {
+            let mut row = HashMap::new();
+            row.insert("value".to_string(), scalar);
+            row
+        }
+    }
+}
+
+/// Resolve the `(url, table)` pair for a `TYPE="sql"` lookup table: a
+/// matching `sql/{conf_key}` source config wins, otherwise the table options
+/// (`URL`, falling back to `DATASOURCE`, plus `TABLE` or the target name).
+fn resolve_sql_lookup(
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    target: &str,
+) -> Option<(String, String)> {
+    let def = table_manager.get_table(target)?;
+    if let Some(key) = def.options.get("CONF_KEY") {
+        if !key.is_empty() {
+            let lookup = format!("sql/{}", key);
+            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
+                match serde_json::from_value::<SqlConnectorConfig>(conf_val) {
+                    Ok(conf) => return Some((conf.url, conf.table)),
+                    Err(e) => {
+                        tracing::warn!("Invalid sql lookup config '{}': {}", lookup, e);
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    let url = def
+        .options
+        .get("URL")
+        .or_else(|| def.options.get("DATASOURCE"))
+        .cloned()
+        .unwrap_or_default();
+    if url.is_empty() {
+        return None;
+    }
+    let table = def
+        .options
+        .get("TABLE")
+        .cloned()
+        .unwrap_or_else(|| target.to_string());
+    Some((url, table))
+}
+
+/// Fetch candidate rows for one join clause: a Redis `GET` point lookup for
+/// `TYPE="redis"` tables, a SQL point lookup for `TYPE="sql"` tables,
+/// otherwise the locally stored table rows.
+async fn lookup_candidates(
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    from: &str,
+    join: &JoinClause,
+    combined: &HashMap<String, Value>,
+) -> Vec<HashMap<String, Value>> {
+    let table_type = table_manager
+        .get_table(&join.target)
+        .and_then(|def| def.options.get("TYPE").cloned())
+        .unwrap_or_default();
+    if table_type.eq_ignore_ascii_case("redis") {
+        let Some(key) = extract_lookup_key(join, from, combined) else {
+            return Vec::new();
+        };
+        let conf_key = table_manager
+            .get_table(&join.target)
+            .and_then(|def| def.options.get("CONF_KEY").cloned())
+            .unwrap_or_default();
+        let addr = resolve_redis_addr(source_configs, &conf_key);
+        return match rekuiper_connectors::redis_lookup_key(&addr, &key).await {
+            Ok(Some(value)) => vec![lookup_value_to_row(value)],
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("Redis lookup GET {} failed: {}", key, e);
+                Vec::new()
+            }
+        };
+    }
+    if table_type.eq_ignore_ascii_case("sql") {
+        let (url, table, col, val) = match (
+            resolve_sql_lookup(table_manager, source_configs, &join.target),
+            join_key_parts(join, from, combined),
+        ) {
+            (Some((url, table)), Some((col, val))) => (url, table, col, val),
+            _ => return Vec::new(),
+        };
+        return match rekuiper_connectors::sql_lookup_key(&url, &table, &col, &val).await {
+            Ok(Some(value)) => vec![lookup_value_to_row(value)],
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("SQL lookup on {} failed: {}", table, e);
+                Vec::new()
+            }
+        };
+    }
+    table_manager.get_table_rows(&join.target)
+}
+
+async fn apply_lookup_joins(
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    select_stmt: &SelectStmt,
+    record: &HashMap<String, Value>,
+) -> Option<HashMap<String, Value>> {
+    if select_stmt.joins.is_empty() {
+        return Some(record.clone());
+    }
+    // Qualified access (`stream.field`, `table.field`) resolves through nested
+    // objects, matching the evaluator's FieldAccess semantics.
+    fn as_object(row: &HashMap<String, Value>) -> Value {
+        Value::Object(row.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    }
+    let mut combined = record.clone();
+    combined.insert(select_stmt.from.clone(), as_object(record));
+    for join in &select_stmt.joins {
+        let mut matched: Option<HashMap<String, Value>> = None;
+        for row in lookup_candidates(table_manager, source_configs, &select_stmt.from, join, &combined).await {
+            let mut probe = combined.clone();
+            for (k, v) in &row {
+                probe.entry(k.clone()).or_insert(v.clone());
+            }
+            probe.insert(join.target.clone(), as_object(&row));
+            let cond_ok = match &join.on {
+                Some(cond) => Evaluator::eval_bool(cond, &probe),
+                // No ON condition: match the first candidate row.
+                None => true,
+            };
+            if cond_ok {
+                matched = Some(row);
+                break;
+            }
+        }
+        match matched {
+            Some(row) => {
+                for (k, v) in &row {
+                    combined.entry(k.clone()).or_insert(v.clone());
+                }
+                combined.insert(join.target.clone(), as_object(&row));
+            }
+            None if join.join_type == JoinType::Left => {}
+            None => return None,
+        }
+    }
+    Some(combined)
+}
+
+/// Enqueue an output record for the background sink worker without blocking
+/// the evaluation loop: fast path is a lock-free `try_send`, falling back to
+/// an awaiting send only while the bounded queue is under backpressure.
+async fn enqueue_sink_record(
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    output_record: StreamRecord,
+) {
+    if let Err(tokio::sync::mpsc::error::TrySendError::Full(rec)) =
+        sink.try_send(output_record)
+    {
+        // Queue under backpressure: await send
+        let _ = sink.send(rec).await;
+    }
+}
+
+async fn run_stateless_rule(
+    rule_mgr: RuleManager,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: broadcast::Receiver<StreamRecord>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    // Running analytic state for acc_* cumulative functions. The stateful
+    // projection below runs for every input row (advancing cumulative state
+    // even for rows the WHERE filter later drops, mirroring eKuiper analytic
+    // semantics); the input-row filter then decides emission.
+    let rule_state = RuleState::default();
+    loop {
+        match rx.recv().await {
+            Ok(record) => {
+                if !is_rule_running(&rule_mgr, &rule_id) {
+                    continue;
+                }
+                rule_mgr.inc_source_records(&rule_id, 1);
+                let Some(joined) = apply_lookup_joins(
+                    &table_manager,
+                    &source_configs,
+                    &select_stmt,
+                    &record.data,
+                )
+                .await
+                else {
+                    // Inner join without a matching table row: drop the record.
+                    continue;
+                };
+                let output_opt =
+                    Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
+                let passes = match &select_stmt.where_clause {
+                    Some(cond) => Evaluator::eval_bool(cond, &joined),
+                    None => true,
+                };
+                if passes {
+                    if let Some(output) = output_opt {
+                        let output_record = StreamRecord::new(output);
+                        enqueue_sink_record(&sink, output_record).await;
+                        rule_mgr.inc_sink_records(&rule_id, 1);
+                    }
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+async fn run_count_window_rule(
+    rule_mgr: RuleManager,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: broadcast::Receiver<StreamRecord>,
+    size: usize,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    loop {
+        match rx.recv().await {
+            Ok(record) => {
+                if !is_rule_running(&rule_mgr, &rule_id) {
+                    continue;
+                }
+                rule_mgr.inc_source_records(&rule_id, 1);
+                buffer.push(record.data);
+                if buffer.len() >= size.max(1) {
+                    if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
+                        let output_record = StreamRecord::new(output);
+                        enqueue_sink_record(&sink, output_record).await;
+                        rule_mgr.inc_sink_records(&rule_id, 1);
+                    }
+                    buffer.clear();
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+fn tumbling_window_duration(unit: &TimeUnit, length: u64) -> std::time::Duration {
+    let millis: u128 = match unit {
+        TimeUnit::Ms => length as u128,
+        TimeUnit::Ss => length as u128 * 1_000,
+        TimeUnit::Mi => length as u128 * 60_000,
+        TimeUnit::Hh => length as u128 * 3_600_000,
+        TimeUnit::Dd => length as u128 * 86_400_000,
+    };
+    let millis = millis.min(u64::MAX as u128) as u64;
+    let duration = std::time::Duration::from_millis(millis);
+    if duration.is_zero() {
+        // tokio::time::interval panics on zero durations; clamp degenerate windows.
+        std::time::Duration::from_millis(1)
+    } else {
+        duration
+    }
+}
+
+async fn run_tumbling_window_rule(
+    rule_mgr: RuleManager,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: broadcast::Receiver<StreamRecord>,
+    duration: std::time::Duration,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    let mut ticker = tokio::time::interval(duration);
+    let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Ok(record) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        buffer.push(record.data);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = ticker.tick() => {
+                if buffer.is_empty() {
+                    continue;
+                }
+                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
+                    let output_record = StreamRecord::new(output);
+                    enqueue_sink_record(&sink, output_record).await;
+                    rule_mgr.inc_sink_records(&rule_id, 1);
+                }
+                buffer.clear();
+            }
+        }
+    }
+}
+
+async fn get_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(rule) = state.rule_manager.get_rule(&name) {
+        Json(rule).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response()
+    }
+}
+
+async fn get_rule_status(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(status) = state.rule_manager.get_rule_status(&name) {
+        Json(status).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response()
+    }
+}
+
+async fn get_all_rule_status(State(state): State<AppState>) -> impl IntoResponse {
+    let mut all = HashMap::new();
+    for rule in state.rule_manager.list_rules() {
+        if let Some(status) = state.rule_manager.get_rule_status(&rule.id) {
+            all.insert(rule.id, status);
+        }
+    }
+    Json(all)
+}
+
+async fn validate_rule(Json(rule): Json<RuleDefinition>) -> Response {
+    if rule.sql.trim().is_empty() {
+        if let Some(ref graph) = rule.graph {
+            return match compile_graph_to_sql_and_actions(graph) {
+                Ok((sql, _)) => {
+                    let mut parser = Parser::new(&sql);
+                    match parser.parse_select() {
+                        Ok(_) => (
+                            StatusCode::OK,
+                            "The rule has been validated successfully\n",
+                        )
+                            .into_response(),
+                        Err(e) => {
+                            (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
+                                .into_response()
+                        }
+                    }
+                }
+                Err(e) => {
+                    (StatusCode::BAD_REQUEST, format!("Invalid rule graph: {}", e)).into_response()
+                }
+            };
+        }
+    }
+    let mut parser = Parser::new(&rule.sql);
+    match parser.parse_select() {
+        Ok(_) => (
+            StatusCode::OK,
+            "The rule has been validated successfully\n",
+        )
+            .into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response(),
+    }
+}
+
+async fn get_rule_topo(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let Some(rule) = state.rule_manager.get_rule(&name) else {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    };
+    // Graph rules report their native DAG topology.
+    if let Some(ref graph) = rule.graph {
+        if !graph.nodes.is_empty() {
+            return Json(json!({
+                "sources": graph.topo.sources,
+                "nodes": graph.nodes.keys().cloned().collect::<Vec<_>>(),
+                "edges": graph.topo.edges,
+            }))
+            .into_response();
+        }
+    }
+    let mut parser = Parser::new(&rule.sql);
+    let select_stmt = match parser.parse_select() {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
+        }
+    };
+    let from = select_stmt.from.clone();
+    let source_node = format!("source_{}", from);
+    let mut edges = serde_json::Map::new();
+    edges.insert(source_node.clone(), json!(["op_eval"]));
+    edges.insert("op_eval".to_string(), json!(["sink_actions"]));
+    Json(json!({
+        "sources": [from],
+        "nodes": [source_node, "op_eval", "sink_actions"],
+        "edges": edges,
+    }))
+    .into_response()
+}
+
+async fn get_rule_explain(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let Some(rule) = state.rule_manager.get_rule(&name) else {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    };
+    let mut parser = Parser::new(&rule.sql);
+    let select_stmt = match parser.parse_select() {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
+        }
+    };
+    let action_kinds: Vec<String> = rule
+        .actions
+        .iter()
+        .flat_map(|a| a.keys().cloned())
+        .collect();
+    Json(json!({
+        "rule": name,
+        "source": select_stmt.from,
+        "projection": select_stmt.fields.iter().map(expr_to_string).collect::<Vec<_>>(),
+        "filter": select_stmt.where_clause.as_ref().map(expr_to_string),
+        "window": select_stmt.window.as_ref().map(window_to_string),
+        "groupBy": select_stmt.group_by.iter().map(expr_to_string).collect::<Vec<_>>(),
+        "having": select_stmt.having.as_ref().map(expr_to_string),
+        "actions": action_kinds,
+    }))
+    .into_response()
+}
+
+fn time_unit_to_string(unit: &TimeUnit) -> &'static str {
+    match unit {
+        TimeUnit::Dd => "dd",
+        TimeUnit::Hh => "hh",
+        TimeUnit::Mi => "mi",
+        TimeUnit::Ss => "ss",
+        TimeUnit::Ms => "ms",
+    }
+}
+
+fn window_to_string(window: &WindowDef) -> String {
+    match window {
+        WindowDef::TumblingTime { unit, length } => {
+            format!("TUMBLINGWINDOW({}, {})", time_unit_to_string(unit), length)
+        }
+        WindowDef::HoppingTime { unit, length, interval } => format!(
+            "HOPPINGWINDOW({}, {}, {})",
+            time_unit_to_string(unit),
+            length,
+            interval
+        ),
+        WindowDef::SlidingTime { unit, length } => {
+            format!("SLIDINGWINDOW({}, {})", time_unit_to_string(unit), length)
+        }
+        WindowDef::Count { size, interval } => match interval {
+            Some(i) => format!("COUNTWINDOW({}, {})", size, i),
+            None => format!("COUNTWINDOW({})", size),
+        },
+    }
+}
+
+fn expr_to_string(expr: &Expr) -> String {
+    match expr {
+        Expr::Wildcard => "*".to_string(),
+        Expr::Identifier(name) => name.clone(),
+        Expr::Literal(v) => v.to_string(),
+        Expr::BinaryOp { left, op, right } => {
+            let op_str = match op {
+                rekuiper_sql::BinaryOperator::Eq => "=",
+                rekuiper_sql::BinaryOperator::Neq => "!=",
+                rekuiper_sql::BinaryOperator::Lt => "<",
+                rekuiper_sql::BinaryOperator::Lte => "<=",
+                rekuiper_sql::BinaryOperator::Gt => ">",
+                rekuiper_sql::BinaryOperator::Gte => ">=",
+                rekuiper_sql::BinaryOperator::And => "AND",
+                rekuiper_sql::BinaryOperator::Or => "OR",
+                rekuiper_sql::BinaryOperator::Add => "+",
+                rekuiper_sql::BinaryOperator::Sub => "-",
+                rekuiper_sql::BinaryOperator::Mul => "*",
+                rekuiper_sql::BinaryOperator::Div => "/",
+                rekuiper_sql::BinaryOperator::Mod => "%",
+                rekuiper_sql::BinaryOperator::Like => "LIKE",
+            };
+            format!("{} {} {}", expr_to_string(left), op_str, expr_to_string(right))
+        }
+        Expr::UnaryOp { op, expr } => match op {
+            rekuiper_sql::UnaryOperator::Not => format!("NOT {}", expr_to_string(expr)),
+            rekuiper_sql::UnaryOperator::Neg => format!("-{}", expr_to_string(expr)),
+        },
+        Expr::Between { expr, low, high, negated } => format!(
+            "{} {}BETWEEN {} AND {}",
+            expr_to_string(expr),
+            if *negated { "NOT " } else { "" },
+            expr_to_string(low),
+            expr_to_string(high)
+        ),
+        Expr::InList { expr, list, negated } => format!(
+            "{} {}IN ({})",
+            expr_to_string(expr),
+            if *negated { "NOT " } else { "" },
+            list.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+        ),
+        Expr::IsNull { expr, negated } => format!(
+            "{} IS {}NULL",
+            expr_to_string(expr),
+            if *negated { "NOT " } else { "" }
+        ),
+        Expr::FieldAccess { parent, field } => {
+            format!("{}.{}", expr_to_string(parent), field)
+        }
+        Expr::Call { name, args } => format!(
+            "{}({})",
+            name,
+            args.iter().map(expr_to_string).collect::<Vec<_>>().join(", ")
+        ),
+        Expr::Case { .. } => "CASE ... END".to_string(),
+        Expr::Over { call, .. } => format!("{} OVER (...)", expr_to_string(call)),
+    }
+}
+
+async fn start_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.rule_manager.start_rule(&name) {
+        Ok(_) => (StatusCode::OK, format!("Rule {} was started", name)).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn stop_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.rule_manager.stop_rule(&name) {
+        Ok(_) => {
+            cancel_httppull(&state, &name);
+            (StatusCode::OK, format!("Rule {} was stopped", name)).into_response()
+        }
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn restart_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let _ = state.rule_manager.stop_rule(&name);
+    cancel_httppull(&state, &name);
+    match state.rule_manager.start_rule(&name) {
+        Ok(_) => (StatusCode::OK, format!("Rule {} was restarted", name)).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn delete_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.rule_manager.delete_rule(&name) {
+        Ok(_) => {
+            cancel_httppull(&state, &name);
+            (StatusCode::OK, format!("Rule {} is dropped.\n", name)).into_response()
+        }
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn get_configs(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.config.clone())
+}
+
+/// Unified ruleset export: all streams, tables and rules with full definitions.
+async fn export_ruleset(State(state): State<AppState>) -> impl IntoResponse {
+    let streams: Vec<StreamDefinition> = {
+        let names = state.stream_manager.list_streams();
+        names
+            .iter()
+            .filter_map(|n| state.stream_manager.get_stream(n))
+            .collect()
+    };
+    let tables: Vec<TableDefinition> = {
+        let names = state.table_manager.list_tables();
+        names
+            .iter()
+            .filter_map(|n| state.table_manager.get_table(n))
+            .collect()
+    };
+    let rules = state.rule_manager.list_rules();
+    Json(json!({
+        "streams": streams,
+        "tables": tables,
+        "rules": rules,
+    }))
+}
+
+/// Unified ruleset import: creates streams, tables and rules from an export
+/// payload. Also accepts the legacy `{name: sql}` map form for streams and
+/// tables. Existing entities are left untouched.
+async fn import_ruleset(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    if let Some(streams) = payload.get("streams") {
+        if let Some(defs) = streams.as_array() {
+            for item in defs {
+                if let Ok(def) = serde_json::from_value::<StreamDefinition>(item.clone()) {
+                    let name = def.name.clone();
+                    let _ = state.stream_manager.create_stream(def);
+                    state.stream_bus.get_or_create(&name);
+                }
+            }
+        } else if let Some(map) = streams.as_object() {
+            for (name, sql) in map {
+                let sql_str = sql.as_str().unwrap_or("");
+                let mut parser = Parser::new(sql_str);
+                if let Ok(stmt) = parser.parse_create_stream() {
+                    let stream_name = stmt.name.clone();
+                    let _ = state.stream_manager.create_stream(StreamDefinition {
+                        name: stream_name.clone(),
+                        sql: sql_str.to_string(),
+                        options: stmt.options,
+                    });
+                    state.stream_bus.get_or_create(&stream_name);
+                } else if !name.is_empty() {
+                    let _ = state.stream_manager.create_stream(StreamDefinition {
+                        name: name.clone(),
+                        sql: sql_str.to_string(),
+                        options: HashMap::new(),
+                    });
+                    state.stream_bus.get_or_create(name);
+                }
+            }
+        }
+    }
+
+    if let Some(tables) = payload.get("tables") {
+        if let Some(defs) = tables.as_array() {
+            for item in defs {
+                if let Ok(def) = serde_json::from_value::<TableDefinition>(item.clone()) {
+                    let _ = state.table_manager.create_table(def);
+                }
+            }
+        } else if let Some(map) = tables.as_object() {
+            for (name, sql) in map {
+                let sql_str = sql.as_str().unwrap_or("");
+                let mut parser = Parser::new(sql_str);
+                if let Ok(stmt) = parser.parse_create_table() {
+                    let _ = state.table_manager.create_table(TableDefinition {
+                        name: stmt.name.clone(),
+                        sql: sql_str.to_string(),
+                        options: stmt.options,
+                    });
+                } else if !name.is_empty() {
+                    let _ = state.table_manager.create_table(TableDefinition {
+                        name: name.clone(),
+                        sql: sql_str.to_string(),
+                        options: HashMap::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    if let Some(rules) = payload.get("rules") {
+        if let Some(defs) = rules.as_array() {
+            for item in defs {
+                let Ok(def) = serde_json::from_value::<RuleDefinition>(item.clone()) else {
+                    continue;
+                };
+                let mut parser = Parser::new(&def.sql);
+                let Ok(select_stmt) = parser.parse_select() else {
+                    continue;
+                };
+                if state.rule_manager.create_rule(def.clone()).is_err() {
+                    continue;
+                }
+                spawn_rule_task(
+                    &state.rule_manager,
+                    &state.stream_bus,
+                    &state.stream_manager,
+                    &state.table_manager,
+                    &state.source_configs,
+                    &state.http_client,
+                    def.id.clone(),
+                    select_stmt,
+                    def.actions.clone(),
+                );
+            }
+        }
+    }
+
+    (StatusCode::OK, "imported successfully\n").into_response()
+}
+
+// ---------------------------------------------------------------------------
+// eKuiper Manager OpenAPI: metadata discovery, connections, plugins,
+// services, schemas and system utilities.
+// ---------------------------------------------------------------------------
+
+fn named_entries(names: &[&str]) -> Value {
+    Value::Array(
+        names
+            .iter()
+            .map(|n| json!({ "name": n }))
+            .collect(),
+    )
+}
+
+/// Rejects resource names carrying characters that break routing or the
+/// manager UI (mirrors eKuiper's validation FVT expectations).
+fn check_valid_name(name: &str) -> Result<(), Response> {
+    if name.contains(' ')
+        || name.contains("%20")
+        || name.contains(';')
+        || name.contains('/')
+        || name.contains('\\')
+    {
+        return Err(
+            (StatusCode::BAD_REQUEST, format!("name '{}' contains invalid characters", name))
+                .into_response(),
+        );
+    }
+    Ok(())
+}
+
+/// Generic empty-list response for discovery endpoints with nothing installed.
+async fn empty_array() -> impl IntoResponse {
+    Json(Value::Array(Vec::new()))
+}
+
+/// Validated variants of the discovery stubs below: they accept any number of
+/// path captures (`Path<HashMap<..>>` also matches capture-less routes) and
+/// reject names with invalid characters before responding as usual.
+async fn validated_empty_array(Path(params): Path<HashMap<String, String>>) -> Response {
+    for name in params.values() {
+        if let Err(resp) = check_valid_name(name) {
+            return resp;
+        }
+    }
+    Json(Value::Array(Vec::new())).into_response()
+}
+
+async fn validated_empty_object(Path(params): Path<HashMap<String, String>>) -> Response {
+    for name in params.values() {
+        if let Err(resp) = check_valid_name(name) {
+            return resp;
+        }
+    }
+    Json(json!({})).into_response()
+}
+
+async fn validated_empty_ok(Path(params): Path<HashMap<String, String>>) -> Response {
+    for name in params.values() {
+        if let Err(resp) = check_valid_name(name) {
+            return resp;
+        }
+    }
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+/// Generic empty-object response for unimplemented detail endpoints.
+async fn empty_object() -> impl IntoResponse {
+    Json(json!({}))
+}
+
+/// Generic success acknowledgement for fire-and-forget endpoints.
+async fn empty_ok() -> impl IntoResponse {
+    (StatusCode::OK, Json(json!({"message": "success"})))
+}
+
+/// Empty YAML document response for metadata YAML endpoints.
+async fn empty_yaml() -> impl IntoResponse {
+    (StatusCode::OK, Json(json!({"yaml": ""})))
+}
+
+async fn get_rule_schema(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    if state.rule_manager.get_rule(&id).is_some() {
+        (StatusCode::OK, Json(json!({}))).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Rule {} not found", id)).into_response()
+    }
+}
+
+async fn async_task_started() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({"task_id": "task_1", "status": "running"})),
+    )
+}
+
+async fn async_task_status(Path(id): Path<String>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({"task_id": id, "status": "completed"})),
+    )
+}
+
+async fn async_task_cancelled(Path(id): Path<String>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({"task_id": id, "status": "cancelled"})),
+    )
+}
+
+async fn list_source_metadata() -> impl IntoResponse {
+    Json(named_entries(&["mqtt", "http", "file", "memory"]))
+}
+
+async fn list_sink_metadata() -> impl IntoResponse {
+    Json(named_entries(&["mqtt", "http", "file", "log", "memory"]))
+}
+
+async fn list_function_metadata() -> impl IntoResponse {
+    Json(named_entries(&[
+        "abs", "ceil", "ceiling", "floor", "round", "sqrt", "power", "pow", "concat",
+        "lower", "upper", "length", "trim", "substr", "substring", "startswith",
+        "endswith", "cast", "coalesce", "count", "sum", "avg", "min", "max",
+    ]))
+}
+
+async fn list_operator_metadata() -> impl IntoResponse {
+    Json(named_entries(&[
+        "+", "-", "*", "/", "=", "!=", "<", ">", "AND", "OR", "NOT", "BETWEEN", "IN",
+    ]))
+}
+
+async fn list_metadata_connections() -> impl IntoResponse {
+    Json(Value::Array(Vec::new()))
+}
+
+async fn list_metadata_resources() -> impl IntoResponse {
+    Json(Value::Array(Vec::new()))
+}
+
+async fn get_source_metadata(Path(name): Path<String>) -> impl IntoResponse {
+    Json(json!({ "name": name, "about": {} }))
+}
+
+async fn get_sink_metadata(Path(name): Path<String>) -> impl IntoResponse {
+    Json(json!({ "name": name, "about": {} }))
+}
+
+/// Stores a source configuration under `<name>/<conf_key>` for later lookup
+/// by simulator (and other file-based) sources.
+async fn save_source_conf_key(
+    State(state): State<AppState>,
+    Path((name, conf_key)): Path<(String, String)>,
+    Json(payload): Json<Value>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&conf_key) {
+        return resp;
+    }
+    state
+        .source_configs
+        .write()
+        .insert(format!("{}/{}", name, conf_key), payload);
+    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+}
+
+async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
+    let conns: Vec<Value> = state.connections.read().values().cloned().collect();
+    Json(conns)
+}
+
+async fn create_connection(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let id = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .or_else(|| payload.get("name").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    if id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing connection id").into_response();
+    }
+    state.connections.write().insert(id.clone(), payload);
+    (
+        StatusCode::CREATED,
+        format!("Connection {} is created.\n", id),
+    )
+        .into_response()
+}
+
+async fn get_connection(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Some(conn) = state.connections.read().get(&id).cloned() {
+        Json(conn).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Connection {} not found", id)).into_response()
+    }
+}
+
+async fn delete_connection(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    if state.connections.write().remove(&id).is_some() {
+        (StatusCode::OK, format!("Connection {} is dropped.\n", id)).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Connection {} not found", id)).into_response()
+    }
+}
+
+async fn bulk_start_rules(State(state): State<AppState>) -> impl IntoResponse {
+    for rule in state.rule_manager.list_rules() {
+        let _ = state.rule_manager.start_rule(&rule.id);
+    }
+    (StatusCode::OK, Json(json!({})))
+}
+
+async fn bulk_stop_rules(State(state): State<AppState>) -> impl IntoResponse {
+    for rule in state.rule_manager.list_rules() {
+        let _ = state.rule_manager.stop_rule(&rule.id);
+        cancel_httppull(&state, &rule.id);
+    }
+    (StatusCode::OK, Json(json!({})))
+}
+
+async fn reset_rule_state(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    match state.rule_manager.reset_rule_metrics(&name) {
+        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn rule_cpu_usage() -> impl IntoResponse {
+    Json(json!({}))
+}
+
+async fn rule_tags_match() -> impl IntoResponse {
+    Json(Value::Array(Vec::new()))
+}
+
+async fn get_config_uploads() -> impl IntoResponse {
+    Json(Value::Array(Vec::new()))
+}
+
+async fn stop_server() -> impl IntoResponse {
+    (StatusCode::OK, "Server is shutting down\n")
+}
+
+async fn import_status() -> impl IntoResponse {
+    Json(json!({ "status": "completed" }))
+}
+
+async fn metrics_dump() -> impl IntoResponse {
+    Json(json!({ "metrics": {} }))
+}
+
+/// Prometheus text exposition of rule metrics (eKuiper monitor endpoint).
+///
+/// Reports per-rule status/counters plus running/stopped rule counts in the
+/// standard exposition format with `# HELP` / `# TYPE` comments.
+pub async fn prometheus_metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let mut running: u64 = 0;
+    let mut stopped: u64 = 0;
+    let mut out = String::new();
+
+    out.push_str("# HELP kuiper_rule_count gauge of rule status count\n");
+    out.push_str("# TYPE kuiper_rule_count gauge\n");
+
+    let mut rule_lines = String::new();
+    rule_lines.push_str("# HELP kuiper_rule_status gauge of rule status\n");
+    rule_lines.push_str("# TYPE kuiper_rule_status gauge\n");
+
+    let mut sink_in = String::new();
+    sink_in.push_str("# HELP kuiper_sink_records_in_total total number of messages read in\n");
+    sink_in.push_str("# TYPE kuiper_sink_records_in_total counter\n");
+
+    let mut sink_out = String::new();
+    sink_out.push_str("# HELP kuiper_sink_records_out_total total number of messages output\n");
+    sink_out.push_str("# TYPE kuiper_sink_records_out_total counter\n");
+
+    let mut sink_err = String::new();
+    sink_err.push_str("# HELP kuiper_sink_exceptions_total total number of exceptions\n");
+    sink_err.push_str("# TYPE kuiper_sink_exceptions_total counter\n");
+
+    let mut latency = String::new();
+    latency.push_str(
+        "# HELP kuiper_sink_process_latency_us latency of most recent processing in microseconds\n",
+    );
+    latency.push_str("# TYPE kuiper_sink_process_latency_us gauge\n");
+
+    let mut source_in = String::new();
+    source_in
+        .push_str("# HELP kuiper_source_records_in_total total number of messages read in\n");
+    source_in.push_str("# TYPE kuiper_source_records_in_total counter\n");
+
+    let mut source_out = String::new();
+    source_out
+        .push_str("# HELP kuiper_source_records_out_total total number of messages output\n");
+    source_out.push_str("# TYPE kuiper_source_records_out_total counter\n");
+
+    for rule in state.rule_manager.list_rules() {
+        let Some(status) = state.rule_manager.get_rule_status(&rule.id) else {
+            continue;
+        };
+        match status.status.as_str() {
+            "running" => running += 1,
+            _ => stopped += 1,
+        }
+        // Status: 1 running, 0 paused/stopped, -1 abnormal exit.
+        let code = match status.status.as_str() {
+            "running" => 1,
+            "stopped" => 0,
+            _ => -1,
+        };
+        // This engine tracks no per-record latency yet; export 0.
+        let latency_us: u64 = 0;
+        rule_lines.push_str(&format!("kuiper_rule_status{{rule=\"{}\"}} {}\n", rule.id, code));
+        sink_in.push_str(&format!(
+            "kuiper_sink_records_in_total{{rule=\"{}\"}} {}\n",
+            rule.id, status.source_records_in_total
+        ));
+        sink_out.push_str(&format!(
+            "kuiper_sink_records_out_total{{rule=\"{}\"}} {}\n",
+            rule.id, status.sink_records_out_total
+        ));
+        sink_err.push_str(&format!(
+            "kuiper_sink_exceptions_total{{rule=\"{}\"}} {}\n",
+            rule.id, status.exceptions_total
+        ));
+        latency.push_str(&format!(
+            "kuiper_sink_process_latency_us{{rule=\"{}\"}} {}\n",
+            rule.id, latency_us
+        ));
+        source_in.push_str(&format!(
+            "kuiper_source_records_in_total{{rule=\"{}\"}} {}\n",
+            rule.id, status.source_records_in_total
+        ));
+        source_out.push_str(&format!(
+            "kuiper_source_records_out_total{{rule=\"{}\"}} {}\n",
+            rule.id, status.source_records_in_total
+        ));
+    }
+
+    out.push_str(&format!("kuiper_rule_count{{status=\"running\"}} {}\n", running));
+    out.push_str(&format!("kuiper_rule_count{{status=\"stop\"}} {}\n", stopped));
+    out.push_str(&rule_lines);
+    out.push_str(&sink_in);
+    out.push_str(&sink_out);
+    out.push_str(&sink_err);
+    out.push_str(&latency);
+    out.push_str(&source_in);
+    out.push_str(&source_out);
+
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        out,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Interactive rule simulation (ruletest) with SSE streaming output.
+// ---------------------------------------------------------------------------
+
+/// Payload for `POST /ruletest`. All fields are optional so that probes
+/// without a body still receive a usable session.
+#[derive(Debug, Default, Deserialize)]
+struct CreateRuletestPayload {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    sql: Option<String>,
+    #[serde(default, rename = "mockSource")]
+    mock_source: HashMap<String, SimulatorConfig>,
+}
+
+fn generate_ruletest_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("ruletest-{}-{}", std::process::id(), nanos)
+}
+
+async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response {
+    let payload: CreateRuletestPayload = if body.is_empty() {
+        CreateRuletestPayload::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(p) => p,
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, format!("Invalid ruletest payload: {}", e))
+                    .into_response();
+            }
+        }
+    };
+    let id = payload.id.unwrap_or_else(generate_ruletest_id);
+    let (output_tx, _) = tokio::sync::broadcast::channel::<String>(256);
+    state.ruletests.write().insert(
+        id.clone(),
+        RuletestSession {
+            id: id.clone(),
+            sql: payload.sql.unwrap_or_default(),
+            mock_source: payload.mock_source,
+            output_tx,
+        },
+    );
+    (
+        StatusCode::OK,
+        Json(json!({ "id": id, "port": state.config.basic.port })),
+    )
+        .into_response()
+}
+
+async fn start_ruletest(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let Some(session) = state.ruletests.read().get(&name).cloned() else {
+        // Keep the endpoint total: unknown sessions are still acknowledged.
+        return (StatusCode::OK, "started\n").into_response();
+    };
+    tokio::spawn(async move {
+        let mut parser = Parser::new(&session.sql);
+        let Ok(select_stmt) = parser.parse_select() else {
+            return;
+        };
+        // Replay the mock data registered for the rule's source stream.
+        let data: Vec<HashMap<String, Value>> = session
+            .mock_source
+            .get(&select_stmt.from)
+            .map(|conf| conf.data.clone())
+            .unwrap_or_default();
+        let rule_state = RuleState::default();
+        for record in &data {
+            for row in Evaluator::eval_select_stateful_multi(&select_stmt, record, &rule_state) {
+                let line = serde_json::to_string(&row).unwrap_or_default();
+                let _ = session.output_tx.send(line);
+            }
+        }
+    });
+    (StatusCode::OK, "started\n").into_response()
+}
+
+async fn delete_ruletest(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    state.ruletests.write().remove(&name);
+    (StatusCode::OK, "dropped\n").into_response()
+}
+
+async fn sse_ruletest(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let Some(session) = state.ruletests.read().get(&name).cloned() else {
+        return (StatusCode::NOT_FOUND, format!("Ruletest {} not found", name)).into_response();
+    };
+    let rx = session.output_tx.subscribe();
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            Ok(line) => Some((Ok::<_, axum::Error>(Event::default().data(line)), rx)),
+            Err(_) => None,
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::new()).into_response()
+}

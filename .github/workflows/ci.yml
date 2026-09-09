@@ -1,0 +1,42 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ master, main, rekuiper-dev ]
+  pull_request:
+    branches: [ master, main, rekuiper-dev ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Code Formatting Check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy Warnings Check
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run Workspace Tests
+        run: cargo test --workspace --verbose
+
+      - name: Run High-Throughput Performance Benchmark
+        run: cargo test --test perf_throughput -- --nocapture

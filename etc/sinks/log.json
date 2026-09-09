@@ -1,0 +1,28 @@
+{
+  "about": {
+    "trial": false,
+    "author": {
+      "name": "EMQ",
+      "email": "contact@emqx.io",
+      "company": "EMQ Technologies Co., Ltd",
+      "website": "https://www.emqx.io"
+    },
+    "helpUrl": {
+      "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/builtin/log.html",
+      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sinks/builtin/log.html"
+    },
+    "description": {
+      "en_US": "The action is used for print output message into log file",
+      "zh_CN": "该操作用于将输出消息打印到日志文件中"
+    }
+  },
+  "properties": [],
+  "node": {
+    "category": "sink",
+    "icon": "iconPath",
+    "label": {
+      "en": "Log",
+      "zh": "Log"
+    }
+  }
+}

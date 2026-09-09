@@ -1,0 +1,57 @@
+{
+  "about": {
+    "trial": true,
+    "author": {
+      "name": "EMQ",
+      "email": "contact@emqx.io",
+      "company": "EMQ Technologies Co., Ltd",
+      "website": "https://www.emqx.io"
+    },
+    "helpUrl": {
+      "en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/neuron.html",
+      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/neuron.html"
+    },
+    "description": {
+      "en_US": "Consume data from the data collection engine.",
+      "zh_CN": "从数采引擎中消费数据。"
+    }
+  },
+  "libs": [],
+  "dataSource": {},
+  "properties": {
+    "default": [
+      {
+        "name": "url",
+        "default": "tcp://127.0.0.1:7081",
+        "optional": false,
+        "control": "text",
+        "type": "string",
+        "hint": {
+          "en_US": "The url to connect to data collection engine.",
+          "zh_CN": "连接数采引擎的 URL"
+        },
+        "label": {
+          "en_US": "URL",
+          "zh_CN": "路径"
+        }
+      }
+    ]
+  },
+  "outputs": [
+    {
+      "label": {
+        "en_US": "Output",
+        "zh_CN": "输出"
+      },
+      "value": "signal"
+    }
+  ],
+  "node": {
+    "category": "source",
+    "icon": "iconPath",
+    "label": {
+      "en_US": "Neuron",
+      "zh_CN": "Neuron"
+    }
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "about": {
+    "trial": false,
+    "author": {
+      "name": "EMQ",
+      "email": "contact@emqx.io",
+      "company": "EMQ Technologies Co., Ltd",
+      "website": "https://www.emqx.io"
+    },
+    "helpUrl": {
+      "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/builtin/neuron.html",
+      "zh_CN": "https://github.com/lf-edge/ekuiper/blob/master/docs/zh_CN/rules/sinks/builtin/"
+    },
+    "description": {
+      "en_US": "The action is used to publish the result into the data collection engine.",
+      "zh_CN": "该操作用于发送消息到数采引擎中。"
+    }
+  },
+  "properties": [
+    {
+      "name": "url",
+      "default": "tcp://127.0.0.1:7081",
+      "optional": false,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The url to connect to data collection engine.",
+        "zh_CN": "连接数采引擎的 URL"
+      },
+      "label": {
+        "en_US": "URL",
+        "zh_CN": "路径"
+      }
+    },
+    {
+      "name": "nodeName",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The data collection engine node name",
+        "zh_CN": "数采引擎节点名称"
+      },
+      "label": {
+        "en_US": "Node Name",
+        "zh_CN": "节点名称"
+      }
+    },
+    {
+      "name": "groupName",
+      "default": "",
+      "optional": true,
+      "control": "text",
+      "type": "string",
+      "hint": {
+        "en_US": "The data collection engine node's group name",
+        "zh_CN": "数采引擎节点分组名称"
+      },
+      "label": {
+        "en_US": "Group Name",
+        "zh_CN": "分组名称"
+      }
+    },
+    {
+      "name": "tags",
+      "default": [],
+      "optional": true,
+      "control": "list",
+      "type": "list_string",
+      "hint": {
+        "en_US": "Tags to be sent",
+        "zh_CN": "要写入的数据标签，规则中的字段名称和数采引擎中的数据标签名称应相同。"
+      },
+      "label": {
+        "en_US": "Tags",
+        "zh_CN": "标签字段"
+      }
+    },
+    {
+      "name": "raw",
+      "optional": true,
+      "control": "radio",
+      "default": false,
+      "type": "bool",
+      "hint": {
+        "en_US": "Whether to send the original string. Select Yes to send the original data to the data collection engine through the data template, while ignoring the configuration of the node name, group name, and tags.",
+        "zh_CN": "是否发送原始字符串。选择是，则通过数据模板发送原始数据给数采引擎，同时忽略节点名称、分组名称、标签字段的配置。"
+      },
+      "label": {
+        "en_US": "Raw",
+        "zh_CN": "原始字符串"
+      }
+    }
+  ],
+  "node": {
+    "category": "sink",
+    "icon": "iconPath",
+    "label": {
+      "en": "Neuron",
+      "zh": "Neuron"
+    }
+  }
+}
