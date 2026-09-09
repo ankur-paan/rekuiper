@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]+.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.420-beta)'
+        required: false
+        default: 'v0.420-beta'
 
 permissions:
   contents: write
@@ -23,7 +30,7 @@ jobs:
             os: windows-latest
             archive: zip
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -44,7 +51,7 @@ jobs:
       - name: Package Release Assets
         shell: bash
         run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
+          TAG_NAME="${{ inputs.tag || github.ref_name }}"
           PKG_NAME="rekuiper-${TAG_NAME}-${{ matrix.target }}"
           mkdir -p "dist/${PKG_NAME}/bin" "dist/${PKG_NAME}/etc"
 
@@ -55,7 +62,7 @@ jobs:
             cp LICENSE README.md RELEASE_NOTES.md "dist/${PKG_NAME}/"
             cd dist
             7z a "${PKG_NAME}.zip" "${PKG_NAME}"
-            certutil -hashfile "${PKG_NAME}.zip" SHA256 | findstr -v "hash" | findstr -v "CertUtil" | tr -d " \r\n" > "${PKG_NAME}.zip.sha256"
+            sha256sum "${PKG_NAME}.zip" > "${PKG_NAME}.zip.sha256"
           else
             cp "target/${{ matrix.target }}/release/kuiperd" "dist/${PKG_NAME}/bin/"
             cp "target/${{ matrix.target }}/release/kuiper" "dist/${PKG_NAME}/bin/"
@@ -63,12 +70,46 @@ jobs:
             cp LICENSE README.md RELEASE_NOTES.md "dist/${PKG_NAME}/"
             cd dist
             tar -czvf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
-            shasum -a 256 "${PKG_NAME}.tar.gz" | cut -d ' ' -f 1 > "${PKG_NAME}.tar.gz.sha256"
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+            else
+              shasum -a 256 "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+            fi
           fi
 
-      - name: Upload Release Artifacts
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-assets-*
+          merge-multiple: true
+
+      - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: "rekuiper ${{ inputs.tag || github.ref_name }}"
+          generate_release_notes: true
           files: |
             dist/*.tar.gz
             dist/*.zip
