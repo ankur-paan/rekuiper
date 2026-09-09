@@ -174,16 +174,16 @@ docker compose -f deploy/docker/docker-compose.yml up -d
 
 ### Option 3: Build from Source
 
-Prerequisites: Rust 1.78+ (`rustup toolchain install stable`).
+Prerequisites: Rust 1.85+ (`rustup update stable`).
 
 ```bash
-git clone https://github.com/lf-edge/ekuiper.git rekuiper
+git clone https://github.com/ankur-paan/rekuiper.git
 cd rekuiper
 
-# Build release binaries in parallel
+# Build release binaries in parallel (placed in target/release/)
 cargo build --release
 
-# Binaries are placed in target/release/ (or bin/ via make build)
+# Or build and bundle binaries into bin/
 make build
 ```
 
