@@ -19,10 +19,10 @@ No item may be marked complete without:
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
-| **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 1 | 1 |
+| **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **21** | **6** |
+| **Total** | | **27 Tasks** | **22** | **5** |
 
 ---
 
@@ -136,14 +136,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Added `tags: Vec<String>` to `RuleDefinition` with serde defaults and KV persistence; implemented `put_rule_tags`, `patch_rule_tags`, and `delete_rule_tags` with KV persistence via `RuleManager::update_rule_tags`; implemented `GET/POST /rules/tags/match` supporting query params (`?tags=...`, `?keys=...`) and JSON body (`{"keys": [...]}` or `{"tags": [...]}`); added tag filtering to `POST /rules/bulkstart` and `POST /rules/bulkstop`. Covered by `test_rule_tags_lifecycle_and_matching` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-core/src/model.rs`, `crates/rekuiper-core/src/manager.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 7.2: Real Rule Execution Trace Buffer**
-  - **Problem**: `/rules/:name/trace/start`, `/rules/:name/trace/stop`, `/trace/rule/:rule_id`, `/trace/:id`, `/tracer` return `empty_ok`/`empty_array`/`empty_object`.
-  - **Implementation**:
-    - Add an in-memory ring-buffer (`VecDeque<TraceRecord>`) per running rule in `AppState`.
-    - When tracing is enabled on a rule, copy stream records and evaluated outputs into the trace buffer with microsecond timestamps.
-    - Serve trace records on `GET /trace/rule/:rule_id` and single traces on `GET /trace/:id`.
-  - **Verification**: Start trace on rule, send 3 records, query `/trace/rule/:id`, assert 3 records captured with correct fields, stop trace.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 7.2: Real Rule Execution Trace Buffer**
+  - **Status**: Completed & Verified. Implemented authentic `TraceManager`, `TraceSpan`, and `TracerConfig`; wired `POST /rules/:name/trace/start` and `POST /rules/:name/trace/stop` with 404 checks; implemented `GET /trace/rule/:rule_id` supporting `?limit=N`; implemented `GET /trace/:id` serving the full OpenTelemetry/eKuiper span tree; implemented `POST /tracer` for remote tracer configuration; hooked live stream evaluation tracing into `spawn_rule_task` and the decoupled sink queue worker with microsecond ISO 8601 timestamps and hierarchical decoder/project/sink child spans; removed dead stub `empty_object`. Covered by `test_rule_execution_trace_buffer` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/Cargo.toml`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 

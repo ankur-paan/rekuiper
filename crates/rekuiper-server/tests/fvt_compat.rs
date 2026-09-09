@@ -4089,3 +4089,176 @@ async fn test_rule_tags_lifecycle_and_matching() {
         .send()
         .await;
 }
+
+#[tokio::test]
+async fn test_rule_execution_trace_buffer() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Create stream
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "create stream stream_trace () WITH (FORMAT=\"JSON\");"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 2. Create rule
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "rule_trace_1",
+            "sql": "SELECT * FROM stream_trace",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 3. Initial trace IDs list should be empty
+    let resp = client
+        .get(format!("{}/trace/rule/rule_trace_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let trace_ids: Vec<String> = resp.json().await.unwrap();
+    assert!(trace_ids.is_empty());
+
+    // 4. Non-existent rule trace start/stop should return 404
+    let resp = client
+        .post(format!("{}/rules/nonexistent/trace/start", base_url))
+        .json(&serde_json::json!({"strategy": "always"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let resp = client
+        .post(format!("{}/rules/nonexistent/trace/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 5. Start trace on rule_trace_1
+    let resp = client
+        .post(format!("{}/rules/rule_trace_1/trace/start", base_url))
+        .json(&serde_json::json!({"strategy": "always"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 6. Push 3 records to stream_trace
+    for i in 1..=3 {
+        let resp = client
+            .post(format!("{}/streams/stream_trace/data", base_url))
+            .json(&serde_json::json!({
+                "temperature": 20.0 + (i as f64),
+                "humidity": 50 + i
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // 7. Verify 3 trace IDs captured
+    let resp = client
+        .get(format!("{}/trace/rule/rule_trace_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let trace_ids: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(trace_ids.len(), 3);
+
+    // 8. Test limit query param
+    let resp = client
+        .get(format!("{}/trace/rule/rule_trace_1?limit=2", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let limited_ids: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(limited_ids.len(), 2);
+
+    // 9. Inspect a trace by ID
+    let sample_id = &trace_ids[0];
+    let resp = client
+        .get(format!("{}/trace/{}", base_url, sample_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let span: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(span["Name"], "rule_trace_1");
+    assert_eq!(span["TraceID"], sample_id.as_str());
+    assert_eq!(span["ParentSpanID"], "0000000000000000");
+    assert!(span["ChildSpan"].is_array());
+    let child_spans = span["ChildSpan"].as_array().unwrap();
+    assert!(!child_spans.is_empty());
+    assert_eq!(child_spans[0]["Name"], "rule_trace_1_decoder");
+
+    // 10. Stop tracing
+    let resp = client
+        .post(format!("{}/rules/rule_trace_1/trace/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 11. Push a 4th record
+    let resp = client
+        .post(format!("{}/streams/stream_trace/data", base_url))
+        .json(&serde_json::json!({
+            "temperature": 35.0,
+            "humidity": 75
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // 12. Verify count is still 3 (tracing was stopped)
+    let resp = client
+        .get(format!("{}/trace/rule/rule_trace_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let trace_ids_after: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(trace_ids_after.len(), 3);
+
+    // 13. Test /tracer configuration endpoint
+    let resp = client
+        .post(format!("{}/tracer", base_url))
+        .json(&serde_json::json!({
+            "service_name": "rekuiper",
+            "action": "start",
+            "collector_url": "http://localhost:4318"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 14. Cleanup
+    let _ = client
+        .delete(format!("{}/rules/rule_trace_1", base_url))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{}/streams/stream_trace", base_url))
+        .send()
+        .await;
+}

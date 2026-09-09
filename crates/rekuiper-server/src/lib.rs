@@ -56,6 +56,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
             .tcp_nodelay(true)
             .build()
             .unwrap_or_default(),
+        trace_manager: routes::TraceManager::new(),
     };
 
     restore_running_rules(&state).await;

@@ -28,6 +28,7 @@ rekuiper-conf = { workspace = true }
 rekuiper-core = { workspace = true }
 rekuiper-sql = { workspace = true }
 rekuiper-connectors = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }
