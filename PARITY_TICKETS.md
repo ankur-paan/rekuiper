@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 3 | 4 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 4 | 3 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **5** | **12** |
+| **Total** | | **17 Tasks** | **6** | **11** |
 
 ---
 
@@ -48,23 +48,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Added parser desugaring for array `[e...]` and object `{k: v...}` literals. Implemented `cardinality`/`array_cardinality`, 1-based & negative-indexed `element_at`, `array_contains_any`, `array_remove`, `array_distinct` (=deduplicate), `array_intersect`, `array_union`, `array_except`, `array_max`, `array_min`, `array_avg`, `array_flatten`, `array_sort`, `repeat`, `sequence`, and `kvpair_array_to_obj`. Covered by `test_array_functions_parity` in `test_sql_functions.rs`.
   - **Files**: `crates/rekuiper-sql/src/parser.rs`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
-### Ticket 2.4: DateTime Functions & Calendar Extractors
-- [ ] **Functions**:
-  - `current_timestamp()`: Current UTC epoch in milliseconds (alias to `now()`).
-  - `current_date()`, `cur_date()`: Current UTC date string `YYYY-MM-DD`.
-  - `current_time()`, `cur_time()`: Current UTC time string `HH:MM:SS`.
-  - `from_unix_time(ms, format)`: Formats epoch milliseconds into date string with optional format pattern.
-  - `day_of_week(ts)`: Day of week: 1 (Sunday) to 7 (Saturday).
-  - `day_of_month(ts)`: Day of month: 1 to 31.
-  - `day_of_year(ts)`: Day of year: 1 to 366.
-  - `day_name(ts)`: Full day name ("Monday", "Tuesday", etc.).
-  - `month_name(ts)`: Full month name ("January", "February", etc.).
-  - `microsecond(ts)`: Microsecond extract.
-  - `last_day(ts)`: Timestamp of the last day of the given month.
-  - `from_days(n)`: Converts day count from year 0 to date epoch.
-  - `to_seconds(ts)`: Converts timestamp to seconds since year 0.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Exact parity unit tests comparing leap years, week boundaries, and formatters.
+- [x] **Ticket 2.4: DateTime Functions & Calendar Extractors**
+  - **Status**: Completed & Verified. Implemented `current_timestamp`/`local_timestamp`, `current_date`/`cur_date`, `current_time`/`cur_time`/`local_time`, `from_unix_time` (with optional custom format), MySQL-convention `day_of_week` (1=Sun..7=Sat), `day_of_month` (day alias), `day_of_year`, `day_name`, `month_name`, `microsecond`, `last_day` (month-end date), and `to_seconds`/`from_days` (year-0 conversions). Covered by `test_datetime_calendar_parity` in `test_sql_functions.rs`.
+  - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.5: Object & JSON Navigation Functions
 - [ ] **Functions**:

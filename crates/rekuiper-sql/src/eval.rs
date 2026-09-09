@@ -1693,13 +1693,26 @@ impl Evaluator {
             "object_construct" => Self::func_object_construct(args),
             // ---- DateTime ----
             "now" => Self::func_now(args),
+            "current_timestamp" | "local_timestamp" => Self::func_now(args),
+            "current_date" | "cur_date" => Self::func_current_date(args),
+            "current_time" | "cur_time" | "local_time" => Self::func_current_time(args),
             "format_date" => Self::func_format_date(args),
+            "from_unix_time" => Self::func_from_unix_time(args),
             "date_parse" => Self::func_date_parse(args),
             "date_add" => Self::func_date_add(args),
             "date_diff" => Self::func_date_diff(args),
             "year" => Self::func_year(args),
             "month" => Self::func_month(args),
             "day" => Self::func_day(args),
+            "day_of_week" => Self::func_day_of_week(args),
+            "day_of_month" => Self::func_day(args),
+            "day_of_year" => Self::func_day_of_year(args),
+            "day_name" => Self::func_day_name(args),
+            "month_name" => Self::func_month_name(args),
+            "microsecond" => Self::func_microsecond(args),
+            "last_day" => Self::func_last_day(args),
+            "to_seconds" => Self::func_to_seconds(args),
+            "from_days" => Self::func_from_days(args),
             "hour" => Self::func_hour(args),
             "minute" => Self::func_minute(args),
             "second" => Self::func_second(args),
@@ -3045,6 +3058,152 @@ impl Evaluator {
 
     fn func_second(args: &[Value]) -> Value {
         Self::datetime_component(args, |dt| dt.second() as i32)
+    }
+
+    fn func_current_date(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string())
+    }
+
+    fn func_current_time(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        Value::String(chrono::Utc::now().format("%H:%M:%S").to_string())
+    }
+
+    fn func_from_unix_time(args: &[Value]) -> Value {
+        if args.is_empty() || args.len() > 2 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        if args.len() == 2 {
+            return Self::func_format_date(args);
+        }
+        match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => Value::String(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+            None => Value::Null,
+        }
+    }
+
+    /// MySQL convention: 1 = Sunday through 7 = Saturday.
+    fn func_day_of_week(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.weekday().num_days_from_sunday() as i32 + 1)
+    }
+
+    fn func_day_of_year(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.ordinal() as i32)
+    }
+
+    fn func_day_name(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        const NAMES: [&str; 7] = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ];
+        match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => {
+                Value::String(NAMES[dt.weekday().num_days_from_sunday() as usize].to_string())
+            }
+            None => Value::Null,
+        }
+    }
+
+    fn func_month_name(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        const NAMES: [&str; 12] = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => Value::String(NAMES[dt.month() as usize - 1].to_string()),
+            None => Value::Null,
+        }
+    }
+
+    fn func_microsecond(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| (dt.timestamp_subsec_micros() % 1_000_000) as i32)
+    }
+
+    /// Last calendar day of the argument's month as `"YYYY-MM-DD"`.
+    fn func_last_day(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let dt = match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => dt.date_naive(),
+            None => return Value::Null,
+        };
+        let (next_year, next_month) = if dt.month() == 12 {
+            (dt.year() + 1, 1)
+        } else {
+            (dt.year(), dt.month() + 1)
+        };
+        match chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)
+            .and_then(|first| first.pred_opt())
+        {
+            Some(last) => Value::String(last.format("%Y-%m-%d").to_string()),
+            None => Value::Null,
+        }
+    }
+
+    /// MySQL `TO_SECONDS`: seconds from year 0 to `ts`.
+    /// `num_days_from_ce` counts from 0001-01-01, and year 0 contributes a
+    /// further 365 days (matching `TO_SECONDS('0001-01-01') = 31622400`).
+    fn func_to_seconds(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let dt = match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => dt.naive_utc(),
+            None => return Value::Null,
+        };
+        match (i64::from(dt.date().num_days_from_ce()) + 365)
+            .checked_mul(86_400)
+            .and_then(|days| days.checked_add(dt.time().num_seconds_from_midnight() as i64))
+        {
+            Some(total) => Value::from(total),
+            None => Value::Null,
+        }
+    }
+
+    /// MySQL `FROM_DAYS`: day count since year 0 back to `"YYYY-MM-DD"`.
+    fn func_from_days(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(n) = Self::to_i64_arg(&args[0]) else {
+            return Value::Null;
+        };
+        // The chrono constructor takes i32 days; out-of-range inputs fail.
+        let days = n.checked_sub(365).and_then(|d| i32::try_from(d).ok());
+        match days.and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+            Some(date) => Value::String(date.format("%Y-%m-%d").to_string()),
+            None => Value::Null,
+        }
     }
 
     // ---------- JSON path functions ----------

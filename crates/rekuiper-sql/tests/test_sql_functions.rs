@@ -1215,3 +1215,199 @@ fn test_array_functions_parity() {
         json!({})
     );
 }
+
+// ---------------------------------------------------------------------------
+// Datetime calendar parity (MySQL-compatible, UTC)
+// ---------------------------------------------------------------------------
+
+fn assert_date_shape(name: &str, value: &Value) {
+    let s = value
+        .as_str()
+        .unwrap_or_else(|| panic!("{} should be a string", name));
+    let b = s.as_bytes();
+    assert_eq!(s.len(), 10, "{} has wrong length: {:?}", name, s);
+    assert_eq!((b[4], b[7]), (b'-', b'-'), "{} separators: {:?}", name, s);
+    for (i, c) in b.iter().enumerate() {
+        if i == 4 || i == 7 {
+            continue;
+        }
+        assert!(c.is_ascii_digit(), "{} digit at {}: {:?}", name, i, s);
+    }
+}
+
+fn assert_time_shape(name: &str, value: &Value) {
+    let s = value
+        .as_str()
+        .unwrap_or_else(|| panic!("{} should be a string", name));
+    let b = s.as_bytes();
+    assert_eq!(s.len(), 8, "{} has wrong length: {:?}", name, s);
+    assert_eq!((b[2], b[5]), (b':', b':'), "{} separators: {:?}", name, s);
+    for (i, c) in b.iter().enumerate() {
+        if i == 2 || i == 5 {
+            continue;
+        }
+        assert!(c.is_ascii_digit(), "{} digit at {}: {:?}", name, i, s);
+    }
+}
+
+#[test]
+fn test_datetime_calendar_parity() {
+    let empty = empty();
+
+    // Current date/time shapes (UTC).
+    assert_date_shape(
+        "current_date()",
+        &eval_one("SELECT current_date() AS v FROM demo", &empty),
+    );
+    assert_date_shape(
+        "cur_date()",
+        &eval_one("SELECT cur_date() AS v FROM demo", &empty),
+    );
+    assert_time_shape(
+        "current_time()",
+        &eval_one("SELECT current_time() AS v FROM demo", &empty),
+    );
+    assert_time_shape(
+        "cur_time()",
+        &eval_one("SELECT cur_time() AS v FROM demo", &empty),
+    );
+    assert_time_shape(
+        "local_time()",
+        &eval_one("SELECT local_time() AS v FROM demo", &empty),
+    );
+    // Timestamp aliases track now().
+    let before = chrono::Utc::now().timestamp_millis();
+    for func in ["current_timestamp", "local_timestamp"] {
+        let v = eval_one(&format!("SELECT {}() AS v FROM demo", func), &empty);
+        let t = v.as_i64().expect("timestamp alias returns an integer");
+        assert!(t >= before, "{} out of range: {}", func, t);
+    }
+
+    // Unix time formatting (1700000000000 = 2023-11-14 22:13:20 UTC).
+    assert_eq!(
+        eval_one(
+            "SELECT from_unix_time(1700000000000) AS v FROM demo",
+            &empty
+        ),
+        json!("2023-11-14 22:13:20")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT from_unix_time(1700000000000, '%Y/%m/%d') AS v FROM demo",
+            &empty
+        ),
+        json!("2023/11/14")
+    );
+    assert_eq!(
+        eval_one("SELECT from_unix_time(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // Day of week: 1 = Sunday .. 7 = Saturday.
+    for (date_ms, expected) in [
+        (1_704_067_200_000i64, 2), // 2024-01-01 Monday
+        (1_700_000_000_000i64, 3), // 2023-11-14 Tuesday
+        (1_704_499_200_000i64, 7), // 2024-01-06 Saturday
+        (1_704_585_600_000i64, 1), // 2024-01-07 Sunday
+        (1_709_164_800_000i64, 5), // 2024-02-29 Thursday (leap day)
+    ] {
+        assert_eq!(
+            eval_one(
+                &format!("SELECT day_of_week({}) AS v FROM demo", date_ms),
+                &empty
+            ),
+            json!(expected),
+            "day_of_week({})",
+            date_ms
+        );
+    }
+
+    // Day of year incl. leap handling.
+    assert_eq!(
+        eval_one("SELECT day_of_year(1704067200000) AS v FROM demo", &empty),
+        json!(1)
+    );
+    assert_eq!(
+        eval_one("SELECT day_of_year(1703980800000) AS v FROM demo", &empty),
+        json!(365)
+    );
+    assert_eq!(
+        eval_one("SELECT day_of_year(1709164800000) AS v FROM demo", &empty),
+        json!(60)
+    );
+
+    // Names.
+    assert_eq!(
+        eval_one("SELECT day_name(1700035200000) AS v FROM demo", &empty),
+        json!("Wednesday")
+    );
+    assert_eq!(
+        eval_one("SELECT month_name(1700000000000) AS v FROM demo", &empty),
+        json!("November")
+    );
+    assert_eq!(
+        eval_one("SELECT day_of_month(1700000000000) AS v FROM demo", &empty),
+        json!(14)
+    );
+
+    // Microsecond component.
+    assert_eq!(
+        eval_one("SELECT microsecond(1704067200123) AS v FROM demo", &empty),
+        json!(123000)
+    );
+    assert_eq!(
+        eval_one("SELECT microsecond(1704067200000) AS v FROM demo", &empty),
+        json!(0)
+    );
+
+    // Last day of month, leap and common years.
+    assert_eq!(
+        eval_one("SELECT last_day(1707955200000) AS v FROM demo", &empty),
+        json!("2024-02-29")
+    );
+    assert_eq!(
+        eval_one("SELECT last_day(1676419200000) AS v FROM demo", &empty),
+        json!("2023-02-28")
+    );
+    assert_eq!(
+        eval_one("SELECT last_day(1704067200000) AS v FROM demo", &empty),
+        json!("2024-01-31")
+    );
+
+    // to_seconds / from_days round-trip (MySQL epoch: year 0).
+    // num_days_from_ce is 1-based: (719163 + 365) * 86400 = 62167219200.
+    assert_eq!(
+        eval_one("SELECT to_seconds(0) AS v FROM demo", &empty),
+        json!(62_167_219_200i64)
+    );
+    assert_eq!(
+        eval_one("SELECT from_days(366) AS v FROM demo", &empty),
+        json!("0001-01-01")
+    );
+    assert_eq!(
+        eval_one("SELECT from_days(739251) AS v FROM demo", &empty),
+        json!("2024-01-01")
+    );
+    // Round-trip: seconds back to a day count first.
+    assert_eq!(
+        eval_one(
+            "SELECT from_days(to_seconds(1704067200000) / 86400) AS v FROM demo",
+            &empty
+        ),
+        json!("2024-01-01")
+    );
+
+    // Null propagation.
+    for sql in [
+        "SELECT day_of_week(null) AS v FROM demo",
+        "SELECT day_name(null) AS v FROM demo",
+        "SELECT month_name(null) AS v FROM demo",
+        "SELECT microsecond(null) AS v FROM demo",
+        "SELECT last_day(null) AS v FROM demo",
+        "SELECT to_seconds(null) AS v FROM demo",
+        "SELECT from_days(null) AS v FROM demo",
+        "SELECT day_of_year(null) AS v FROM demo",
+    ] {
+        assert_eq!(eval_one(sql, &empty), Value::Null, "{}", sql);
+    }
+}
