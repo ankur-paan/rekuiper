@@ -1317,7 +1317,24 @@ fn spawn_rule_task(
                 sink_tx,
             ))
         }
-        // Hopping/sliding windows are not incrementally scheduled here;
+        Some(WindowDef::HoppingTime {
+            unit,
+            length,
+            interval,
+        }) => {
+            let window_length = tumbling_window_duration(&unit, length);
+            let hop_interval = tumbling_window_duration(&unit, interval);
+            tokio::spawn(run_hopping_window_rule(
+                rule_mgr,
+                rule_id.clone(),
+                select_stmt,
+                rx,
+                window_length,
+                hop_interval,
+                sink_tx,
+            ))
+        }
+        // Sliding windows are not incrementally scheduled here;
         // fall back to per-record evaluation.
         Some(_) => tokio::spawn(run_stateless_rule(
             rule_mgr,
@@ -1918,6 +1935,54 @@ async fn run_tumbling_window_rule(
                     rule_mgr.inc_sink_records(&rule_id, 1);
                 }
                 buffer.clear();
+            }
+        }
+    }
+}
+
+async fn run_hopping_window_rule(
+    rule_mgr: RuleManager,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: broadcast::Receiver<StreamRecord>,
+    length: std::time::Duration,
+    hop: std::time::Duration,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    let mut ticker = tokio::time::interval(hop);
+    // Tokio's interval fires immediately on the first tick; consume it so the
+    // first window emission aligns with elapsed hop time.
+    ticker.tick().await;
+    let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Ok(record) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        buffer.push((std::time::Instant::now(), record.data));
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = ticker.tick() => {
+                let now = std::time::Instant::now();
+                // Expire and discard records older than the full window length
+                buffer.retain(|(ts, _)| now.duration_since(*ts) <= length);
+                if buffer.is_empty() {
+                    continue;
+                }
+                let batch: Vec<HashMap<String, Value>> =
+                    buffer.iter().map(|(_, data)| data.clone()).collect();
+                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
+                    let output_record = StreamRecord::new(output);
+                    enqueue_sink_record(&sink, output_record).await;
+                    rule_mgr.inc_sink_records(&rule_id, 1);
+                }
             }
         }
     }

@@ -740,7 +740,7 @@ async fn test_all_openapi_paths_responding() {
             .send()
             .await
             .unwrap();
-        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {}", path);
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
     for path in [
@@ -2643,6 +2643,117 @@ async fn test_graph_rule_lifecycle_and_dag_execution() {
     // Cleanup: drop the rule (the stream stays for other tests to ignore).
     let resp = client
         .delete(format!("{}/rules/rule_graph_active", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_hopping_window_overlapping_execution() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM hop_stream () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // Subscribe before the rule exists so no window output is lost.
+    let mut sink_rx = state.stream_bus.subscribe("hop_sink_topic");
+
+    // Window length 300ms, hop 100ms: consecutive hops overlap heavily.
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_hop_test",
+            "sql": "SELECT count(*) AS cnt, sum(val) AS total FROM hop_stream GROUP BY HOPPINGWINDOW(ms, 300, 100)",
+            "actions": [{"memory": {"topic": "hop_sink_topic"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    async fn post_data(client: &reqwest::Client, base_url: &str, payload: serde_json::Value) {
+        let resp = client
+            .post(format!("{}/streams/hop_stream/data", base_url))
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    async fn recv_output(
+        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
+    ) -> serde_json::Value {
+        tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for window output")
+            .expect("hop_sink_topic closed")
+            .data
+            .into_iter()
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into()
+    }
+
+    // Phase 1: two events in one POST land in the same hop-age bracket; the
+    // first emission covering both proves the window fired over buffered rows.
+    post_data(&client, &base_url, json!([{"val": 10}, {"val": 20}])).await;
+    let hop1 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop1["cnt"], json!(2), "hop 1 output: {}", hop1);
+    assert_eq!(hop1["total"], json!(30), "hop 1 output: {}", hop1);
+
+    // Phase 2 (overlap): a third event arrives while the first two are still
+    // inside the 300ms window — the next hop must retain all three. Stale
+    // duplicate emissions are skipped by waiting for cnt == 3.
+    post_data(&client, &base_url, json!([{"val": 30}])).await;
+    let hop2 = loop {
+        let out = recv_output(&mut sink_rx).await;
+        if out["cnt"] == json!(3) {
+            break out;
+        }
+    };
+    assert_eq!(hop2["total"], json!(60), "hop 2 output: {}", hop2);
+
+    // Phase 3 (expiration): wait until every buffered record is older than
+    // the 300ms window, drain stale emissions, then send two fresh events.
+    // The next hop must contain exactly the fresh pair.
+    tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+    while tokio::time::timeout(std::time::Duration::from_millis(50), sink_rx.recv())
+        .await
+        .is_ok()
+    {}
+    post_data(&client, &base_url, json!([{"val": 40}, {"val": 30}])).await;
+    let hop3 = recv_output(&mut sink_rx).await;
+    assert_eq!(hop3["cnt"], json!(2), "hop 3 output: {}", hop3);
+    assert_eq!(hop3["total"], json!(70), "hop 3 output: {}", hop3);
+
+    // Metrics: all five source records seen; at least the three key hops out.
+    let status: serde_json::Value = client
+        .get(format!("{}/rules/rule_hop_test/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["sourceRecordsInTotal"], json!(5));
+    assert!(
+        status["sinkRecordsOutTotal"].as_u64().unwrap_or(0) >= 3,
+        "status: {}",
+        status
+    );
+
+    // Delete the rule cleanly.
+    let resp = client
+        .delete(format!("{}/rules/rule_hop_test", base_url))
         .send()
         .await
         .unwrap();

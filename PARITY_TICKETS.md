@@ -15,10 +15,10 @@ No item may be marked complete without:
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
-| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
+| **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 1 | 2 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **9** | **8** |
+| **Total** | | **17 Tasks** | **10** | **7** |
 
 ---
 
@@ -68,15 +68,9 @@ No item may be marked complete without:
 
 ## Epic 3: Windowing Engine Parity
 
-- [ ] **Ticket 3.1: Real Hopping Window Execution (`HOPPINGWINDOW(unit, length, hop)`)**
-  - **Problem**: In `crates/rekuiper-server/src/routes.rs:L1115`, `WindowDef::Hopping` falls back to `run_stateless_rule`, processing each record individually instead of buffering and aggregating across overlapping time windows.
-  - **Requirements**:
-    - Implement `run_hopping_window_rule` actor loop.
-    - Buffer records with their arrival/event timestamps.
-    - Every `hop` duration (e.g. 5 seconds), trigger aggregation over all buffered records whose timestamp falls within `[now - length, now)`.
-    - Expire records older than `length`.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test sending 10 records over time, verifying output triggers every `hop` interval with overlapping data.
+- [x] **Ticket 3.1: Real Hopping Window Execution (`HOPPINGWINDOW(unit, length, hop)`)**
+  - **Status**: Completed & Verified. Added an explicit `WindowDef::HoppingTime` arm in `spawn_rule_task` and a stateful `run_hopping_window_rule` actor loop: records buffer with arrival timestamps, a hop-interval ticker (first immediate tick consumed for grid alignment) evaluates `eval_aggregate` over records in `[now - length, now]`, expired records are retained-pruned each tick so overlapping data survives across hops, and empty windows emit nothing. Covered by `test_hopping_window_overlapping_execution` in `fvt_compat.rs` (300ms/100ms windows proving overlap retention then expiration).
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 3.2: Real Sliding Window Execution (`SLIDINGWINDOW(unit, length, delay)`)**
   - **Problem**: In `routes.rs:L1115`, `WindowDef::Sliding` falls back to `run_stateless_rule`.
