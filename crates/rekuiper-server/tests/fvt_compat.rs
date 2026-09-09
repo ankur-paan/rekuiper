@@ -3900,3 +3900,192 @@ async fn test_confkeys_persistence_and_registration() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_rule_tags_lifecycle_and_matching() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Create a stream for rules to use
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "create stream stream_tags () WITH (FORMAT=\"JSON\");"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 2. Create rule 1 with initial tags ["edge", "production"]
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "rule_tag_1",
+            "sql": "SELECT * FROM stream_tags",
+            "actions": [{"log": {}}],
+            "tags": ["edge", "production"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 3. Create rule 2 with no initial tags
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "rule_tag_2",
+            "sql": "SELECT * FROM stream_tags",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 4. Verify rule 1 tags in GET /rules/:id
+    let resp = client
+        .get(format!("{}/rules/rule_tag_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let r1: serde_json::Value = resp.json().await.unwrap();
+    let r1_tags: Vec<String> = serde_json::from_value(r1["tags"].clone()).unwrap();
+    assert_eq!(r1_tags, vec!["edge", "production"]);
+
+    // 5. Match tags via query parameters
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=edge", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_1"]);
+
+    let resp = client
+        .get(format!(
+            "{}/rules/tags/match?tags=edge,production",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_1"]);
+
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=staging", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert!(matched.is_empty());
+
+    // 6. PATCH /rules/rule_tag_2/tags to add ["staging", "production"]
+    let resp = client
+        .patch(format!("{}/rules/rule_tag_2/tags", base_url))
+        .json(&serde_json::json!({"tags": ["staging", "production"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 7. Query match for "production" should now match both rules
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=production", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_1", "rule_tag_2"]);
+
+    // 8. Test POST /rules/tags/match with body {"keys": ["staging"]}
+    let resp = client
+        .post(format!("{}/rules/tags/match", base_url))
+        .json(&serde_json::json!({"keys": ["staging"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_2"]);
+
+    // 9. PUT /rules/rule_tag_1/tags to replace tags with ["canary"]
+    let resp = client
+        .put(format!("{}/rules/rule_tag_1/tags", base_url))
+        .json(&serde_json::json!({"tags": ["canary"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=canary", base_url))
+        .send()
+        .await
+        .unwrap();
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_1"]);
+
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=edge", base_url))
+        .send()
+        .await
+        .unwrap();
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert!(matched.is_empty());
+
+    // 10. DELETE /rules/rule_tag_2/tags with {"keys": ["staging"]} removes staging only
+    let resp = client
+        .delete(format!("{}/rules/rule_tag_2/tags", base_url))
+        .json(&serde_json::json!({"keys": ["staging"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=production", base_url))
+        .send()
+        .await
+        .unwrap();
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(matched, vec!["rule_tag_2"]);
+
+    // 11. DELETE /rules/rule_tag_2/tags with {} removes all tags
+    let resp = client
+        .delete(format!("{}/rules/rule_tag_2/tags", base_url))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/rules/tags/match?tags=production", base_url))
+        .send()
+        .await
+        .unwrap();
+    let matched: Vec<String> = resp.json().await.unwrap();
+    assert!(matched.is_empty());
+
+    // 12. Cleanup rules & stream
+    let _ = client
+        .delete(format!("{}/rules/rule_tag_1", base_url))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{}/rules/rule_tag_2", base_url))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{}/streams/stream_tags", base_url))
+        .send()
+        .await;
+}

@@ -56,6 +56,8 @@ pub struct RuleDefinition {
     pub options: Option<HashMap<String, Value>>,
     #[serde(default)]
     pub graph: Option<GraphDefinition>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

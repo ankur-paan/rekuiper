@@ -43,6 +43,7 @@ fn rule_def(id: &str) -> RuleDefinition {
         actions: vec![],
         options: None,
         graph: None,
+        tags: vec![],
     }
 }
 

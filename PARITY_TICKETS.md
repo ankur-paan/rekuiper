@@ -19,10 +19,10 @@ No item may be marked complete without:
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
-| **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 0 | 2 |
+| **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 1 | 1 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **20** | **7** |
+| **Total** | | **27 Tasks** | **21** | **6** |
 
 ---
 
@@ -132,14 +132,9 @@ No item may be marked complete without:
 
 ## Epic 7: Rule Tagging & Trace Diagnostics
 
-- [ ] **Ticket 7.1: Persistent Rule Tagging & Tag-Based Matching**
-  - **Problem**: `PUT, PATCH, DELETE /rules/:name/tags` returns `empty_ok`. `/rules/tags/match` returns `[]`. Tags are lost.
-  - **Implementation**:
-    - Add `tags: HashSet<String>` to `RuleDefinition`.
-    - Implement `put_rule_tags`, `patch_rule_tags`, `delete_rule_tags` with KV persistence.
-    - Implement `GET /rules/tags/match?tags=t1,t2` to return all matching rule IDs.
-  - **Verification**: Test adding tags to rule, filtering via `/rules/tags/match`, and deleting tags.
-  - **Files**: `crates/rekuiper-core/src/rule.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 7.1: Persistent Rule Tagging & Tag-Based Matching**
+  - **Status**: Completed & Verified. Added `tags: Vec<String>` to `RuleDefinition` with serde defaults and KV persistence; implemented `put_rule_tags`, `patch_rule_tags`, and `delete_rule_tags` with KV persistence via `RuleManager::update_rule_tags`; implemented `GET/POST /rules/tags/match` supporting query params (`?tags=...`, `?keys=...`) and JSON body (`{"keys": [...]}` or `{"tags": [...]}`); added tag filtering to `POST /rules/bulkstart` and `POST /rules/bulkstop`. Covered by `test_rule_tags_lifecycle_and_matching` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-core/src/model.rs`, `crates/rekuiper-core/src/manager.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 7.2: Real Rule Execution Trace Buffer**
   - **Problem**: `/rules/:name/trace/start`, `/rules/:name/trace/stop`, `/trace/rule/:rule_id`, `/trace/:id`, `/tracer` return `empty_ok`/`empty_array`/`empty_object`.

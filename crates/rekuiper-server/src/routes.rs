@@ -124,7 +124,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules/:id/cpu", get(get_rule_cpu))
         .route(
             "/rules/:name/tags",
-            put(empty_ok).patch(empty_ok).delete(empty_ok),
+            put(put_rule_tags)
+                .patch(patch_rule_tags)
+                .delete(delete_rule_tags),
         )
         .route("/v2/rules/:name/status", get(get_rule_status))
         .route("/ruletest", post(create_ruletest))
@@ -143,7 +145,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules/bulkstart", post(bulk_start_rules))
         .route("/rules/bulkstop", post(bulk_stop_rules))
         .route("/rules/usage/cpu", get(rule_cpu_usage))
-        .route("/rules/tags/match", get(rule_tags_match))
+        .route(
+            "/rules/tags/match",
+            get(rule_tags_match).post(rule_tags_match),
+        )
         .route("/configs", get(get_configs))
         .route("/config/uploads", get(get_config_uploads))
         .route("/config/uploads/:name", delete(empty_ok))
@@ -3694,15 +3699,39 @@ async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>
     }
 }
 
-async fn bulk_start_rules(State(state): State<AppState>) -> impl IntoResponse {
+async fn bulk_start_rules(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
+    let target_tags = if !body.is_empty() {
+        if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+            extract_tags_from_value(&val)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
     for rule in state.rule_manager.list_rules() {
+        if !target_tags.is_empty() && !target_tags.iter().any(|t| rule.tags.contains(t)) {
+            continue;
+        }
         let _ = state.rule_manager.start_rule(&rule.id).await;
     }
     (StatusCode::OK, Json(json!({})))
 }
 
-async fn bulk_stop_rules(State(state): State<AppState>) -> impl IntoResponse {
+async fn bulk_stop_rules(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
+    let target_tags = if !body.is_empty() {
+        if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+            extract_tags_from_value(&val)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
     for rule in state.rule_manager.list_rules() {
+        if !target_tags.is_empty() && !target_tags.iter().any(|t| rule.tags.contains(t)) {
+            continue;
+        }
         let _ = state.rule_manager.stop_rule(&rule.id).await;
         cancel_rule_source(&state, &rule.id);
     }
@@ -3768,8 +3797,141 @@ async fn rule_cpu_usage(State(state): State<AppState>) -> impl IntoResponse {
     Json(Value::Object(map))
 }
 
-async fn rule_tags_match() -> impl IntoResponse {
-    Json(Value::Array(Vec::new()))
+#[derive(Deserialize, Default)]
+struct TagMatchQuery {
+    tags: Option<String>,
+    keys: Option<String>,
+}
+
+fn extract_tags_from_value(val: &Value) -> Vec<String> {
+    if let Some(arr) = val.get("tags").and_then(|t| t.as_array()) {
+        return arr
+            .iter()
+            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+    if let Some(arr) = val.get("keys").and_then(|t| t.as_array()) {
+        return arr
+            .iter()
+            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+    if let Some(arr) = val.as_array() {
+        return arr
+            .iter()
+            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+    Vec::new()
+}
+
+async fn put_rule_tags(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let val: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let new_tags = extract_tags_from_value(&val);
+    match state
+        .rule_manager
+        .update_rule_tags(&name, |tags| {
+            *tags = new_tags;
+        })
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "success"}))).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn patch_rule_tags(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let val: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let add_tags = extract_tags_from_value(&val);
+    match state
+        .rule_manager
+        .update_rule_tags(&name, |tags| {
+            for t in add_tags {
+                if !tags.contains(&t) {
+                    tags.push(t);
+                }
+            }
+        })
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "success"}))).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn delete_rule_tags(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let val: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let remove_tags = extract_tags_from_value(&val);
+    match state
+        .rule_manager
+        .update_rule_tags(&name, |tags| {
+            if remove_tags.is_empty() {
+                tags.clear();
+            } else {
+                tags.retain(|t| !remove_tags.contains(t));
+            }
+        })
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "success"}))).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn rule_tags_match(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<TagMatchQuery>,
+    body: Bytes,
+) -> Response {
+    let mut search_tags: HashSet<String> = HashSet::new();
+    if let Some(t_str) = query.tags.or(query.keys) {
+        for t in t_str.split(',') {
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+                search_tags.insert(trimmed.to_string());
+            }
+        }
+    }
+    if search_tags.is_empty() && !body.is_empty() {
+        if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+            for t in extract_tags_from_value(&val) {
+                search_tags.insert(t);
+            }
+        }
+    }
+
+    let mut matched: Vec<String> = Vec::new();
+    for rule in state.rule_manager.list_rules() {
+        if search_tags.is_empty() {
+            continue;
+        }
+        if search_tags.iter().all(|t| rule.tags.contains(t)) {
+            matched.push(rule.id.clone());
+        }
+    }
+    matched.sort();
+    Json(matched).into_response()
 }
 
 async fn get_config_uploads() -> impl IntoResponse {

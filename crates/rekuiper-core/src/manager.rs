@@ -430,6 +430,27 @@ impl RuleManager {
         self.rules.read().get(id).map(|r| r.read().def.clone())
     }
 
+    pub async fn update_rule_tags<F>(&self, id: &str, update_fn: F) -> Result<Vec<String>>
+    where
+        F: FnOnce(&mut Vec<String>),
+    {
+        let (snapshot, status_str) = {
+            let map = self.rules.read();
+            let rule = map
+                .get(id)
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
+            let mut active = rule.write();
+            update_fn(&mut active.def.tags);
+            active.def.tags.sort();
+            active.def.tags.dedup();
+            let status = active.status.read().status.clone();
+            (active.def.clone(), status)
+        };
+        self.persist_rule(&snapshot.id, &snapshot, &status_str)
+            .await;
+        Ok(snapshot.tags)
+    }
+
     pub fn list_rules(&self) -> Vec<RuleDefinition> {
         self.rules
             .read()
