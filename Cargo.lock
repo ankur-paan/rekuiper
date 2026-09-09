@@ -1808,11 +1808,15 @@ name = "rekuiper-sql"
 version = "0.420.0-beta"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "md-5",
  "parking_lot",
  "regex",
  "rekuiper-core",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
 ]
 

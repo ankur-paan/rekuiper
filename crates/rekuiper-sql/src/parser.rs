@@ -909,9 +909,7 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 let mut args = Vec::new();
                 self.skip_whitespace();
-                if self.pos < self.input.len() && self.input[self.pos..].starts_with(')') {
-                    self.pos += 1;
-                } else {
+                if !(self.pos < self.input.len() && self.input[self.pos..].starts_with(')')) {
                     loop {
                         self.skip_whitespace();
                         // Support '*' as wildcard arg (e.g. count(*)) for forward-compat.

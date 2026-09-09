@@ -1,6 +1,9 @@
 use crate::ast::{BinaryOperator, Expr, SelectStmt, UnaryOperator};
+use base64::Engine as _;
+use chrono::{Datelike, Timelike};
 use parking_lot::RwLock;
 use serde_json::Value;
+use sha2::Digest as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -171,7 +174,7 @@ impl Evaluator {
     fn is_aggregate_call(name: &str) -> bool {
         matches!(
             name.to_ascii_lowercase().as_str(),
-            "count" | "sum" | "avg" | "min" | "max"
+            "count" | "sum" | "avg" | "min" | "max" | "collect" | "lead" | "latest"
         )
     }
 
@@ -182,6 +185,9 @@ impl Evaluator {
             "avg" => Self::agg_avg(args, records),
             "min" => Self::agg_min(args, records),
             "max" => Self::agg_max(args, records),
+            "collect" => Self::agg_collect(args, records),
+            "lead" => Self::agg_lead(args, records),
+            "latest" => Self::agg_latest(args, records),
             _ => Value::Null,
         }
     }
@@ -549,6 +555,34 @@ impl Evaluator {
                 .collect();
             let call_id = Self::column_name(expr, 0);
             return Self::eval_lag(&vals, state, &call_id, partition_key.unwrap_or(""));
+        }
+        if lowered == "had_changed" || lowered == "changed_col" {
+            let vals: Vec<Value> = args
+                .iter()
+                .map(|a| Self::eval_stateful_expr(a, record, state))
+                .collect();
+            let call_id = Self::column_name(expr, 0);
+            return Self::eval_changed(
+                &lowered,
+                &vals,
+                state,
+                &call_id,
+                partition_key.unwrap_or(""),
+            );
+        }
+        if lowered == "had_changed" || lowered == "changed_col" {
+            let vals: Vec<Value> = args
+                .iter()
+                .map(|a| Self::eval_stateful_expr(a, record, state))
+                .collect();
+            let call_id = Self::column_name(expr, 0);
+            return Self::eval_changed(
+                &lowered,
+                &vals,
+                state,
+                &call_id,
+                partition_key.unwrap_or(""),
+            );
         }
         let vals: Vec<Value> = args
             .iter()
@@ -981,6 +1015,76 @@ impl Evaluator {
             }
         }
         best.clone()
+    }
+
+    /// `collect(col)`: all non-null values of `col` across the window batch,
+    /// in row order.
+    fn agg_collect(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return Value::Null;
+        }
+        Value::Array(
+            records
+                .iter()
+                .map(|rec| Self::eval_val(&args[0], rec))
+                .filter(|v| !v.is_null())
+                .collect(),
+        )
+    }
+
+    /// `latest(col)`: the most recent (last) non-null value of `col` in the
+    /// batch, or `Null` when there is none.
+    fn agg_latest(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return Value::Null;
+        }
+        records
+            .iter()
+            .rev()
+            .map(|rec| Self::eval_val(&args[0], rec))
+            .find(|v| !v.is_null())
+            .unwrap_or(Value::Null)
+    }
+
+    /// `lead(col, [offset], [default])`: forward lookup within the window
+    /// batch. The single output row represents the whole window, so `offset`
+    /// (default 1) counts forward from the first row (0-based); out-of-range
+    /// offsets yield `default` (default `Null`).
+    fn agg_lead(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.is_empty() || args.len() > 3 {
+            return Value::Null;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return Value::Null;
+        }
+        let first = records.first();
+        let offset: i64 = if args.len() >= 2 {
+            first
+                .and_then(|rec| Self::to_i64_arg(&Self::eval_val(&args[1], rec)))
+                .unwrap_or(1)
+        } else {
+            1
+        };
+        let default: Value = if args.len() >= 3 {
+            first
+                .map(|rec| Self::eval_val(&args[2], rec))
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        if offset < 0 {
+            return default;
+        }
+        records
+            .get(offset as usize)
+            .map(|rec| Self::eval_val(&args[0], rec))
+            .unwrap_or(default)
     }
 
     fn op_str(op: &BinaryOperator) -> &'static str {
@@ -1500,6 +1604,44 @@ impl Evaluator {
             "nvl" => Self::func_coalesce(args),
             // ---- Object construction ----
             "object_construct" => Self::func_object_construct(args),
+            // ---- DateTime ----
+            "now" => Self::func_now(args),
+            "format_date" => Self::func_format_date(args),
+            "date_parse" => Self::func_date_parse(args),
+            "date_add" => Self::func_date_add(args),
+            "date_diff" => Self::func_date_diff(args),
+            "year" => Self::func_year(args),
+            "month" => Self::func_month(args),
+            "day" => Self::func_day(args),
+            "hour" => Self::func_hour(args),
+            "minute" => Self::func_minute(args),
+            "second" => Self::func_second(args),
+            // ---- JSON path ----
+            "json_path_query" => Self::func_json_path_query(args),
+            "json_path_query_first" => Self::func_json_path_query_first(args),
+            "json_path_exists" => Self::func_json_path_exists(args),
+            "json_map" => Self::func_json_map(args),
+            // ---- Crypto & encoding ----
+            "md5" => Self::func_md5(args),
+            "sha256" => Self::func_sha256(args),
+            "sha512" => Self::func_sha512(args),
+            "encode" => Self::func_encode(args),
+            "base64_encode" => Self::func_base64_encode(args),
+            "decode" => Self::func_decode(args),
+            "base64_decode" => Self::func_base64_decode(args),
+            // ---- Extended array ----
+            "array_create" => Self::func_array_create(args),
+            "array_position" => Self::func_array_position(args),
+            "array_length" => Self::func_array_length(args),
+            "array_slice" => Self::func_array_slice(args),
+            "array_concat" => Self::func_array_concat(args),
+            "deduplicate" => Self::func_deduplicate(args),
+            // ---- Analytic scalar fallbacks (batch/stateful paths below) ----
+            "collect" => Self::func_collect_scalar(args),
+            "lead" => Self::func_lead_scalar(args),
+            "latest" => Self::func_latest_scalar(args),
+            "had_changed" => Self::func_had_changed_scalar(args),
+            "changed_col" => Self::func_changed_col_scalar(args),
             _ => Value::Null,
         }
     }
@@ -2281,6 +2423,563 @@ impl Evaluator {
             return Value::Null;
         }
         Value::Bool(Self::to_f64(&args[0]).is_some())
+    }
+
+    // ---------- datetime functions (all in UTC) ----------
+
+    /// Resolve a value to epoch milliseconds: numbers directly, RFC3339
+    /// strings via parsing, other strings when numerically parseable.
+    fn to_epoch_millis(v: &Value) -> Option<i64> {
+        if let Some(s) = v.as_str() {
+            let t = s.trim();
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
+                return Some(dt.timestamp_millis());
+            }
+        }
+        Self::to_i64_arg(v)
+    }
+
+    fn datetime_from_millis(ms: i64) -> Option<chrono::DateTime<chrono::Utc>> {
+        chrono::DateTime::from_timestamp_millis(ms)
+    }
+
+    fn func_now(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        Value::from(chrono::Utc::now().timestamp_millis())
+    }
+
+    fn func_format_date(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(fmt) = args[1].as_str() else {
+            return Value::Null;
+        };
+        let dt = match &args[0] {
+            Value::Number(_) => {
+                Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis)
+            }
+            Value::String(_) => {
+                if let Some(s) = args[0].as_str().and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(s.trim())
+                        .ok()
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                }) {
+                    Some(s)
+                } else {
+                    Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis)
+                }
+            }
+            _ => None,
+        };
+        match dt {
+            Some(dt) => Value::String(dt.format(fmt).to_string()),
+            None => Value::Null,
+        }
+    }
+
+    fn func_date_parse(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(s), Some(fmt)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        if let Ok(dt) = chrono::DateTime::parse_from_str(s, fmt) {
+            return Value::from(dt.timestamp_millis());
+        }
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return Value::from(dt.and_utc().timestamp_millis());
+        }
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(s, fmt) {
+            if let Some(dt) = d.and_hms_opt(0, 0, 0) {
+                return Value::from(dt.and_utc().timestamp_millis());
+            }
+        }
+        Value::Null
+    }
+
+    /// Milliseconds per interval unit: dd|day, hh|hour, mi|minute|min,
+    /// ss|second|sec, ms|millisecond (case-insensitive).
+    fn interval_unit_millis(part: &str) -> Option<i64> {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "dd" | "day" => Some(86_400_000),
+            "hh" | "hour" => Some(3_600_000),
+            "mi" | "minute" | "min" => Some(60_000),
+            "ss" | "second" | "sec" => Some(1_000),
+            "ms" | "millisecond" => Some(1),
+            _ => None,
+        }
+    }
+
+    fn func_date_add(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        let (Some(part), Some(num)) = (args[0].as_str(), Self::to_i64_arg(&args[1])) else {
+            return Value::Null;
+        };
+        let (Some(unit), Some(ts)) = (
+            Self::interval_unit_millis(part),
+            Self::to_epoch_millis(&args[2]),
+        ) else {
+            return Value::Null;
+        };
+        match num.checked_mul(unit).and_then(|d| ts.checked_add(d)) {
+            Some(ms) => Value::from(ms),
+            None => Value::Null,
+        }
+    }
+
+    fn func_date_diff(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        let Some(part) = args[0].as_str() else {
+            return Value::Null;
+        };
+        let (Some(unit), Some(t1), Some(t2)) = (
+            Self::interval_unit_millis(part),
+            Self::to_epoch_millis(&args[1]),
+            Self::to_epoch_millis(&args[2]),
+        ) else {
+            return Value::Null;
+        };
+        match t2.checked_sub(t1) {
+            // Integer division truncates toward zero, matching SQL semantics.
+            Some(diff) => Value::from(diff / unit),
+            None => Value::Null,
+        }
+    }
+
+    fn datetime_component<F>(args: &[Value], extract: F) -> Value
+    where
+        F: Fn(chrono::DateTime<chrono::Utc>) -> i32,
+    {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
+            Some(dt) => Value::from(extract(dt)),
+            None => Value::Null,
+        }
+    }
+
+    fn func_year(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.year())
+    }
+
+    fn func_month(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.month() as i32)
+    }
+
+    fn func_day(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.day() as i32)
+    }
+
+    fn func_hour(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.hour() as i32)
+    }
+
+    fn func_minute(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.minute() as i32)
+    }
+
+    fn func_second(args: &[Value]) -> Value {
+        Self::datetime_component(args, |dt| dt.second() as i32)
+    }
+
+    // ---------- JSON path functions ----------
+
+    /// Split a dot-notation segment like `a[0][1]` into its field name and
+    /// index list. Malformed brackets fall back to the literal segment.
+    fn split_path_segment(seg: &str) -> (&str, Vec<usize>) {
+        match seg.find('[') {
+            None => (seg, Vec::new()),
+            Some(pos) => {
+                let (name, mut rest) = seg.split_at(pos);
+                let mut indices = Vec::new();
+                while let Some(inner) = rest.strip_prefix('[') {
+                    match inner.find(']') {
+                        Some(end) => match inner[..end].parse::<usize>() {
+                            Ok(i) => {
+                                indices.push(i);
+                                rest = &inner[end + 1..];
+                            }
+                            Err(_) => return (seg, Vec::new()),
+                        },
+                        None => return (seg, Vec::new()),
+                    }
+                }
+                if rest.is_empty() {
+                    (name, indices)
+                } else {
+                    (seg, Vec::new())
+                }
+            }
+        }
+    }
+
+    /// Resolve a JSON pointer (`/a/b/0`, RFC 6901) or dot-notation path
+    /// (`a.b.c`, with optional `[n]` indices) against a value.
+    fn json_resolve_path<'v>(val: &'v Value, path: &str) -> Option<&'v Value> {
+        let path = path.trim();
+        if path.is_empty() {
+            return Some(val);
+        }
+        if path.starts_with('/') {
+            let mut current = val;
+            for token in path.split('/').skip(1) {
+                let token = token.replace("~1", "/").replace("~0", "~");
+                match current {
+                    Value::Object(map) => current = map.get(&token)?,
+                    Value::Array(arr) => current = arr.get(token.parse::<usize>().ok()?)?,
+                    _ => return None,
+                }
+            }
+            return Some(current);
+        }
+        let mut current = val;
+        for seg in path.split('.') {
+            let (name, indices) = Self::split_path_segment(seg);
+            if !name.is_empty() {
+                match current {
+                    Value::Object(map) => current = map.get(name)?,
+                    // A bare numeric segment also indexes arrays.
+                    Value::Array(arr) => {
+                        current = arr.get(name.parse::<usize>().ok()?)?;
+                    }
+                    _ => return None,
+                }
+            }
+            for idx in indices {
+                match current {
+                    Value::Array(arr) => current = arr.get(idx)?,
+                    _ => return None,
+                }
+            }
+        }
+        Some(current)
+    }
+
+    fn func_json_path_query(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(path) = args[1].as_str() else {
+            return Value::Null;
+        };
+        Self::json_resolve_path(&args[0], path)
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    fn func_json_path_query_first(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(path) = args[1].as_str() else {
+            return Value::Null;
+        };
+        match Self::json_resolve_path(&args[0], path) {
+            Some(Value::Array(arr)) => arr.first().cloned().unwrap_or(Value::Null),
+            Some(v) => v.clone(),
+            None => Value::Null,
+        }
+    }
+
+    fn func_json_path_exists(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(path) = args[1].as_str() else {
+            return Value::Bool(false);
+        };
+        Value::Bool(Self::json_resolve_path(&args[0], path).is_some())
+    }
+
+    fn func_json_map(args: &[Value]) -> Value {
+        if !args.len().is_multiple_of(2) {
+            return Value::Null;
+        }
+        let mut map = serde_json::Map::with_capacity(args.len() / 2);
+        let mut it = args.iter();
+        while let (Some(k), Some(v)) = (it.next(), it.next()) {
+            map.insert(Self::to_string_always(k), v.clone());
+        }
+        Value::Object(map)
+    }
+
+    // ---------- crypto & encoding functions ----------
+
+    fn hash_input(value: &Value) -> Option<Vec<u8>> {
+        if value.is_null() {
+            return None;
+        }
+        Some(Self::to_string_always(value).into_bytes())
+    }
+
+    fn func_md5(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::hash_input(&args[0]) {
+            // `md5::Digest` is the same trait object as `sha2::Digest`
+            // (shared `digest` crate), already imported above.
+            Some(bytes) => Value::String(format!("{:x}", md5::Md5::digest(bytes))),
+            None => Value::Null,
+        }
+    }
+
+    fn func_sha256(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::hash_input(&args[0]) {
+            Some(bytes) => Value::String(format!("{:x}", sha2::Sha256::digest(bytes))),
+            None => Value::Null,
+        }
+    }
+
+    fn func_sha512(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::hash_input(&args[0]) {
+            Some(bytes) => Value::String(format!("{:x}", sha2::Sha512::digest(bytes))),
+            None => Value::Null,
+        }
+    }
+
+    fn func_encode(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(method) = args[1].as_str() else {
+            return Value::Null;
+        };
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        match method.trim().to_ascii_lowercase().as_str() {
+            "base64" => Value::String(
+                base64::engine::general_purpose::STANDARD.encode(Self::to_string_always(&args[0])),
+            ),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_base64_encode(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        Value::String(
+            base64::engine::general_purpose::STANDARD.encode(Self::to_string_always(&args[0])),
+        )
+    }
+
+    fn func_decode(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(text), Some(method)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        match method.trim().to_ascii_lowercase().as_str() {
+            "base64" => match base64::engine::general_purpose::STANDARD.decode(text.trim()) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(s) => Value::String(s),
+                    Err(_) => Value::Null,
+                },
+                Err(_) => Value::Null,
+            },
+            _ => Value::Null,
+        }
+    }
+
+    fn func_base64_decode(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(text) = args[0].as_str() else {
+            return Value::Null;
+        };
+        match base64::engine::general_purpose::STANDARD.decode(text.trim()) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Value::String(s),
+                Err(_) => Value::Null,
+            },
+            Err(_) => Value::Null,
+        }
+    }
+
+    // ---------- extended array functions ----------
+
+    fn func_array_create(args: &[Value]) -> Value {
+        Value::Array(args.to_vec())
+    }
+
+    fn func_array_position(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        match arr
+            .iter()
+            .position(|item| Self::values_equal(item, &args[1]))
+        {
+            // 1-based index, 0 when absent.
+            Some(i) => Value::from((i + 1) as i64),
+            None => Value::from(0),
+        }
+    }
+
+    fn func_array_length(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match args[0].as_array() {
+            Some(arr) => Value::from(arr.len() as i64),
+            None => Value::Null,
+        }
+    }
+
+    fn func_array_slice(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let (Some(mut start), Some(mut end)) =
+            (Self::to_i64_arg(&args[1]), Self::to_i64_arg(&args[2]))
+        else {
+            return Value::Null;
+        };
+        // 1-based inclusive bounds, clamped into range.
+        let len = arr.len() as i64;
+        if start < 1 {
+            start = 1;
+        }
+        if end > len {
+            end = len;
+        }
+        if start > end || start > len || end < 1 {
+            return Value::Array(Vec::new());
+        }
+        Value::Array(arr[(start - 1) as usize..end as usize].to_vec())
+    }
+
+    fn func_array_concat(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(a), Some(b)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Null;
+        };
+        Value::Array(a.iter().chain(b.iter()).cloned().collect())
+    }
+
+    fn func_deduplicate(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut out: Vec<Value> = Vec::with_capacity(arr.len());
+        for item in arr {
+            if !out.iter().any(|seen| Self::values_equal(seen, item)) {
+                out.push(item.clone());
+            }
+        }
+        Value::Array(out)
+    }
+
+    // ---------- analytic scalar fallbacks (single-record context) ----------
+
+    fn func_collect_scalar(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Array(Vec::new());
+        }
+        Value::Array(vec![args[0].clone()])
+    }
+
+    fn func_lead_scalar(args: &[Value]) -> Value {
+        if args.is_empty() || args.len() > 3 {
+            return Value::Null;
+        }
+        // A single row has no future rows: resolve to the default.
+        args.get(2).cloned().unwrap_or(Value::Null)
+    }
+
+    fn func_latest_scalar(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        args[0].clone()
+    }
+
+    fn func_had_changed_scalar(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        // Without history every value counts as changed.
+        Value::Bool(true)
+    }
+
+    fn func_changed_col_scalar(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        args[0].clone()
+    }
+
+    /// Stateful change detection shared by `had_changed` / `changed_col`:
+    /// compares against the stored previous value (both-null counts as
+    /// unchanged), then stores the current value.
+    fn eval_changed(
+        lowered_name: &str,
+        args: &[Value],
+        state: &RuleState,
+        call_id: &str,
+        partition_key: &str,
+    ) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let current = &args[0];
+        let state_key = format!("{}:{}:{}", lowered_name, call_id, partition_key);
+        let previous = state.state.read().get(&state_key).cloned();
+        let changed = match (&previous, current) {
+            (None, _) => true,
+            (Some(p), c) if p.is_null() && c.is_null() => false,
+            (Some(p), c) => !Self::values_equal(p, c),
+        };
+        state.state.write().insert(state_key, current.clone());
+        if lowered_name == "had_changed" {
+            Value::Bool(changed)
+        } else if changed {
+            current.clone()
+        } else {
+            Value::Null
+        }
     }
 }
 
