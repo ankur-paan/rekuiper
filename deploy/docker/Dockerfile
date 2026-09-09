@@ -9,7 +9,7 @@
 # ==============================================================================
 FROM rust:alpine AS builder
 
-RUN apk add --no-cache musl-dev pkgconfig openssl-dev sqlite-dev build-base
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static sqlite-dev sqlite-static build-base
 
 WORKDIR /usr/src/rekuiper
 
@@ -22,7 +22,7 @@ RUN cargo build --release
 # ==============================================================================
 # Runtime Stage: Ultra-lightweight secure Alpine runtime
 # ==============================================================================
-FROM alpine:3.20
+FROM alpine:latest
 
 ENV KUIPER_HOME="/kuiper" \
     KUIPER__BASIC__CONSOLELOG="true" \
