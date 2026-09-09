@@ -19,7 +19,7 @@
 
 The benchmark below evaluates `rekuiper` against upstream Go eKuiper, Apache Flink, Redpanda Connect (Benthos), and Telegraf under an identical high-frequency edge workload: parsing 50,000 wide-schema telemetry events through JSON decoding, filtering predicates, arithmetic transformations, and sink emission on a single CPU core:
 
-| Feature / Metric | `rekuiper` (v0.420-beta) | Go eKuiper (v2.x) | Apache Flink | Redpanda Connect (Benthos) | Telegraf |
+| Feature / Metric | `rekuiper` (0.420-beta) | Upstream Go eKuiper (v2.x) | Apache Flink | Redpanda Connect (Benthos) | Telegraf |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Core Language** | **Pure Rust** | Go (Golang) | Java / Scala (JVM) | Go (Golang) | Go (Golang) |
 | **Throughput (1 Core)** | **180,000+ eps** | ~25,000 – 35,000 eps | ~40,000 – 60,000 eps | ~30,000 – 45,000 eps | ~20,000 – 30,000 eps |
@@ -181,8 +181,8 @@ Detailed capability disclosures for the **v0.420-beta** release:
 | **EdgeX Foundry IPC** | ❌ **Not Supported in Core** | ⚠️ *Excluded to prevent bundling heavy C/ZeroMQ dependencies. Integrate via EdgeX MQTT/Redis message bus.* |
 | **EMQ Neuron / NeuronEX**| ❌ **Not Supported in Core** | ⚠️ *Excluded proprietary IPC. Connect directly via standard MQTT broker (NanoMQ / EMQX).* |
 | **Video / CV Pipelines**| ❌ **Not Supported in Core** | ⚠️ *FFmpeg, OpenCV, and RTSP video decoders are excluded to preserve the 9.6 MB micro footprint.* |
-| **Embedded AI / ONNX** | ❌ **Not Supported in Core** | ⚠️ *ONNX Runtime and TensorFlow Lite C-bindings are omitted. Slated as an optional modular feature in v2.3.* |
-| **Dynamic Go Plugins** | ❌ **Not Supported** | ⚠️ *Loading raw Go `.so` shared libraries violates Rust memory safety. WebAssembly (WASM) plugin runtime is planned for v2.3.* |
+| **Embedded AI / ONNX** | ❌ **Not Supported in Core** | ⚠️ *ONNX Runtime and TensorFlow Lite C-bindings are omitted. Slated as an optional modular feature in 0.69-beta.* |
+| **Dynamic Go Plugins** | ❌ **Not Supported** | ⚠️ *Loading raw Go `.so` shared libraries violates Rust memory safety. WebAssembly (WASM) plugin runtime is planned for 0.69-beta.* |
 | **Industrial Protocols**| ❌ **Not Supported in Core** | ⚠️ *Direct binary Modbus, OPC-UA, and BACnet drivers are not bundled. Bridge via an industrial edge gateway or NanoMQ.* |
 | **Multi-Node Cluster** | ❌ **Not Supported** | ⚠️ *Designed exclusively as a hyper-specialized, single-node deterministic edge streaming daemon.* |
 
@@ -272,8 +272,8 @@ In production, edge streaming architectures faced a frustrating compromise:
 
 ## 🗺️ Roadmap
 
-- **v0.420-beta (Current)**: High-Speed Rust Core Engine, 100% OpenAPI Parity, Decoupled Actor Sink Queue, Full Connector Ecosystem, Visual Graph Rule DAG Engine.
-- **v2.3.0 (Planned)**:
+- **0.420-beta (Current)**: High-Speed Rust Core Engine, 100% OpenAPI Parity, Decoupled Actor Sink Queue, Full Connector Ecosystem, Visual Graph Rule DAG Engine.
+- **0.69-beta (Next Release)**:
   - WebAssembly (WASM) user-defined function (UDF) runtime using Wasmtime.
   - MQTT v5 User Properties and Flow Control.
   - Optional ONNX Runtime dynamic scoring crate for local AI inference.

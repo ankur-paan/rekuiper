@@ -54,8 +54,8 @@ To maintain a secure, deterministic, memory-safe, and micro-footprint core:
 - **EMQ Neuron / NeuronEX Native IPC**: Proprietary shared-memory IPC is not included. Standard MQTT bridging (via NanoMQ or EMQX) is the recommended pattern.
 - **EdgeX Foundry ZeroMQ C-Bindings**: Native C-bindings are omitted. Integration is supported via EdgeX MQTT or Redis message bus.
 - **Video / Computer Vision**: Embedded FFmpeg/OpenCV video frame decoding is excluded.
-- **Embedded AI / ONNX Runtime**: Local ML scoring models are excluded from this core release (planned for v2.3 as an optional crate).
-- **Dynamic Go Plugins (`.so`)**: Raw C/Go `.so` loading is not supported due to Rust ABI safety constraints (slated for WebAssembly/WASM runtime in v2.3).
+- **Embedded AI / ONNX Runtime**: Local ML scoring models are excluded from this core release (planned for 0.69-beta as an optional crate).
+- **Dynamic Go Plugins (`.so`)**: Raw C/Go `.so` loading is not supported due to Rust ABI safety constraints (slated for WebAssembly/WASM runtime in 0.69-beta).
 - **Multi-Node Distributed Clustering**: `rekuiper` is intentionally built as a standalone, single-node edge daemon.
 
 ---
