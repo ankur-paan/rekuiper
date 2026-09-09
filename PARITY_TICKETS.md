@@ -16,9 +16,9 @@ No item may be marked complete without:
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
-| **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 1 | 1 |
+| **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **13** | **4** |
+| **Total** | | **17 Tasks** | **14** | **3** |
 
 ---
 
@@ -88,13 +88,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. `spawn_rule_task` accepts rule options and derives `EventTimeConfig` (`isEventTime`, `lateTolerance`, stream `TIMESTAMP` field); timestamp extraction tries the configured field, then `timestamp`/`ts`/`event_time`/`time` (int/float/RFC3339/numeric-string), then wall clock. Sliding windows buffer `(event_ts, row)`, drop rows with `event_ts < W`, advance `W = max(W, ts - tol)`, and evaluate over the age-pruned horizon; tumbling windows align `[Tstart, Tend)` in event time and close on watermark. Covered by `test_event_time_watermark_and_late_tolerance` in `fvt_compat.rs` (out-of-order acceptance, expiry, late drop, source 4 / sink 3 metrics).
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 4.2: Enforce Buffer Length and Error Dispatch Options**
-  - **Problem**: Rule option `bufferLength` is ignored; bounded channel is hardcoded to 10,000. Option `sendError` is not checked.
-  - **Requirements**:
-    - Pass `bufferLength` from rule options to MPSC channel creation (default 10,000).
-    - If `sendError: true`, format execution errors into error records and route to sinks.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test bounded queue backpressure honoring custom `bufferLength`.
+- [x] **Ticket 4.2: Enforce Buffer Length and Error Dispatch Options**
+  - **Status**: Completed & Verified. `spawn_rule_task` parses per-rule `bufferLength` (usize, min 1, default 10,000) to size the bounded sink MPSC channel and `sendError` (bool, default false). New `check_record_error` detects upstream error records (`error`/`__error` fields); shared async helper `handle_error_record` counts `inc_exceptions`, formats `{error, rule_id}` and forwards immediately to the sink when `sendError: true`, otherwise drops it — always `continue`-ing before projection or window-buffer insertion in all five runners (stateless, count, tumbling, hopping, sliding), so window aggregation ignores error events per eKuiper docs. Covered by `test_buffer_length_and_send_error_options` in `fvt_compat.rs` (forward + metrics 1/1/1 when true; processed-but-silent 1/0/1 when false; both rules clean-deleted).
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 

@@ -1271,7 +1271,19 @@ fn spawn_rule_task(
     // Bounded decoupled sink queue: the streaming evaluation loop never blocks
     // on sink network/disk I/O. Dropping `sink_tx` (rule end/cancel) lets the
     // worker flush remaining outputs and exit cleanly.
-    let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(10_000);
+    let buffer_len = rule_options
+        .as_ref()
+        .and_then(|o| o.get("bufferLength"))
+        .and_then(|v| v.as_u64())
+        .and_then(|n| usize::try_from(n).ok())
+        .map(|n| n.max(1))
+        .unwrap_or(10_000);
+    let send_error = rule_options
+        .as_ref()
+        .and_then(|o| o.get("sendError"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(buffer_len);
     let sink_actions = actions;
     let sink_rule_id = rule_id.clone();
     let sink_rule_mgr = rule_manager.clone();
@@ -1324,6 +1336,7 @@ fn spawn_rule_task(
             tables,
             confs,
             sink_tx,
+            send_error,
         )),
         Some(WindowDef::Count { size, interval }) => tokio::spawn(run_count_window_rule(
             rule_mgr,
@@ -1333,6 +1346,7 @@ fn spawn_rule_task(
             size,
             interval,
             sink_tx,
+            send_error,
         )),
         Some(WindowDef::TumblingTime { unit, length }) => {
             let duration = tumbling_window_duration(&unit, length);
@@ -1344,6 +1358,7 @@ fn spawn_rule_task(
                 duration,
                 sink_tx,
                 event_time,
+                send_error,
             ))
         }
         Some(WindowDef::HoppingTime {
@@ -1361,6 +1376,7 @@ fn spawn_rule_task(
                 window_length,
                 hop_interval,
                 sink_tx,
+                send_error,
             ))
         }
         Some(WindowDef::SlidingTime {
@@ -1379,6 +1395,7 @@ fn spawn_rule_task(
                 delay_dur,
                 sink_tx,
                 event_time,
+                send_error,
             ))
         }
     };
@@ -1391,6 +1408,45 @@ fn is_rule_running(rule_mgr: &RuleManager, rule_id: &str) -> bool {
         // Rule deleted mid-flight: stop processing.
         None => false,
     }
+}
+
+/// Extracts an upstream error message when the record carries an `error` or
+/// `__error` field (emitted by source decoders on malformed payloads).
+fn check_record_error(data: &HashMap<String, Value>) -> Option<String> {
+    if let Some(err) = data.get("error").or_else(|| data.get("__error")) {
+        return Some(
+            err.as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| err.to_string()),
+        );
+    }
+    None
+}
+
+/// Handles an upstream error record per the rule `sendError` option. Returns
+/// `true` when the record was an error record (counted as an exception and,
+/// when enabled, forwarded immediately to the sink); the caller must then
+/// `continue` without normal projection or window-buffer insertion, mirroring
+/// eKuiper semantics where the error event bypasses window aggregation.
+async fn handle_error_record(
+    rule_mgr: &RuleManager,
+    rule_id: &str,
+    send_error: bool,
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    record: &StreamRecord,
+) -> bool {
+    let Some(err_msg) = check_record_error(&record.data) else {
+        return false;
+    };
+    rule_mgr.inc_exceptions(rule_id, 1);
+    if send_error {
+        let mut err_data = HashMap::new();
+        err_data.insert("error".to_string(), Value::String(err_msg));
+        err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
+        enqueue_sink_record(sink, StreamRecord::new(err_data)).await;
+        rule_mgr.inc_sink_records(rule_id, 1);
+    }
+    true
 }
 
 /// Event-time configuration for windowed rules: when `enabled`, window
@@ -1883,6 +1939,7 @@ async fn enqueue_sink_record(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_stateless_rule(
     rule_mgr: RuleManager,
     rule_id: String,
@@ -1891,6 +1948,7 @@ async fn run_stateless_rule(
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    send_error: bool,
 ) {
     // Running analytic state for acc_* cumulative functions. The stateful
     // projection below runs for every input row (advancing cumulative state
@@ -1904,6 +1962,9 @@ async fn run_stateless_rule(
                     continue;
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
+                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
+                    continue;
+                }
                 let Some(joined) =
                     apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
                         .await
@@ -1931,6 +1992,7 @@ async fn run_stateless_rule(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_count_window_rule(
     rule_mgr: RuleManager,
     rule_id: String,
@@ -1939,6 +2001,7 @@ async fn run_count_window_rule(
     size: usize,
     interval: Option<usize>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    send_error: bool,
 ) {
     let count = size.max(1);
     let hop = interval.unwrap_or(count).max(1);
@@ -1951,6 +2014,9 @@ async fn run_count_window_rule(
                     continue;
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
+                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
+                    continue;
+                }
                 buffer.push(record.data);
                 events_since_trigger += 1;
                 if hop <= count {
@@ -2007,6 +2073,7 @@ fn tumbling_window_duration(unit: &TimeUnit, length: u64) -> std::time::Duration
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_tumbling_window_rule(
     rule_mgr: RuleManager,
     rule_id: String,
@@ -2015,6 +2082,7 @@ async fn run_tumbling_window_rule(
     duration: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
+    send_error: bool,
 ) {
     let mut ticker = tokio::time::interval(duration);
     let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
@@ -2033,6 +2101,11 @@ async fn run_tumbling_window_rule(
                             continue;
                         }
                         rule_mgr.inc_source_records(&rule_id, 1);
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record)
+                            .await
+                        {
+                            continue;
+                        }
                         if event_time.enabled {
                             let event_ts = extract_event_timestamp(
                                 &record.data,
@@ -2101,6 +2174,7 @@ async fn run_tumbling_window_rule(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_hopping_window_rule(
     rule_mgr: RuleManager,
     rule_id: String,
@@ -2109,6 +2183,7 @@ async fn run_hopping_window_rule(
     length: std::time::Duration,
     hop: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    send_error: bool,
 ) {
     let mut ticker = tokio::time::interval(hop);
     // Tokio's interval fires immediately on the first tick; consume it so the
@@ -2124,6 +2199,11 @@ async fn run_hopping_window_rule(
                             continue;
                         }
                         rule_mgr.inc_source_records(&rule_id, 1);
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record)
+                            .await
+                        {
+                            continue;
+                        }
                         buffer.push((std::time::Instant::now(), record.data));
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2159,6 +2239,7 @@ async fn run_sliding_window_rule(
     delay: Option<std::time::Duration>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
+    send_error: bool,
 ) {
     let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
     // Event-time state: event-timestamped rows plus the watermark.
@@ -2172,6 +2253,9 @@ async fn run_sliding_window_rule(
                     continue;
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
+                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
+                    continue;
+                }
                 // If delay is configured, wait for the delay duration before evaluating
                 // so events arriving during the delay window are captured.
                 if let Some(delay_dur) = delay {

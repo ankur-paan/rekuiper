@@ -3092,3 +3092,136 @@ async fn test_event_time_watermark_and_late_tolerance() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_buffer_length_and_send_error_options() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // Shared source stream for both rules.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM opt_stream () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    async fn post_error(client: &reqwest::Client, base_url: &str) {
+        let resp = client
+            .post(format!("{}/streams/opt_stream/data", base_url))
+            .json(&json!({"error": "sensor connection reset"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    async fn rule_status(
+        client: &reqwest::Client,
+        base_url: &str,
+        rule: &str,
+    ) -> serde_json::Value {
+        client
+            .get(format!("{}/rules/{}/status", base_url, rule))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    // sendError: true — the error record is formatted and forwarded immediately.
+    let mut sink_rx_true = state.stream_bus.subscribe("sink_err_true");
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_err_true",
+            "sql": "SELECT * FROM opt_stream",
+            "actions": [{"memory": {"topic": "sink_err_true"}}],
+            "options": {"sendError": true, "bufferLength": 50}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    post_error(&client, &base_url).await;
+    let out = tokio::time::timeout(std::time::Duration::from_secs(2), sink_rx_true.recv())
+        .await
+        .expect("sendError:true must forward the error record")
+        .expect("sink_err_true closed");
+    let out_json: serde_json::Value = out
+        .data
+        .into_iter()
+        .collect::<serde_json::Map<String, serde_json::Value>>()
+        .into();
+    assert_eq!(
+        out_json["error"],
+        json!("sensor connection reset"),
+        "forwarded: {}",
+        out_json
+    );
+    assert_eq!(
+        out_json["rule_id"],
+        json!("rule_err_true"),
+        "forwarded: {}",
+        out_json
+    );
+    let status = rule_status(&client, &base_url, "rule_err_true").await;
+    assert_eq!(status["sourceRecordsInTotal"], json!(1));
+    assert_eq!(status["sinkRecordsOutTotal"], json!(1));
+    assert_eq!(status["exceptionsTotal"], json!(1));
+
+    // sendError: false (default) — counted as an exception, never forwarded.
+    let mut sink_rx_false = state.stream_bus.subscribe("sink_err_false");
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_err_false",
+            "sql": "SELECT * FROM opt_stream",
+            "actions": [{"memory": {"topic": "sink_err_false"}}],
+            "options": {"sendError": false, "bufferLength": 50}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    post_error(&client, &base_url).await;
+    // Wait until the rule has demonstrably processed the error record (source
+    // counter), so the subsequent empty assertion is meaningful and not a race.
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let s = rule_status(&client, &base_url, "rule_err_false").await;
+            if s["sourceRecordsInTotal"] == json!(1) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("rule_err_false never processed the error record");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), sink_rx_false.recv())
+            .await
+            .is_err(),
+        "sendError:false must not forward error records"
+    );
+    let status = rule_status(&client, &base_url, "rule_err_false").await;
+    assert_eq!(status["sinkRecordsOutTotal"], json!(0));
+    assert_eq!(status["exceptionsTotal"], json!(1));
+
+    // Clean delete of both rules.
+    for rule in ["rule_err_true", "rule_err_false"] {
+        let resp = client
+            .delete(format!("{}/rules/{}", base_url, rule))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+}
