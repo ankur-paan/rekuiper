@@ -3415,3 +3415,102 @@ async fn test_rule_schema_introspection() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_process_cpu_and_memory_metrics() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM demo () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "metric_test_rule",
+            "sql": "SELECT * FROM demo",
+            "actions": [{"memory": {"topic": "metric_sink"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // Per-rule CPU/memory reflects the live process.
+    let resp = client
+        .get(format!("{}/rules/metric_test_rule/cpu", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let cpu: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(cpu["rule_id"], json!("metric_test_rule"));
+    assert!(
+        cpu["memory"].as_u64().unwrap_or(0) > 0,
+        "memory must be positive: {}",
+        cpu
+    );
+    assert!(
+        cpu["cpu"].as_f64().unwrap_or(-1.0) >= 0.0,
+        "cpu must be non-negative: {}",
+        cpu
+    );
+
+    // Aggregate usage maps every known rule id.
+    let resp = client
+        .get(format!("{}/rules/usage/cpu", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let usage: serde_json::Value = resp.json().await.unwrap();
+    assert!(usage.is_object(), "usage must be an object: {}", usage);
+    assert!(
+        usage.get("metric_test_rule").is_some(),
+        "usage must contain the rule: {}",
+        usage
+    );
+
+    // Metrics dump carries live process and system memory.
+    let resp = client
+        .get(format!("{}/metrics/dump", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let dump: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        dump["metrics"]["memory"].as_u64().unwrap_or(0) > 0,
+        "dump memory must be positive: {}",
+        dump
+    );
+
+    // Unknown rule ids 404.
+    let resp = client
+        .get(format!("{}/rules/non_existent/cpu", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // Clean up rule and stream.
+    let resp = client
+        .delete(format!("{}/rules/metric_test_rule", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .delete(format!("{}/streams/demo", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}

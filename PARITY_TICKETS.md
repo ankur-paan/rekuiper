@@ -17,8 +17,8 @@ No item may be marked complete without:
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
-| **Epic 5** | REST API Realism & System Introspection | 3 | 2 | 1 |
-| **Total** | | **17 Tasks** | **16** | **1** |
+| **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
+| **Total** | | **17 Tasks** | **17** | **0** |
 
 ---
 
@@ -104,9 +104,6 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. `Evaluator::infer_expr_type` statically types every `Expr` (literals, boolean/arithmetic/unary ops with bigint-widening, `BETWEEN`/`IN`/`IS NULL`, a ~150-name call table grouped float/bigint/boolean/string/array/struct, first-concrete `CASE` branch, `Over` delegation) and `Evaluator::infer_select_schema` maps each SELECT field to its alias (or `column_name`) plus type. `get_rule_schema` returns 404 for unknown rules, `{}` when the SQL won't parse (graph rules), else the inferred object. Covered by `test_rule_schema_introspection` in `fvt_compat.rs` (`{"a": "any", "c": "float"}`, greeting/cnt/is_missing string/bigint/boolean, 404, cleanup).
   - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 5.3: Process CPU and Memory Metrics**
-  - **Problem**: `GET /rules/:id/cpu` and `GET /metrics/dump` return empty objects.
-  - **Requirements**:
-    - Use `sysinfo` (already in workspace `Cargo.toml`) to query real process CPU % and resident memory (RSS).
-  - **Files**: `crates/rekuiper-server/src/routes.rs`
-  - **Verification**: Test verifying real non-empty CPU usage and memory stats are returned.
+- [x] **Ticket 5.3: Process CPU and Memory Metrics**
+  - **Status**: Completed & Verified. New `GET /rules/:id/cpu` (`get_rule_cpu`) validates the name, 404s unknown rules, and returns live `{rule_id, cpu, cpu_percent, memory, memory_bytes}` via a shared `current_process_stats` helper (`get_current_pid` + `System::new_all`/`refresh_all`, falling back to global CPU/used memory). `GET /rules/usage/cpu` now maps every listed rule to the process CPU (0.0 when stopped); `GET /metrics/dump` reports process cpu/memory plus system total/used memory and uptime. Covered by `test_process_cpu_and_memory_metrics` in `fvt_compat.rs` (memory > 0, cpu >= 0.0, usage object contains the rule, dump memory > 0, 404, cleanup).
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.

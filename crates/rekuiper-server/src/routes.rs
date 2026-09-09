@@ -119,6 +119,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules/:name/restart", post(restart_rule))
         .route("/rules/:name/reset_state", put(reset_rule_state))
         .route("/rules/:id/schema", get(get_rule_schema))
+        .route("/rules/:id/cpu", get(get_rule_cpu))
         .route(
             "/rules/:name/tags",
             put(empty_ok).patch(empty_ok).delete(empty_ok),
@@ -3283,8 +3284,53 @@ async fn reset_rule_state(State(state): State<AppState>, Path(name): Path<String
     }
 }
 
-async fn rule_cpu_usage() -> impl IntoResponse {
-    Json(json!({}))
+/// Current process CPU percent and RSS bytes via sysinfo, falling back to
+/// global CPU and used memory when the process handle is unavailable.
+fn current_process_stats() -> (f64, u64) {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    if let Some(p) = sysinfo::get_current_pid()
+        .ok()
+        .and_then(|id| sys.process(id))
+    {
+        (p.cpu_usage() as f64, p.memory())
+    } else {
+        (sys.global_cpu_info().cpu_usage() as f64, sys.used_memory())
+    }
+}
+
+async fn get_rule_cpu(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    if state.rule_manager.get_rule(&id).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", id)).into_response();
+    }
+    let (cpu, memory) = current_process_stats();
+    Json(json!({
+        "rule_id": id,
+        "cpu": cpu,
+        "cpu_percent": cpu,
+        "memory": memory,
+        "memory_bytes": memory,
+    }))
+    .into_response()
+}
+
+async fn rule_cpu_usage(State(state): State<AppState>) -> impl IntoResponse {
+    let (cpu, _) = current_process_stats();
+    let mut map = serde_json::Map::new();
+    for rule in state.rule_manager.list_rules() {
+        // Per-rule CPU accounting is unavailable: running rules share the
+        // process measurement, stopped rules report zero.
+        let usage = if is_rule_running(&state.rule_manager, &rule.id) {
+            cpu
+        } else {
+            0.0
+        };
+        map.insert(rule.id, json!(usage));
+    }
+    Json(Value::Object(map))
 }
 
 async fn rule_tags_match() -> impl IntoResponse {
@@ -3303,8 +3349,23 @@ async fn import_status() -> impl IntoResponse {
     Json(json!({ "status": "completed" }))
 }
 
-async fn metrics_dump() -> impl IntoResponse {
-    Json(json!({ "metrics": {} }))
+async fn metrics_dump(State(state): State<AppState>) -> impl IntoResponse {
+    let (cpu, memory) = current_process_stats();
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    Json(json!({
+        "metrics": {
+            "cpu": cpu,
+            "cpu_usage": cpu,
+            "memory": memory,
+            "memory_bytes": memory,
+            "total_memory": sys.total_memory(),
+            "used_memory": sys.used_memory(),
+            "uptime_seconds": state.start_time.elapsed().as_secs(),
+        },
+        "cpu": cpu,
+        "memory": memory,
+    }))
 }
 
 /// Prometheus text exposition of rule metrics (eKuiper monitor endpoint).
