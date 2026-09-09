@@ -3225,3 +3225,101 @@ async fn test_buffer_length_and_send_error_options() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn test_dynamic_metadata_functions() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    async fn fetch_functions(client: &reqwest::Client, base_url: &str) -> Vec<serde_json::Value> {
+        let resp = client
+            .get(format!("{}/metadata/functions", base_url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        resp.json().await.unwrap()
+    }
+
+    fn find<'a>(list: &'a [serde_json::Value], name: &str) -> &'a serde_json::Value {
+        list.iter()
+            .find(|entry| entry["name"] == json!(name))
+            .unwrap_or_else(|| panic!("function {} missing from metadata", name))
+    }
+
+    // The catalog covers every built-in function.
+    let functions = fetch_functions(&client, &base_url).await;
+    assert!(
+        functions.len() >= 185,
+        "expected >= 185 functions, got {}",
+        functions.len()
+    );
+    for name in [
+        "crc32",
+        "day_of_week",
+        "object_pick",
+        "percentile",
+        "split_value",
+        "row_number",
+    ] {
+        find(&functions, name);
+    }
+
+    // Spot-check categories and the aggregate flag.
+    assert_eq!(find(&functions, "crc32")["category"], json!("crypto"));
+    assert_eq!(find(&functions, "crc32")["aggregate"], json!(false));
+    assert_eq!(
+        find(&functions, "day_of_week")["category"],
+        json!("datetime")
+    );
+    assert_eq!(find(&functions, "object_pick")["category"], json!("array"));
+    assert_eq!(
+        find(&functions, "percentile")["category"],
+        json!("aggregate")
+    );
+    assert_eq!(find(&functions, "percentile")["aggregate"], json!(true));
+    assert_eq!(
+        find(&functions, "row_number")["category"],
+        json!("aggregate")
+    );
+    assert_eq!(find(&functions, "row_number")["aggregate"], json!(true));
+
+    // Registered plugin functions extend the catalog dynamically.
+    let resp = client
+        .post(format!("{}/plugins/functions", base_url))
+        .json(&json!({
+            "name": "meta_test_plugin",
+            "functions": ["custom_fn1", "custom_fn2"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let functions = fetch_functions(&client, &base_url).await;
+    let custom = find(&functions, "custom_fn1");
+    assert_eq!(custom["category"], json!("plugin"));
+    find(&functions, "custom_fn2");
+
+    // Deleting the plugin removes its functions again.
+    let resp = client
+        .delete(format!("{}/plugins/functions/meta_test_plugin", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let functions = fetch_functions(&client, &base_url).await;
+    assert!(
+        !functions
+            .iter()
+            .any(|entry| entry["name"] == json!("custom_fn1")),
+        "custom_fn1 must disappear after plugin deletion"
+    );
+    assert!(
+        !functions
+            .iter()
+            .any(|entry| entry["name"] == json!("custom_fn2")),
+        "custom_fn2 must disappear after plugin deletion"
+    );
+}

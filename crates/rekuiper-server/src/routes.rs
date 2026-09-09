@@ -23,11 +23,12 @@ use rekuiper_core::{
     StreamDefinition, StreamManager, TableDefinition, TableManager,
 };
 use rekuiper_sql::{
-    Evaluator, Expr, JoinClause, JoinType, Parser, RuleState, SelectStmt, TimeUnit, WindowDef,
+    builtin_function_metadata, Evaluator, Expr, JoinClause, JoinType, Parser, RuleState,
+    SelectStmt, TimeUnit, WindowDef,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
@@ -3107,33 +3108,57 @@ async fn list_sink_metadata() -> impl IntoResponse {
     Json(named_entries(&["mqtt", "http", "file", "log", "memory"]))
 }
 
-async fn list_function_metadata() -> impl IntoResponse {
-    Json(named_entries(&[
-        "abs",
-        "ceil",
-        "ceiling",
-        "floor",
-        "round",
-        "sqrt",
-        "power",
-        "pow",
-        "concat",
-        "lower",
-        "upper",
-        "length",
-        "trim",
-        "substr",
-        "substring",
-        "startswith",
-        "endswith",
-        "cast",
-        "coalesce",
-        "count",
-        "sum",
-        "avg",
-        "min",
-        "max",
-    ]))
+async fn list_function_metadata(State(state): State<AppState>) -> impl IntoResponse {
+    let mut list: Vec<Value> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for meta in builtin_function_metadata() {
+        seen.insert(meta.name.to_string());
+        list.push(json!({
+            "name": meta.name,
+            "category": meta.category,
+            "description": meta.description,
+            "aggregate": meta.aggregate,
+            "arity": meta.arity,
+            "example": meta.example,
+        }));
+    }
+    // Registered plugin/UDF functions extend the catalog; built-ins win on
+    // name collisions. The registry stores no arity, so it is reported
+    // honestly as unknown.
+    let plugins = state
+        .plugin_manager
+        .list_plugins("function")
+        .into_iter()
+        .chain(state.plugin_manager.list_plugins("udf"));
+    for plugin in plugins {
+        let category = if plugin.plugin_type == "udf" {
+            "udf"
+        } else {
+            "plugin"
+        };
+        let functions = if plugin.functions.is_empty() {
+            vec![plugin.name.clone()]
+        } else {
+            plugin.functions.clone()
+        };
+        let description = plugin
+            .description
+            .clone()
+            .unwrap_or_else(|| format!("Function provided by the {} plugin.", plugin.name));
+        for func in functions {
+            if seen.insert(func.clone()) {
+                list.push(json!({
+                    "name": func,
+                    "category": category,
+                    "description": description,
+                    "aggregate": false,
+                    "arity": "unknown",
+                    "example": format!("{}()", func),
+                }));
+            }
+        }
+    }
+    Json(list)
 }
 
 async fn list_operator_metadata() -> impl IntoResponse {
