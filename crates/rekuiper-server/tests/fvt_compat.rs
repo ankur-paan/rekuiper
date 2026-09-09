@@ -736,7 +736,6 @@ async fn test_all_openapi_paths_responding() {
         "/services/edgex",
         "/services/functions/echo",
         "/udf/javascript/func1",
-        "/schemas/stream/myschema",
     ] {
         let resp = client
             .get(format!("{}{}", base_url, path))
@@ -824,6 +823,114 @@ async fn test_all_openapi_paths_responding() {
     // Rule schema for a missing rule is 404.
     let resp = client
         .get(format!("{}/rules/no_such_rule/schema", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_schema_registry_crud() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+    let book = "syntax = \"proto3\";\nmessage Book { string title = 1; int32 price = 2; }\n";
+
+    // Missing schemas 404.
+    let resp = client
+        .get(format!("{}/schemas/protobuf/book", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // Register, then list.
+    let resp = client
+        .post(format!("{}/schemas/protobuf", base_url))
+        .json(&json!({"name": "book", "content": book}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/schemas/protobuf", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(names, vec!["book".to_string()]);
+    // Other kinds are isolated.
+    let resp = client
+        .get(format!("{}/schemas/json", base_url))
+        .send()
+        .await
+        .unwrap();
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert!(names.is_empty());
+
+    // Definition JSON.
+    let resp = client
+        .get(format!("{}/schemas/protobuf/book", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let def: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(def["name"], "book");
+    assert_eq!(def["kind"], "protobuf");
+    assert_eq!(def["content"], book);
+
+    // Raw proto text via Accept: text/plain.
+    let resp = client
+        .get(format!("{}/schemas/protobuf/book", base_url))
+        .header(reqwest::header::ACCEPT, "text/plain")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(resp.text().await.unwrap(), book);
+
+    // Update content, then delete.
+    let resp = client
+        .put(format!("{}/schemas/protobuf/book", base_url))
+        .json(&json!({"content": "syntax = \"proto3\";\nmessage Book { string title = 1; }"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .get(format!("{}/schemas/protobuf/book", base_url))
+        .send()
+        .await
+        .unwrap();
+    let def: serde_json::Value = resp.json().await.unwrap();
+    assert!(def["content"].as_str().unwrap().contains("string title"));
+
+    // Upload endpoint upserts too.
+    let resp = client
+        .put(format!("{}/schemas/protobuf/mag/upload", base_url))
+        .json(&json!({"content": book}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .get(format!("{}/schemas/protobuf", base_url))
+        .send()
+        .await
+        .unwrap();
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert_eq!(names, vec!["book".to_string(), "mag".to_string()]);
+
+    let resp = client
+        .delete(format!("{}/schemas/protobuf/book", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .get(format!("{}/schemas/protobuf/book", base_url))
         .send()
         .await
         .unwrap();

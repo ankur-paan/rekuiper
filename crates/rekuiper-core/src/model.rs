@@ -27,6 +27,16 @@ pub struct StreamDefinition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaDefinition {
+    pub name: String,
+    pub kind: String, // e.g. "protobuf"
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableDefinition {
     pub name: String,
     #[serde(default)]

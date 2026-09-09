@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub mod codec;
+pub use codec::*;
+
 #[async_trait]
 pub trait Sink: Send + Sync {
     async fn send(&self, record: &StreamRecord) -> Result<()>;

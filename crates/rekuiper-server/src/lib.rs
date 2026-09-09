@@ -3,7 +3,9 @@ pub mod routes;
 use anyhow::Result;
 use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
-use rekuiper_core::{RuleManager, SqliteKvStore, StreamBus, StreamManager, TableManager};
+use rekuiper_core::{
+    RuleManager, SchemaManager, SqliteKvStore, StreamBus, StreamManager, TableManager,
+};
 use routes::{create_router, prometheus_metrics_handler, restore_running_rules, AppState};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -21,10 +23,16 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
     let stream_manager = StreamManager::new_with_kv(kv.clone());
     let rule_manager = RuleManager::new_with_kv(stream_bus.clone(), kv.clone());
     let table_manager = TableManager::new_with_kv(kv.clone());
+    let schema_manager = SchemaManager::new_with_kv(kv.clone());
 
     stream_manager.load_from_kv(&kv).await?;
     table_manager.load_from_kv(&kv).await?;
     rule_manager.load_from_kv(&kv).await?;
+    schema_manager.load_from_kv(&kv).await?;
+    let proto_schemas = schema_manager.load_proto_dir(std::path::Path::new("etc/schemas"));
+    if proto_schemas > 0 {
+        tracing::info!("Loaded {} schemas from etc/schemas", proto_schemas);
+    }
 
     let state = AppState {
         start_time: Instant::now(),
@@ -33,6 +41,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         stream_manager,
         table_manager,
         rule_manager,
+        schema_manager,
         stream_bus,
         connections: Arc::new(RwLock::new(HashMap::new())),
         source_configs: Arc::new(RwLock::new(HashMap::new())),

@@ -1,5 +1,7 @@
 use crate::kv::KvStore;
-use crate::model::{RuleDefinition, RuleStatus, StreamDefinition, TableDefinition};
+use crate::model::{
+    RuleDefinition, RuleStatus, SchemaDefinition, StreamDefinition, TableDefinition,
+};
 use crate::runtime::StreamBus;
 use anyhow::{bail, Result};
 use parking_lot::RwLock;
@@ -201,6 +203,144 @@ impl TableManager {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct SchemaManager {
+    schemas: Arc<RwLock<HashMap<String, SchemaDefinition>>>,
+    kv: Option<Arc<dyn KvStore>>,
+}
+
+impl SchemaManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn new_with_kv(kv: Arc<dyn KvStore>) -> Self {
+        Self {
+            schemas: Arc::new(RwLock::new(HashMap::new())),
+            kv: Some(kv),
+        }
+    }
+
+    fn storage_key(kind: &str, name: &str) -> String {
+        format!("{}/{}", kind, name)
+    }
+
+    pub async fn register_schema(&self, def: SchemaDefinition) -> Result<()> {
+        let key = Self::storage_key(&def.kind, &def.name);
+        let snapshot = serde_json::to_string(&def).unwrap_or_default();
+        self.schemas.write().insert(key.clone(), def);
+        if let Some(kv) = &self.kv {
+            if let Err(e) = kv.set("schemas", &key, &snapshot).await {
+                tracing::warn!("KV persist schemas/{} failed: {}", key, e);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_schema(&self, kind: &str, name: &str) -> Option<SchemaDefinition> {
+        self.schemas
+            .read()
+            .get(&Self::storage_key(kind, name))
+            .cloned()
+    }
+
+    /// Sorted schema names registered under one kind.
+    pub fn list_schemas(&self, kind: &str) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .schemas
+            .read()
+            .values()
+            .filter(|def| def.kind == kind)
+            .map(|def| def.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    pub async fn delete_schema(&self, kind: &str, name: &str) -> Result<()> {
+        let key = Self::storage_key(kind, name);
+        if self.schemas.write().remove(&key).is_none() {
+            bail!("Schema {}/{} not found", kind, name);
+        }
+        if let Some(kv) = &self.kv {
+            if let Err(e) = kv.delete("schemas", &key).await {
+                tracing::warn!("KV delete schemas/{} failed: {}", key, e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Repopulates schemas previously stored under the `schemas` namespace,
+    /// skipping corrupt entries.
+    pub async fn load_from_kv(&self, kv: &Arc<dyn KvStore>) -> Result<()> {
+        for (key, val) in kv.list_all("schemas").await? {
+            match serde_json::from_str::<SchemaDefinition>(&val) {
+                Ok(def) => {
+                    self.schemas.write().insert(key, def);
+                }
+                Err(e) => {
+                    tracing::warn!("Skipping corrupt schema entry {}: {}", key, e);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Seeds the registry from `etc/schemas/{kind}/*.proto`-style trees:
+    /// each immediate subdirectory is a kind, each `*.proto` file a schema
+    /// named by its file stem. Missing trees load nothing.
+    pub fn load_proto_dir(&self, base: &std::path::Path) -> usize {
+        let kinds = match std::fs::read_dir(base) {
+            Ok(entries) => entries,
+            Err(_) => return 0,
+        };
+        let mut loaded = 0;
+        for kind_entry in kinds.flatten() {
+            let kind_path = kind_entry.path();
+            if !kind_path.is_dir() {
+                continue;
+            }
+            let kind = kind_entry.file_name().to_string_lossy().into_owned();
+            let files = match std::fs::read_dir(&kind_path) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for file_entry in files.flatten() {
+                let path = file_entry.path();
+                if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("proto") {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        let key = Self::storage_key(&kind, &name);
+                        self.schemas.write().insert(
+                            key,
+                            SchemaDefinition {
+                                name,
+                                kind: kind.clone(),
+                                content: Some(content),
+                                file: Some(path.to_string_lossy().into_owned()),
+                            },
+                        );
+                        loaded += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Skipping unreadable schema file {:?}: {}", path, e);
+                    }
+                }
+            }
+        }
+        loaded
     }
 }
 

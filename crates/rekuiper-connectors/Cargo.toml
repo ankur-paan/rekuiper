@@ -26,4 +26,5 @@ redis = { workspace = true }
 rskafka = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
+base64 = { workspace = true }
 rekuiper-core = { workspace = true }

@@ -18,9 +18,9 @@ use rekuiper_connectors::{
     WebSocketSource,
 };
 use rekuiper_core::{
-    model::{compile_graph_to_sql_and_actions, StreamRecord},
-    RuleDefinition, RuleManager, StreamBus, StreamDefinition, StreamManager, TableDefinition,
-    TableManager,
+    model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamRecord},
+    RuleDefinition, RuleManager, SchemaManager, StreamBus, StreamDefinition, StreamManager,
+    TableDefinition, TableManager,
 };
 use rekuiper_sql::{
     Evaluator, Expr, JoinClause, JoinType, Parser, RuleState, SelectStmt, TimeUnit, WindowDef,
@@ -47,6 +47,7 @@ pub struct AppState {
     pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
     pub source_cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
     pub http_client: reqwest::Client,
+    pub schema_manager: SchemaManager,
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -84,6 +85,7 @@ impl AppState {
                 .unwrap_or_default(),
             ruletests: Arc::new(RwLock::new(HashMap::new())),
             source_cancels: Arc::new(RwLock::new(HashMap::new())),
+            schema_manager: SchemaManager::new(),
         }
     }
 }
@@ -220,14 +222,12 @@ pub fn create_router(state: AppState) -> Router {
                 .put(validated_empty_ok)
                 .delete(validated_empty_ok),
         )
-        .route("/schemas/:kind", get(validated_empty_array))
+        .route("/schemas/:kind", get(list_schemas).post(create_schema))
         .route(
             "/schemas/:kind/:name",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_schema).put(update_schema).delete(delete_schema),
         )
-        .route("/schemas/:kind/:name/upload", put(validated_empty_ok))
+        .route("/schemas/:kind/:name/upload", put(update_schema))
         .route("/metadata/connections/:name", get(get_source_metadata))
         .route("/metadata/sources/yaml/:name", get(empty_yaml))
         .route(
@@ -2169,15 +2169,6 @@ async fn empty_array() -> impl IntoResponse {
 /// Validated variants of the discovery stubs below: they accept any number of
 /// path captures (`Path<HashMap<..>>` also matches capture-less routes) and
 /// reject names with invalid characters before responding as usual.
-async fn validated_empty_array(Path(params): Path<HashMap<String, String>>) -> Response {
-    for name in params.values() {
-        if let Err(resp) = check_valid_name(name) {
-            return resp;
-        }
-    }
-    Json(Value::Array(Vec::new())).into_response()
-}
-
 async fn validated_empty_object(Path(params): Path<HashMap<String, String>>) -> Response {
     for name in params.values() {
         if let Err(resp) = check_valid_name(name) {
@@ -2199,6 +2190,149 @@ async fn validated_empty_ok(Path(params): Path<HashMap<String, String>>) -> Resp
 /// Generic empty-object response for unimplemented detail endpoints.
 async fn empty_object() -> impl IntoResponse {
     Json(json!({}))
+}
+
+// ---------------------------------------------------------------------------
+// Schema registry (`/schemas/:kind[/:name]`).
+// ---------------------------------------------------------------------------
+
+/// Payload for registering or updating a schema; the kind always comes from
+/// the URL path.
+#[derive(Debug, serde::Deserialize)]
+struct SchemaPayload {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
+}
+
+async fn list_schemas(State(state): State<AppState>, Path(kind): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    Json(state.schema_manager.list_schemas(&kind)).into_response()
+}
+
+async fn create_schema(
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+    Json(payload): Json<SchemaPayload>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    let Some(name) = payload.name.filter(|n| !n.is_empty()) else {
+        return (StatusCode::BAD_REQUEST, "Missing schema name").into_response();
+    };
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let def = SchemaDefinition {
+        name,
+        kind,
+        content: payload.content,
+        file: payload.file,
+    };
+    let created = def.name.clone();
+    let _ = state.schema_manager.register_schema(def).await;
+    (
+        StatusCode::CREATED,
+        format!("Schema {} is created.\n", created),
+    )
+        .into_response()
+}
+
+async fn get_schema(
+    State(state): State<AppState>,
+    Path((kind, name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let Some(def) = state.schema_manager.get_schema(&kind, &name) else {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Schema {}/{} not found", kind, name),
+        )
+            .into_response();
+    };
+    let wants_text = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("text/plain"));
+    if wants_text {
+        (
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            def.content.unwrap_or_default(),
+        )
+            .into_response()
+    } else {
+        Json(def).into_response()
+    }
+}
+
+async fn update_schema(
+    State(state): State<AppState>,
+    Path((kind, name)): Path<(String, String)>,
+    Json(payload): Json<SchemaPayload>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    // Upsert: merge over any existing definition so partial bodies work.
+    let mut def = state
+        .schema_manager
+        .get_schema(&kind, &name)
+        .unwrap_or(SchemaDefinition {
+            name: name.clone(),
+            kind: kind.clone(),
+            content: None,
+            file: None,
+        });
+    if payload.content.is_some() {
+        def.content = payload.content;
+    }
+    if payload.file.is_some() {
+        def.file = payload.file;
+    }
+    let _ = state.schema_manager.register_schema(def).await;
+    (
+        StatusCode::OK,
+        format!("Schema {}/{} is updated.\n", kind, name),
+    )
+        .into_response()
+}
+
+async fn delete_schema(
+    State(state): State<AppState>,
+    Path((kind, name)): Path<(String, String)>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    // Idempotent like the other drop endpoints: missing schemas still 200.
+    let _ = state.schema_manager.delete_schema(&kind, &name).await;
+    (
+        StatusCode::OK,
+        format!("Schema {}/{} is dropped.\n", kind, name),
+    )
+        .into_response()
 }
 
 /// Generic success acknowledgement for fire-and-forget endpoints.

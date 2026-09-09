@@ -1747,6 +1747,7 @@ version = "0.420.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "futures",
  "parking_lot",
