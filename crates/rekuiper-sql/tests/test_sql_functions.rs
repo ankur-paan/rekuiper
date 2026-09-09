@@ -1411,3 +1411,205 @@ fn test_datetime_calendar_parity() {
         assert_eq!(eval_one(sql, &empty), Value::Null, "{}", sql);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Object & JSON navigation functions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_object_json_parity() {
+    let empty = empty();
+
+    // keys & values, including empty and mistyped inputs.
+    assert_eq!(
+        eval_one(
+            "SELECT keys({\"a\": 1, \"b\": \"val\", \"c\": true}) AS v FROM demo",
+            &empty
+        ),
+        json!(["a", "b", "c"])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT values({\"a\": 1, \"b\": \"val\", \"c\": true}) AS v FROM demo",
+            &empty
+        ),
+        json!([1, "val", true])
+    );
+    assert_eq!(
+        eval_one("SELECT keys({}) AS v FROM demo", &empty),
+        json!([])
+    );
+    assert_eq!(
+        eval_one("SELECT values({}) AS v FROM demo", &empty),
+        json!([])
+    );
+    for sql in [
+        "SELECT keys(42) AS v FROM demo",
+        "SELECT keys('s') AS v FROM demo",
+        "SELECT keys([1]) AS v FROM demo",
+        "SELECT keys(null) AS v FROM demo",
+        "SELECT values(null) AS v FROM demo",
+    ] {
+        assert_eq!(eval_one(sql, &empty), Value::Null, "{}", sql);
+    }
+
+    // object_construct, with Null-valued pairs omitted.
+    assert_eq!(
+        eval_one(
+            "SELECT object_construct('a', 1, 'b', 'test', 'c', null) AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 1, "b": "test"})
+    );
+    assert_eq!(
+        eval_one("SELECT object_construct() AS v FROM demo", &empty),
+        json!({})
+    );
+    assert_eq!(
+        eval_one("SELECT object_construct('a') AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // object_concat merges left to right, later keys winning.
+    assert_eq!(
+        eval_one(
+            "SELECT object_concat({\"a\": 1, \"b\": 2}, {\"b\": 99, \"c\": 3}) AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 1, "b": 99, "c": 3})
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT object_concat({\"a\": 1}, {\"b\": 2}, {\"a\": 10, \"c\": 3}) AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 10, "b": 2, "c": 3})
+    );
+    assert_eq!(
+        eval_one("SELECT object_concat({\"a\": 1}) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT object_concat({\"a\": 1}, 5) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // erase / object_erase with single, multiple and array keys.
+    assert_eq!(
+        eval_one(
+            "SELECT erase({\"a\": 1, \"b\": 2, \"c\": 3}, 'b') AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 1, "c": 3})
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT object_erase({\"a\": 1, \"b\": 2, \"c\": 3}, 'a', 'c') AS v FROM demo",
+            &empty
+        ),
+        json!({"b": 2})
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT erase({\"a\": 1, \"b\": 2}, ['a', 'zzz']) AS v FROM demo",
+            &empty
+        ),
+        json!({"b": 2})
+    );
+    assert_eq!(
+        eval_one("SELECT erase({\"a\": 1}, 'missing') AS v FROM demo", &empty),
+        json!({"a": 1})
+    );
+    assert_eq!(
+        eval_one("SELECT erase(null, 'a') AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // object_pick keeps only requested keys.
+    assert_eq!(
+        eval_one(
+            "SELECT object_pick({\"a\": 1, \"b\": 2, \"c\": 3}, 'a', 'c') AS v FROM demo",
+            &empty
+        ),
+        json!({"a": 1, "c": 3})
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT object_pick({\"a\": 1, \"b\": 2, \"c\": 3}, ['b', 'z']) AS v FROM demo",
+            &empty
+        ),
+        json!({"b": 2})
+    );
+    assert_eq!(
+        eval_one("SELECT object_pick(null, 'a') AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // kvpair round-trip both directions.
+    assert_eq!(
+        eval_one(
+            "SELECT obj_to_kvpair_array({\"x\": 10, \"y\": 20}) AS v FROM demo",
+            &empty
+        ),
+        json!([{"key": "x", "value": 10}, {"key": "y", "value": 20}])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT object_to_kvpair_array({\"x\": 10}) AS v FROM demo",
+            &empty
+        ),
+        json!([{"key": "x", "value": 10}])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT kvpair_array_to_obj(obj_to_kvpair_array({\"x\": 10, \"y\": 20})) AS v FROM demo",
+            &empty
+        ),
+        json!({"x": 10, "y": 20})
+    );
+    assert_eq!(
+        eval_one("SELECT obj_to_kvpair_array(42) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // to_json / parse_json round-trip plus aliases and error paths.
+    assert_eq!(
+        eval_one(
+            "SELECT to_json({\"msg\": \"hello\", \"code\": 200}) AS v FROM demo",
+            &empty
+        ),
+        json!("{\"code\":200,\"msg\":\"hello\"}")
+    );
+    assert_eq!(
+        eval_one("SELECT tojson(7) AS v FROM demo", &empty),
+        json!("7")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT parse_json('{\"code\":200,\"msg\":\"hello\"}') AS v FROM demo",
+            &empty
+        ),
+        json!({"code": 200, "msg": "hello"})
+    );
+    assert_eq!(
+        eval_one("SELECT parsejson('[1, 2]') AS v FROM demo", &empty),
+        json!([1, 2])
+    );
+    assert_eq!(
+        eval_one("SELECT json_parse('invalid json{') AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT to_json(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT parse_json(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+    // Structured values pass straight through parse_json.
+    assert_eq!(
+        eval_one("SELECT parse_json(42) AS v FROM demo", &empty),
+        json!(42)
+    );
+}

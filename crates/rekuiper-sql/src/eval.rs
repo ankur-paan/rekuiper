@@ -1691,6 +1691,14 @@ impl Evaluator {
             "nvl" => Self::func_coalesce(args),
             // ---- Object construction ----
             "object_construct" => Self::func_object_construct(args),
+            "object_concat" => Self::func_object_concat(args),
+            "erase" | "object_erase" => Self::func_erase(args),
+            "object_pick" => Self::func_object_pick(args),
+            "obj_to_kvpair_array" | "object_to_kvpair_array" => {
+                Self::func_obj_to_kvpair_array(args)
+            }
+            "to_json" | "tojson" => Self::func_to_json(args),
+            "parse_json" | "parsejson" | "json_parse" => Self::func_parse_json(args),
             // ---- DateTime ----
             "now" => Self::func_now(args),
             "current_timestamp" | "local_timestamp" => Self::func_now(args),
@@ -2864,7 +2872,8 @@ impl Evaluator {
 
     /// Builds an object from alternating key/value arguments:
     /// `object_construct(k1, v1, k2, v2, ...)`. Keys are stringified via
-    /// [`Self::to_string_always`]; an odd argument count yields `Null`.
+    /// [`Self::to_string_always`]; pairs with `Null` values are omitted
+    /// (eKuiper parity); an odd argument count yields `Null`.
     #[allow(clippy::manual_is_multiple_of)]
     fn func_object_construct(args: &[Value]) -> Value {
         if args.len() % 2 != 0 {
@@ -2873,9 +2882,118 @@ impl Evaluator {
         let mut map = serde_json::Map::with_capacity(args.len() / 2);
         let mut it = args.iter();
         while let (Some(k), Some(v)) = (it.next(), it.next()) {
+            if v.is_null() {
+                continue;
+            }
             map.insert(Self::to_string_always(k), v.clone());
         }
         Value::Object(map)
+    }
+
+    /// Merges two or more objects left to right; later keys win.
+    fn func_object_concat(args: &[Value]) -> Value {
+        if args.len() < 2 {
+            return Value::Null;
+        }
+        let mut map = serde_json::Map::new();
+        for arg in args {
+            let Some(obj) = arg.as_object() else {
+                return Value::Null;
+            };
+            for (k, v) in obj {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+        Value::Object(map)
+    }
+
+    /// Collects key names to erase/pick: plain values stringify, arrays
+    /// contribute each element as a string.
+    fn key_names(args: &[Value]) -> Vec<String> {
+        let mut keys = Vec::new();
+        for arg in args {
+            if let Some(arr) = arg.as_array() {
+                keys.extend(arr.iter().map(Self::to_string_always));
+            } else {
+                keys.push(Self::to_string_always(arg));
+            }
+        }
+        keys
+    }
+
+    fn func_erase(args: &[Value]) -> Value {
+        if args.len() < 2 {
+            return Value::Null;
+        }
+        let Some(obj) = args[0].as_object() else {
+            return Value::Null;
+        };
+        let mut map = obj.clone();
+        for key in Self::key_names(&args[1..]) {
+            map.remove(&key);
+        }
+        Value::Object(map)
+    }
+
+    fn func_object_pick(args: &[Value]) -> Value {
+        if args.len() < 2 {
+            return Value::Null;
+        }
+        let Some(obj) = args[0].as_object() else {
+            return Value::Null;
+        };
+        let mut map = serde_json::Map::new();
+        for key in Self::key_names(&args[1..]) {
+            if let Some(v) = obj.get(&key) {
+                map.insert(key, v.clone());
+            }
+        }
+        Value::Object(map)
+    }
+
+    /// Inverse of [`Self::func_kvpair_array_to_obj`]: object entries become
+    /// `{"key": k, "value": v}` elements.
+    fn func_obj_to_kvpair_array(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(obj) = args[0].as_object() else {
+            return Value::Null;
+        };
+        Value::Array(
+            obj.iter()
+                .map(|(k, v)| {
+                    let mut entry = serde_json::Map::with_capacity(2);
+                    entry.insert("key".to_string(), Value::String(k.clone()));
+                    entry.insert("value".to_string(), v.clone());
+                    Value::Object(entry)
+                })
+                .collect(),
+        )
+    }
+
+    fn func_to_json(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        match serde_json::to_string(&args[0]) {
+            Ok(s) => Value::String(s),
+            Err(_) => Value::Null,
+        }
+    }
+
+    fn func_parse_json(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match &args[0] {
+            Value::Null => Value::Null,
+            Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::Null),
+            structured => structured.clone(),
+        }
     }
 
     // ---------- validation functions ----------

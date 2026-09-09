@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 4 | 3 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 5 | 2 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **6** | **11** |
+| **Total** | | **17 Tasks** | **7** | **10** |
 
 ---
 
@@ -53,18 +53,8 @@ No item may be marked complete without:
   - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.5: Object & JSON Navigation Functions
-- [ ] **Functions**:
-  - `keys(obj)`: Returns JSON array of string keys.
-  - `values(obj)`: Returns JSON array of values.
-  - `object_construct(k1, v1, k2, v2, ...)`: Constructs dynamic JSON object from key/value pairs.
-  - `object_concat(obj1, obj2)`: Shallow merge of two objects.
-  - `erase(obj, key)`: Returns copy of object with `key` removed.
-  - `object_pick(obj, k1, k2, ...)`: Returns sub-object with only the specified keys.
-  - `obj_to_kvpair_array(obj)`: Converts object to `[{"key": k, "value": v}]`.
-  - `to_json(val)`: Serializes value to JSON string.
-  - `parse_json(str)`: Parses JSON string into structured value (or Null on malformed).
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Tests for object manipulation, nested extraction, and roundtrip JSON conversion.
+- [x] **Status**: Completed & Verified. Implemented `object_concat` (left-to-right merge), `erase`/`object_erase` (variadic + array keys, missing keys ignored), `object_pick` (variadic + array keys), `obj_to_kvpair_array`/`object_to_kvpair_array` (exact inverse of `kvpair_array_to_obj`), `to_json`/`tojson` and `parse_json`/`parsejson`/`json_parse` (Null-safe round-trip, structured passthrough). Corrected `object_construct` to eKuiper parity by omitting Null-valued pairs (verified no existing caller passes Nulls). `keys`/`values` already matched spec - covered as-is. Covered by `test_object_json_parity` in `test_sql_functions.rs` (literals, aliases, arity/type errors, both round-trips).
+  - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.6: String, Regex & Encoding Functions
 - [ ] **Functions**:
