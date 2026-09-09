@@ -18,7 +18,11 @@ No item may be marked complete without:
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
-| **Total** | | **17 Tasks** | **17** | **0** |
+| **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 1 | 2 |
+| **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 0 | 2 |
+| **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
+| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
+| **Total** | | **27 Tasks** | **18** | **9** |
 
 ---
 
@@ -107,3 +111,100 @@ No item may be marked complete without:
 - [x] **Ticket 5.3: Process CPU and Memory Metrics**
   - **Status**: Completed & Verified. New `GET /rules/:id/cpu` (`get_rule_cpu`) validates the name, 404s unknown rules, and returns live `{rule_id, cpu, cpu_percent, memory, memory_bytes}` via a shared `current_process_stats` helper (`get_current_pid` + `System::new_all`/`refresh_all`, falling back to global CPU/used memory). `GET /rules/usage/cpu` now maps every listed rule to the process CPU (0.0 when stopped); `GET /metrics/dump` reports process cpu/memory plus system total/used memory and uptime. Covered by `test_process_cpu_and_memory_metrics` in `fvt_compat.rs` (memory > 0, cpu >= 0.0, usage object contains the rule, dump memory > 0, 404, cleanup).
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+---
+
+## Epic 6: Real Source, Sink & Connection Metadata
+
+- [x] **Ticket 6.1: Disk-Backed Source & Sink JSON and YAML Metadata**
+  - **Status**: Completed & Verified. Replaced scaffolded `{"name": name, "about": {}}` and `{"yaml": ""}` with authentic disk-backed loaders via `find_etc_file`: resolves `etc/sources/{name}.json` (and `etc/mqtt_source.json`), `etc/sinks/{name}.json`, `etc/sources/{name}.yaml` (and `etc/mqtt_source.yaml`), and `etc/sinks/{name}.yaml`. Expanded `list_source_metadata` and `list_sink_metadata` to include all 14 sources and 13 sinks. Covered by `test_metadata_source_and_sink_documents` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 6.2: Real Connection & Resource Discovery**
+  - **Problem**: `GET /metadata/connections` and `GET /metadata/resources` return empty `[]`.
+  - **Implementation**:
+    - Populate `/metadata/connections` from `state.connections.read()`.
+    - Serve connection YAML from `etc/connections/{name}.yaml` on `/metadata/connections/yaml/:name`.
+  - **Verification**: Create a connection via `POST /connections`, verify it appears in `/metadata/connections` and has valid metadata.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 6.3: Sink & Connection Configuration Key Persistence**
+  - **Problem**: `PUT, DELETE /metadata/sinks/:name/confKeys/:conf_key` and `PUT, DELETE /metadata/connections/:name/confKeys/:conf_key` return `empty_ok` without saving.
+  - **Implementation**:
+    - Store sink configurations under `sink_configs` in `AppState` (mirroring `source_configs`).
+    - Store connection configuration keys in `state.connections`.
+  - **Verification**: CRUD test creating, reading, and deleting sink confKeys.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+---
+
+## Epic 7: Rule Tagging & Trace Diagnostics
+
+- [ ] **Ticket 7.1: Persistent Rule Tagging & Tag-Based Matching**
+  - **Problem**: `PUT, PATCH, DELETE /rules/:name/tags` returns `empty_ok`. `/rules/tags/match` returns `[]`. Tags are lost.
+  - **Implementation**:
+    - Add `tags: HashSet<String>` to `RuleDefinition`.
+    - Implement `put_rule_tags`, `patch_rule_tags`, `delete_rule_tags` with KV persistence.
+    - Implement `GET /rules/tags/match?tags=t1,t2` to return all matching rule IDs.
+  - **Verification**: Test adding tags to rule, filtering via `/rules/tags/match`, and deleting tags.
+  - **Files**: `crates/rekuiper-core/src/rule.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 7.2: Real Rule Execution Trace Buffer**
+  - **Problem**: `/rules/:name/trace/start`, `/rules/:name/trace/stop`, `/trace/rule/:rule_id`, `/trace/:id`, `/tracer` return `empty_ok`/`empty_array`/`empty_object`.
+  - **Implementation**:
+    - Add an in-memory ring-buffer (`VecDeque<TraceRecord>`) per running rule in `AppState`.
+    - When tracing is enabled on a rule, copy stream records and evaluated outputs into the trace buffer with microsecond timestamps.
+    - Serve trace records on `GET /trace/rule/:rule_id` and single traces on `GET /trace/:id`.
+  - **Verification**: Start trace on rule, send 3 records, query `/trace/rule/:id`, assert 3 records captured with correct fields, stop trace.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+---
+
+## Epic 8: Async Task Lifecycle & Batch Operations
+
+- [ ] **Ticket 8.1: Authentic Background Task Manager**
+  - **Problem**: `/async/data/import` returns hardcoded `task_1`; `/async/task/:id` returns hardcoded `completed`.
+  - **Implementation**:
+    - Create a real `TaskManager` tracking background jobs with unique UUIDs, statuses (`running`, `completed`, `failed`, `cancelled`), start/end times, and cancellation tokens.
+    - `POST /async/data/import` spawns the actual import in background, returns generated `task_id`.
+    - `GET /async/task/:id` returns real task status and progress.
+    - `POST /async/task/:id/cancel` cancels the running background task.
+  - **Verification**: Spawn async import task, check status transitions from running to completed, and test cancellation.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 8.2: Batch Request Pipeline (`POST /batch/req`)**
+  - **Problem**: `POST /batch/req` returns empty `[]`.
+  - **Implementation**:
+    - Parse batch array of HTTP request specs (`method`, `url`, `body`, `headers`).
+    - Internal loop dispatching requests through the local Axum router and returning an array of responses.
+  - **Verification**: Send batch request creating a stream and a rule in one call; verify both are created.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+---
+
+## Epic 9: Plugin Ecosystem & Extension Realism
+
+- [ ] **Ticket 9.1: Universal Source & Sink Plugin Registry**
+  - **Problem**: `/plugins/sources` and `/plugins/sinks` return `empty_array`.
+  - **Implementation**:
+    - Extend `PluginManager` to store and list source and sink plugin definitions using the existing KV store backing.
+    - Support install, update, and delete for source and sink plugins matching `/plugins/functions`.
+  - **Verification**: CRUD integration test installing, listing, and deleting a source and sink plugin definition.
+  - **Files**: `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 9.2: Portable Plugin Process Lifecycle Manager**
+  - **Problem**: `/plugins/portables` returns `empty_array` and `/plugins/portables/:name/status` returns `{}`.
+  - **Implementation**:
+    - Track portable plugin definitions and supervisor state in `PluginManager`.
+    - Provide real status (`running`, `stopped`) and configuration details.
+  - **Verification**: Install portable plugin definition, start, verify status reports real state, and stop.
+  - **Files**: `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
+- [ ] **Ticket 9.3: External Services & Embedded JavaScript UDF Engine**
+  - **Problem**: `/services` and `/udf/javascript` return `empty_array`.
+  - **Implementation**:
+    - Store service definitions in `AppState` with schema and endpoint registration.
+    - Integrate an embedded JavaScript engine (such as `boa_engine`) to compile and execute JavaScript UDF functions in stream processing.
+  - **Verification**: Register JS UDF and service definition, verify they appear in `/services` and `/udf/javascript`, and verify execution of a JS UDF in SQL.
+  - **Files**: `Cargo.toml`, `crates/rekuiper-core/Cargo.toml`, `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+

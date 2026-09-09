@@ -3514,3 +3514,144 @@ async fn test_process_cpu_and_memory_metrics() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_metadata_source_and_sink_documents() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. List source metadata: contains expanded set of connectors.
+    let resp = client
+        .get(format!("{}/metadata/sources", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let sources: Vec<serde_json::Value> = resp.json().await.unwrap();
+    let source_names: Vec<&str> = sources
+        .iter()
+        .filter_map(|s| s.get("name").and_then(|v| v.as_str()))
+        .collect();
+    for expected in &[
+        "mqtt",
+        "file",
+        "http",
+        "httppull",
+        "redis",
+        "simulator",
+        "memory",
+    ] {
+        assert!(
+            source_names.contains(expected),
+            "sources must contain '{}': {:?}",
+            expected,
+            source_names
+        );
+    }
+
+    // 2. List sink metadata: contains expanded set of connectors.
+    let resp = client
+        .get(format!("{}/metadata/sinks", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let sinks: Vec<serde_json::Value> = resp.json().await.unwrap();
+    let sink_names: Vec<&str> = sinks
+        .iter()
+        .filter_map(|s| s.get("name").and_then(|v| v.as_str()))
+        .collect();
+    for expected in &["mqtt", "file", "log", "memory", "redis", "rest"] {
+        assert!(
+            sink_names.contains(expected),
+            "sinks must contain '{}': {:?}",
+            expected,
+            sink_names
+        );
+    }
+
+    // 3. Disk-backed source metadata for mqtt: has about and properties.
+    let resp = client
+        .get(format!("{}/metadata/sources/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mqtt_src: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        mqtt_src.get("about").is_some(),
+        "mqtt source metadata must have 'about': {}",
+        mqtt_src
+    );
+    assert!(
+        mqtt_src.get("properties").is_some() || mqtt_src.get("dataSource").is_some(),
+        "mqtt source metadata must have properties or dataSource: {}",
+        mqtt_src
+    );
+
+    // 4. Disk-backed source metadata for file.
+    let resp = client
+        .get(format!("{}/metadata/sources/file", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let file_src: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        file_src.get("about").is_some(),
+        "file source metadata must have 'about': {}",
+        file_src
+    );
+
+    // 5. Disk-backed sink metadata for mqtt.
+    let resp = client
+        .get(format!("{}/metadata/sinks/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mqtt_sink: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        mqtt_sink.get("about").is_some(),
+        "mqtt sink metadata must have 'about': {}",
+        mqtt_sink
+    );
+
+    // 6. Source YAML for mqtt returns real configuration from disk.
+    let resp = client
+        .get(format!("{}/metadata/sources/yaml/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mqtt_yaml: serde_json::Value = resp.json().await.unwrap();
+    let yaml_str = mqtt_yaml["yaml"].as_str().unwrap_or("");
+    assert!(
+        yaml_str.contains("server:"),
+        "mqtt source YAML must contain 'server:': {}",
+        yaml_str
+    );
+
+    // 7. Source YAML for file returns real configuration from disk.
+    let resp = client
+        .get(format!("{}/metadata/sources/yaml/file", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let file_yaml: serde_json::Value = resp.json().await.unwrap();
+    let yaml_str = file_yaml["yaml"].as_str().unwrap_or("");
+    assert!(
+        yaml_str.contains("fileType:"),
+        "file source YAML must contain 'fileType:': {}",
+        yaml_str
+    );
+
+    // 8. Invalid resource names are rejected with 400 Bad Request.
+    let resp = client
+        .get(format!("{}/metadata/sources/invalid%20name", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+}

@@ -242,14 +242,14 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/schemas/:kind/:name/upload", put(update_schema))
         .route("/metadata/connections/:name", get(get_source_metadata))
-        .route("/metadata/sources/yaml/:name", get(empty_yaml))
+        .route("/metadata/sources/yaml/:name", get(get_source_yaml))
         .route(
             "/metadata/sources/:name/confKeys/:conf_key",
             put(save_source_conf_key)
                 .post(save_source_conf_key)
                 .delete(empty_ok),
         )
-        .route("/metadata/sinks/yaml/:name", get(empty_yaml))
+        .route("/metadata/sinks/yaml/:name", get(get_sink_yaml))
         .route(
             "/metadata/sinks/:name/confKeys/:conf_key",
             put(empty_ok).delete(empty_ok),
@@ -3109,12 +3109,70 @@ async fn async_task_cancelled(Path(id): Path<String>) -> impl IntoResponse {
     )
 }
 
+fn find_etc_file(relative: &str) -> Option<std::path::PathBuf> {
+    let mut candidates = vec![
+        std::path::PathBuf::from("etc").join(relative),
+        std::path::PathBuf::from("../etc").join(relative),
+        std::path::PathBuf::from("../../etc").join(relative),
+    ];
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        candidates.push(
+            std::path::Path::new(&manifest_dir)
+                .join("etc")
+                .join(relative),
+        );
+        candidates.push(
+            std::path::Path::new(&manifest_dir)
+                .join("..")
+                .join("etc")
+                .join(relative),
+        );
+        candidates.push(
+            std::path::Path::new(&manifest_dir)
+                .join("..")
+                .join("..")
+                .join("etc")
+                .join(relative),
+        );
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 async fn list_source_metadata() -> impl IntoResponse {
-    Json(named_entries(&["mqtt", "http", "file", "memory"]))
+    Json(named_entries(&[
+        "edgex",
+        "file",
+        "http",
+        "httppull",
+        "httppush",
+        "kafka",
+        "memory",
+        "mqtt",
+        "neuron",
+        "redis",
+        "redisSub",
+        "simulator",
+        "sql",
+        "websocket",
+    ]))
 }
 
 async fn list_sink_metadata() -> impl IntoResponse {
-    Json(named_entries(&["mqtt", "http", "file", "log", "memory"]))
+    Json(named_entries(&[
+        "edgex",
+        "file",
+        "http",
+        "kafka",
+        "log",
+        "memory",
+        "mqtt",
+        "neuron",
+        "nop",
+        "redis",
+        "redisPub",
+        "rest",
+        "websocket",
+    ]))
 }
 
 async fn list_function_metadata(State(state): State<AppState>) -> impl IntoResponse {
@@ -3184,12 +3242,88 @@ async fn list_metadata_resources() -> impl IntoResponse {
     Json(Value::Array(Vec::new()))
 }
 
-async fn get_source_metadata(Path(name): Path<String>) -> impl IntoResponse {
-    Json(json!({ "name": name, "about": {} }))
+async fn get_source_metadata(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let found = if name == "mqtt" {
+        find_etc_file("mqtt_source.json").or_else(|| find_etc_file("sources/mqtt.json"))
+    } else if name == "http" {
+        find_etc_file("sources/http.json").or_else(|| find_etc_file("sources/httppull.json"))
+    } else {
+        find_etc_file(&format!("sources/{}.json", name))
+    };
+
+    if let Some(path) = found {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+                return Json(json_val).into_response();
+            }
+        }
+    }
+    Json(json!({ "name": name, "about": {} })).into_response()
 }
 
-async fn get_sink_metadata(Path(name): Path<String>) -> impl IntoResponse {
-    Json(json!({ "name": name, "about": {} }))
+async fn get_sink_metadata(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let found = if name == "mqtt" {
+        find_etc_file("sinks/mqtt.json")
+    } else if name == "http" {
+        find_etc_file("sinks/rest.json").or_else(|| find_etc_file("sinks/http.json"))
+    } else {
+        find_etc_file(&format!("sinks/{}.json", name))
+    };
+
+    if let Some(path) = found {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+                return Json(json_val).into_response();
+            }
+        }
+    }
+    Json(json!({ "name": name, "about": {} })).into_response()
+}
+
+async fn get_source_yaml(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let found = if name == "mqtt" {
+        find_etc_file("mqtt_source.yaml").or_else(|| find_etc_file("sources/mqtt.yaml"))
+    } else if name == "http" {
+        find_etc_file("sources/httppull.yaml").or_else(|| find_etc_file("sources/http.yaml"))
+    } else {
+        find_etc_file(&format!("sources/{}.yaml", name))
+    };
+
+    if let Some(path) = found {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return Json(json!({ "yaml": content })).into_response();
+        }
+    }
+    Json(json!({ "yaml": "" })).into_response()
+}
+
+async fn get_sink_yaml(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let found = if name == "mqtt" {
+        find_etc_file("sinks/mqtt.yaml").or_else(|| find_etc_file("mqtt_sink.yaml"))
+    } else if name == "http" {
+        find_etc_file("sinks/rest.yaml").or_else(|| find_etc_file("sinks/http.yaml"))
+    } else {
+        find_etc_file(&format!("sinks/{}.yaml", name))
+    };
+
+    if let Some(path) = found {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return Json(json!({ "yaml": content })).into_response();
+        }
+    }
+    Json(json!({ "yaml": "" })).into_response()
 }
 
 /// Stores a source configuration under `<name>/<conf_key>` for later lookup
