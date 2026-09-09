@@ -241,7 +241,7 @@ pub fn create_router(state: AppState) -> Router {
             get(get_schema).put(update_schema).delete(delete_schema),
         )
         .route("/schemas/:kind/:name/upload", put(update_schema))
-        .route("/metadata/connections/:name", get(get_source_metadata))
+        .route("/metadata/connections/:name", get(get_connection_metadata))
         .route("/metadata/sources/yaml/:name", get(get_source_yaml))
         .route(
             "/metadata/sources/:name/confKeys/:conf_key",
@@ -254,7 +254,7 @@ pub fn create_router(state: AppState) -> Router {
             "/metadata/sinks/:name/confKeys/:conf_key",
             put(empty_ok).delete(empty_ok),
         )
-        .route("/metadata/connections/yaml/:name", get(empty_yaml))
+        .route("/metadata/connections/yaml/:name", get(get_connection_yaml))
         .route(
             "/metadata/connections/:name/confKeys/:conf_key",
             put(empty_ok).delete(empty_ok),
@@ -3064,11 +3064,6 @@ async fn delete_typed_plugin(state: &AppState, name: &str) -> Response {
     (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
 }
 
-/// Empty YAML document response for metadata YAML endpoints.
-async fn empty_yaml() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"yaml": ""})))
-}
-
 async fn get_rule_schema(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&id) {
         return resp;
@@ -3234,12 +3229,64 @@ async fn list_operator_metadata() -> impl IntoResponse {
     ]))
 }
 
-async fn list_metadata_connections() -> impl IntoResponse {
-    Json(Value::Array(Vec::new()))
+async fn list_metadata_connections(State(state): State<AppState>) -> impl IntoResponse {
+    let conns: Vec<Value> = state.connections.read().values().cloned().collect();
+    Json(conns)
 }
 
-async fn list_metadata_resources() -> impl IntoResponse {
-    Json(Value::Array(Vec::new()))
+async fn list_metadata_resources(State(state): State<AppState>) -> impl IntoResponse {
+    let mut resources: Vec<Value> = Vec::new();
+    for (id, conn) in state.connections.read().iter() {
+        resources.push(json!({
+            "id": id,
+            "resource": id,
+            "type": conn.get("type").and_then(|v| v.as_str()).unwrap_or("connection"),
+            "status": "active",
+        }));
+    }
+    Json(resources)
+}
+
+async fn get_connection_metadata(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(conn) = state.connections.read().get(&name).cloned() {
+        return Json(conn).into_response();
+    }
+    if let Some(path) = find_etc_file(&format!("connections/{}.json", name)) {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                return Json(val).into_response();
+            }
+        }
+    }
+    Json(json!({
+        "id": name,
+        "name": name,
+        "about": {
+            "description": format!("Connection configuration for {}", name)
+        }
+    }))
+    .into_response()
+}
+
+async fn get_connection_yaml(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let found = find_etc_file(&format!("connections/{}.yaml", name))
+        .or_else(|| find_etc_file("connections/connection.yaml"));
+
+    if let Some(path) = found {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return Json(json!({ "yaml": content })).into_response();
+        }
+    }
+    Json(json!({ "yaml": "" })).into_response()
 }
 
 async fn get_source_metadata(Path(name): Path<String>) -> Response {

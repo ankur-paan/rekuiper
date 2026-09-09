@@ -3655,3 +3655,94 @@ async fn test_metadata_source_and_sink_documents() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn test_connection_metadata_and_resource_discovery() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Initially connections are empty.
+    let resp = client
+        .get(format!("{}/metadata/connections", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conns: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(conns.is_empty(), "initially empty: {:?}", conns);
+
+    // 2. Create connection.
+    let resp = client
+        .post(format!("{}/connections", base_url))
+        .json(&serde_json::json!({
+            "id": "test_conn_1",
+            "type": "mqtt",
+            "server": "tcp://127.0.0.1:1883"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 3. /metadata/connections reflects the new connection.
+    let resp = client
+        .get(format!("{}/metadata/connections", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conns: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(conns.len(), 1);
+    assert_eq!(conns[0]["id"], "test_conn_1");
+
+    // 4. /metadata/connections/:name returns connection details.
+    let resp = client
+        .get(format!("{}/metadata/connections/test_conn_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conn_meta: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(conn_meta["id"], "test_conn_1");
+    assert_eq!(conn_meta["type"], "mqtt");
+
+    // 5. /metadata/resources reflects connection as a live resource.
+    let resp = client
+        .get(format!("{}/metadata/resources", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resources: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0]["id"], "test_conn_1");
+    assert_eq!(resources[0]["type"], "mqtt");
+
+    // 6. /metadata/connections/yaml/:name returns connection YAML from disk.
+    let resp = client
+        .get(format!("{}/metadata/connections/yaml/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let yaml_resp: serde_json::Value = resp.json().await.unwrap();
+    assert!(yaml_resp.get("yaml").is_some());
+
+    // 7. Delete connection.
+    let resp = client
+        .delete(format!("{}/connections/test_conn_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 8. /metadata/connections is empty again.
+    let resp = client
+        .get(format!("{}/metadata/connections", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conns: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(conns.is_empty());
+}

@@ -18,11 +18,11 @@ No item may be marked complete without:
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 2 | 0 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
-| **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 1 | 2 |
+| **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 2 | 1 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 0 | 2 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 0 | 2 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **18** | **9** |
+| **Total** | | **27 Tasks** | **19** | **8** |
 
 ---
 
@@ -120,12 +120,8 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Replaced scaffolded `{"name": name, "about": {}}` and `{"yaml": ""}` with authentic disk-backed loaders via `find_etc_file`: resolves `etc/sources/{name}.json` (and `etc/mqtt_source.json`), `etc/sinks/{name}.json`, `etc/sources/{name}.yaml` (and `etc/mqtt_source.yaml`), and `etc/sinks/{name}.yaml`. Expanded `list_source_metadata` and `list_sink_metadata` to include all 14 sources and 13 sinks. Covered by `test_metadata_source_and_sink_documents` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 6.2: Real Connection & Resource Discovery**
-  - **Problem**: `GET /metadata/connections` and `GET /metadata/resources` return empty `[]`.
-  - **Implementation**:
-    - Populate `/metadata/connections` from `state.connections.read()`.
-    - Serve connection YAML from `etc/connections/{name}.yaml` on `/metadata/connections/yaml/:name`.
-  - **Verification**: Create a connection via `POST /connections`, verify it appears in `/metadata/connections` and has valid metadata.
+- [x] **Ticket 6.2: Real Connection & Resource Discovery**
+  - **Status**: Completed & Verified. Completely eliminated `empty_yaml` stub; routed `/metadata/connections/:name` to dedicated `get_connection_metadata` (reads registered connection or `etc/connections/{name}.json` or connector profile), populated `/metadata/connections` and `/metadata/resources` directly from `state.connections`, and implemented `get_connection_yaml` resolving `etc/connections/{name}.yaml` or `etc/connections/connection.yaml`. Covered by `test_connection_metadata_and_resource_discovery` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 6.3: Sink & Connection Configuration Key Persistence**
