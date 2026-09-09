@@ -275,6 +275,13 @@ impl Evaluator {
                 if Self::is_aggregate_call(name) {
                     return Self::eval_aggregate_call(name, args, records);
                 }
+                // Contextual system functions resolve against the first batch
+                // record when one exists.
+                if let Some(first) = records.first() {
+                    if let Some(v) = Self::eval_context_call(name, args, first) {
+                        return v;
+                    }
+                }
                 let vals: Vec<Value> = args
                     .iter()
                     .map(|a| Self::eval_agg_expr(a, records, output))
@@ -640,19 +647,9 @@ impl Evaluator {
                 partition_key.unwrap_or(""),
             );
         }
-        if lowered == "had_changed" || lowered == "changed_col" {
-            let vals: Vec<Value> = args
-                .iter()
-                .map(|a| Self::eval_stateful_expr(a, record, state))
-                .collect();
-            let call_id = Self::column_name(expr, 0);
-            return Self::eval_changed(
-                &lowered,
-                &vals,
-                state,
-                &call_id,
-                partition_key.unwrap_or(""),
-            );
+        // Contextual system functions resolve against the record itself.
+        if let Some(v) = Self::eval_context_call(name, args, record) {
+            return v;
         }
         let vals: Vec<Value> = args
             .iter()
@@ -1349,6 +1346,11 @@ impl Evaluator {
                 }
             }
             Expr::Call { name, args } => {
+                // Contextual system functions (meta/mqtt/event_time/...)
+                // need the raw argument expressions plus the record.
+                if let Some(v) = Self::eval_context_call(name, args, record) {
+                    return v;
+                }
                 let vals: Vec<Value> = args.iter().map(|a| Self::eval_val(a, record)).collect();
                 Self::eval_call(name, &vals)
             }
@@ -1712,9 +1714,119 @@ impl Evaluator {
             "latest" => Self::func_latest_scalar(args),
             "had_changed" => Self::func_had_changed_scalar(args),
             "changed_col" => Self::func_changed_col_scalar(args),
+            // ---- System & metadata ----
+            "isnull" => Value::Bool(match args.first() {
+                Some(v) => v.is_null(),
+                None => true,
+            }),
+            "tstamp" => serde_json::json!(chrono::Utc::now().timestamp_millis()),
+            "uuid" | "newuuid" => Self::func_uuid(args),
+            // Contextual functions without record context: static defaults.
+            // (With a record in scope, `eval_context_call` resolves them.)
+            "window_start" | "window_end" => Value::Null,
+            "rule_id" => Value::String(String::new()),
+            "meta" | "mqtt" => Value::Null,
+            "event_time" => serde_json::json!(chrono::Utc::now().timestamp_millis()),
             // ---- Registered UDFs (anything not built in) ----
             _ => Self::call_global_udf(name, args),
         }
+    }
+
+    /// RFC 4122 UUID v4 as a hyphenated lowercase string.
+    fn func_uuid(_args: &[Value]) -> Value {
+        Value::String(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Resolve a contextual system function against the current record.
+    /// Returns `None` for non-contextual names so callers fall through to
+    /// normal argument evaluation.
+    fn eval_context_call(
+        name: &str,
+        args: &[Expr],
+        record: &HashMap<String, Value>,
+    ) -> Option<Value> {
+        match name.to_ascii_lowercase().as_str() {
+            "meta" => Some(Self::resolve_meta(
+                args.first(),
+                record,
+                &["__meta__", "meta"],
+            )),
+            "mqtt" => Some(Self::resolve_meta(
+                args.first(),
+                record,
+                &["__mqtt__", "mqtt"],
+            )),
+            "event_time" => Some(Self::resolve_event_time(record)),
+            "rule_id" => Some(Self::resolve_rule_id(record)),
+            "window_start" => Some(Self::resolve_window_bound(
+                record,
+                &["window_start", "__window_start__"],
+            )),
+            "window_end" => Some(Self::resolve_window_bound(
+                record,
+                &["window_end", "__window_end__"],
+            )),
+            _ => None,
+        }
+    }
+
+    /// Look a metadata key up in the first present meta object, falling back
+    /// to a top-level record field. No argument returns the whole object.
+    fn resolve_meta(
+        arg: Option<&Expr>,
+        record: &HashMap<String, Value>,
+        object_keys: &[&str],
+    ) -> Value {
+        let meta_obj = object_keys
+            .iter()
+            .find_map(|k| record.get(*k))
+            .and_then(|v| v.as_object());
+        let Some(arg) = arg else {
+            return meta_obj
+                .map(|m| Value::Object(m.clone()))
+                .unwrap_or(Value::Null);
+        };
+        // Unquoted identifiers name the key directly; anything else is
+        // evaluated first and must yield a string.
+        let key = match arg {
+            Expr::Identifier(name) => Some(name.clone()),
+            other => match Self::eval_val(other, record) {
+                Value::String(s) => Some(s),
+                _ => None,
+            },
+        };
+        let Some(key) = key else {
+            return Value::Null;
+        };
+        if let Some(value) = meta_obj.and_then(|m| m.get(&key)) {
+            return value.clone();
+        }
+        record.get(&key).cloned().unwrap_or(Value::Null)
+    }
+
+    fn resolve_event_time(record: &HashMap<String, Value>) -> Value {
+        for key in ["timestamp", "event_time", "__timestamp__"] {
+            if let Some(v) = record.get(key) {
+                if !v.is_null() {
+                    return v.clone();
+                }
+            }
+        }
+        serde_json::json!(chrono::Utc::now().timestamp_millis())
+    }
+
+    fn resolve_rule_id(record: &HashMap<String, Value>) -> Value {
+        match record.get("__rule_id__") {
+            Some(Value::String(s)) => Value::String(s.clone()),
+            _ => Value::String(String::new()),
+        }
+    }
+
+    fn resolve_window_bound(record: &HashMap<String, Value>, keys: &[&str]) -> Value {
+        keys.iter()
+            .find_map(|k| record.get(*k))
+            .cloned()
+            .unwrap_or(Value::Null)
     }
 
     /// Fall back to a user-registered UDF for names outside the built-in

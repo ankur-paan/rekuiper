@@ -667,3 +667,148 @@ fn test_stateful_had_changed_and_changed_col() {
         json!(99)
     );
 }
+
+// ---------------------------------------------------------------------------
+// System & metadata functions
+// ---------------------------------------------------------------------------
+
+fn assert_uuid_v4(s: &str) {
+    assert_eq!(s.len(), 36, "uuid length: {}", s);
+    for (i, c) in s.chars().enumerate() {
+        match i {
+            8 | 13 | 18 | 23 => assert_eq!(c, '-', "hyphen at {}", i),
+            14 => assert_eq!(c, '4', "version nibble"),
+            19 => assert!(matches!(c, '8' | '9' | 'a' | 'b'), "variant nibble: {}", c),
+            _ => assert!(c.is_ascii_hexdigit(), "hex at {}: {}", i, c),
+        }
+    }
+}
+
+#[test]
+fn test_system_and_meta_functions() {
+    // isnull across literal kinds.
+    let mut parser =
+        Parser::new("SELECT isnull(null) AS a, isnull(1) AS b, isnull('abc') AS c FROM demo");
+    let stmt = parser.parse_select().expect("Should parse");
+    let out = Evaluator::eval_select(&stmt, &empty()).expect("Should project");
+    assert_eq!(out.get("a"), Some(&json!(true)));
+    assert_eq!(out.get("b"), Some(&json!(false)));
+    assert_eq!(out.get("c"), Some(&json!(false)));
+
+    // uuid()/newuuid(): hyphenated v4, unique per call.
+    for func in ["uuid", "newuuid"] {
+        let first = eval_one(&format!("SELECT {}() AS v FROM demo", func), &empty());
+        let second = eval_one(&format!("SELECT {}() AS v FROM demo", func), &empty());
+        let (a, b) = (
+            first.as_str().expect("uuid returns a string"),
+            second.as_str().expect("uuid returns a string"),
+        );
+        assert_uuid_v4(a);
+        assert_uuid_v4(b);
+        assert_ne!(a, b, "uuids must differ");
+    }
+
+    // tstamp(): epoch millis near now.
+    let before = chrono::Utc::now().timestamp_millis();
+    let v = eval_one("SELECT tstamp() AS v FROM demo", &empty());
+    let after = chrono::Utc::now().timestamp_millis();
+    let t = v.as_i64().expect("tstamp() returns an integer");
+    assert!(
+        t > 0 && t >= before && t <= after,
+        "tstamp out of range: {}",
+        t
+    );
+
+    // meta()/mqtt() extraction from envelope objects.
+    let r = rec(&[
+        (
+            "meta",
+            json!({"topic": "factory/temp", "device": "sensor1"}),
+        ),
+        ("mqtt", json!({"topic": "m/t"})),
+    ]);
+    // Unquoted identifier and quoted string keys both work.
+    assert_eq!(
+        eval_one("SELECT meta(topic) AS v FROM demo", &r),
+        json!("factory/temp")
+    );
+    assert_eq!(
+        eval_one("SELECT meta('device') AS v FROM demo", &r),
+        json!("sensor1")
+    );
+    assert_eq!(
+        eval_one("SELECT mqtt(topic) AS v FROM demo", &r),
+        json!("m/t")
+    );
+    // No-arg form returns the whole envelope object.
+    assert_eq!(
+        eval_one("SELECT meta() AS v FROM demo", &r),
+        json!({"topic": "factory/temp", "device": "sensor1"})
+    );
+    // Missing keys and envelopes resolve to Null.
+    assert_eq!(
+        eval_one("SELECT meta('missing') AS v FROM demo", &r),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT meta() AS v FROM demo", &empty()),
+        Value::Null
+    );
+    // Without an envelope, plain top-level fields are the fallback.
+    let r = rec(&[("topic", json!("plain"))]);
+    assert_eq!(
+        eval_one("SELECT meta(topic) AS v FROM demo", &r),
+        json!("plain")
+    );
+
+    // event_time(): timestamp keys win, otherwise now().
+    assert_eq!(
+        eval_one(
+            "SELECT event_time() AS v FROM demo",
+            &rec(&[("timestamp", json!(1700000000000i64))])
+        ),
+        json!(1700000000000i64)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT event_time() AS v FROM demo",
+            &rec(&[("event_time", json!(123))])
+        ),
+        json!(123)
+    );
+    let v = eval_one("SELECT event_time() AS v FROM demo", &empty());
+    assert!(v.as_i64().unwrap_or(0) > 0);
+
+    // rule_id(): envelope value or empty string.
+    assert_eq!(
+        eval_one(
+            "SELECT rule_id() AS v FROM demo",
+            &rec(&[("__rule_id__", json!("r1"))])
+        ),
+        json!("r1")
+    );
+    assert_eq!(
+        eval_one("SELECT rule_id() AS v FROM demo", &empty()),
+        json!("")
+    );
+
+    // window bounds resolve from plain or dunder keys.
+    let r = rec(&[("window_start", json!(1000)), ("window_end", json!(2000))]);
+    let mut parser = Parser::new("SELECT window_start() AS s, window_end() AS e FROM demo");
+    let stmt = parser.parse_select().expect("Should parse");
+    let out = Evaluator::eval_select(&stmt, &r).expect("Should project");
+    assert_eq!(out.get("s"), Some(&json!(1000)));
+    assert_eq!(out.get("e"), Some(&json!(2000)));
+    assert_eq!(
+        eval_one("SELECT window_start() AS v FROM demo", &empty()),
+        Value::Null
+    );
+
+    // Contextual functions also resolve on the stateful path.
+    let mut parser = Parser::new("SELECT meta(topic) AS v FROM demo");
+    let stmt = parser.parse_select().expect("Should parse");
+    let state = rekuiper_sql::RuleState::default();
+    let r = rec(&[("meta", json!({"topic": "factory/temp"}))]);
+    let out = Evaluator::eval_select_stateful(&stmt, &r, &state).expect("Should project");
+    assert_eq!(out.get("v"), Some(&json!("factory/temp")));
+}

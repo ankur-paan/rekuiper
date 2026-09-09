@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 0 | 7 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 1 | 6 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **2** | **15** |
+| **Total** | | **17 Tasks** | **3** | **14** |
 
 ---
 
@@ -36,18 +36,9 @@ No item may be marked complete without:
 
 ## Epic 2: Complete SQL Function Library Parity
 
-### Ticket 2.1: System, Metadata & Context Functions
-- [ ] **Functions**:
-  - `meta(key)`: Extract metadata properties from the current stream envelope (e.g. `meta(topic)` returns MQTT/bus topic).
-  - `mqtt(topic)` / `mqtt(key)`: MQTT header/topic metadata.
-  - `isnull(val)`: Returns `true` if `val` is `Value::Null`, else `false`.
-  - `newuuid()` / `uuid()`: Generates a new random UUID v4 string.
-  - `tstamp()`: Returns current system wall-clock epoch timestamp in milliseconds.
-  - `event_time()`: Returns the event timestamp of the current [`StreamRecord`].
-  - `rule_id()`: Returns the ID of the rule currently executing.
-  - `window_start()`, `window_end()`: Return the start and end timestamps (epoch ms) of the current window.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/src/parser.rs`
-- **Verification**: Unit tests covering all 8 functions in `crates/rekuiper-sql/tests/test_sql_functions.rs`.
+- [x] **Ticket 2.1: System, Metadata & Context Functions**
+  - **Status**: Completed & Verified. Added `meta(key)` and `mqtt(key)` envelope-and-fallback lookup, `isnull(val)`, `uuid()`/`newuuid()` via uuid v4, `tstamp()`, `event_time()` with record-field priority, `rule_id()`, `window_start()`, `window_end()`. Wired into `eval_val`, `eval_stateful_call`, and `eval_agg_expr`. Covered by `test_system_and_meta_functions` in `test_sql_functions.rs`.
+  - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.2: Math & Bitwise Operations
 - [ ] **Functions**:
