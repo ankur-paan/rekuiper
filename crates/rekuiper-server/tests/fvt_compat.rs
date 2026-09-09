@@ -2990,3 +2990,105 @@ async fn test_count_window_hopping_overlap() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_event_time_watermark_and_late_tolerance() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM et_stream () WITH (FORMAT=\"json\", TIMESTAMP=\"ts\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // Subscribe before the rule exists so no window output is lost.
+    let mut sink_rx = state.stream_bus.subscribe("et_sink_topic");
+
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_et_test",
+            "sql": "SELECT count(*) AS cnt, max(ts) AS max_ts FROM et_stream GROUP BY SLIDINGWINDOW(ms, 500)",
+            "actions": [{"memory": {"topic": "et_sink_topic"}}],
+            "options": {"isEventTime": true, "lateTolerance": 100}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    async fn post_event(client: &reqwest::Client, base_url: &str, val: i64, ts: i64) {
+        let resp = client
+            .post(format!("{}/streams/et_stream/data", base_url))
+            .json(&json!({"val": val, "ts": ts}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+
+    async fn recv_output(
+        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
+    ) -> serde_json::Value {
+        tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for window output")
+            .expect("et_sink_topic closed")
+            .data
+            .into_iter()
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into()
+    }
+
+    // Event 1 (t=1000): watermark 900, output cnt=1/max_ts=1000.
+    post_event(&client, &base_url, 1, 1000).await;
+    let out1 = recv_output(&mut sink_rx).await;
+    assert_eq!(out1["cnt"], json!(1), "output 1: {}", out1);
+    assert_eq!(out1["max_ts"], json!(1000), "output 1: {}", out1);
+
+    // Event 2 (t=950, out of order but >= W=900): accepted, buffer [950, 1000].
+    post_event(&client, &base_url, 2, 950).await;
+    let out2 = recv_output(&mut sink_rx).await;
+    assert_eq!(out2["cnt"], json!(2), "output 2: {}", out2);
+    assert_eq!(out2["max_ts"], json!(1000), "output 2: {}", out2);
+
+    // Event 3 (t=1500): watermark 1400, horizon [1000, 1500] drops 950.
+    post_event(&client, &base_url, 3, 1500).await;
+    let out3 = recv_output(&mut sink_rx).await;
+    assert_eq!(out3["cnt"], json!(2), "output 3: {}", out3);
+    assert_eq!(out3["max_ts"], json!(1500), "output 3: {}", out3);
+
+    // Event 4 (t=1100 < W=1400): late, dropped with no output.
+    post_event(&client, &base_url, 4, 1100).await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), sink_rx.recv())
+            .await
+            .is_err(),
+        "late event must not emit"
+    );
+
+    // Metrics prove the dropped event still counted as a source record.
+    let status: serde_json::Value = client
+        .get(format!("{}/rules/rule_et_test/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["sourceRecordsInTotal"], json!(4));
+    assert_eq!(status["sinkRecordsOutTotal"], json!(3));
+
+    // Delete the rule cleanly.
+    let resp = client
+        .delete(format!("{}/rules/rule_et_test", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}

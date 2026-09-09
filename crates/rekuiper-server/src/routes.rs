@@ -602,6 +602,7 @@ async fn create_rule(
         rule_id.clone(),
         select_stmt.clone(),
         rule.actions.clone(),
+        rule.options.clone(),
     );
 
     bootstrap_rule_sources(&state, &rule_id, &select_stmt);
@@ -890,6 +891,7 @@ pub async fn restore_running_rules(state: &AppState) {
             rule.id.clone(),
             select_stmt.clone(),
             rule.actions.clone(),
+            rule.options.clone(),
         );
         bootstrap_rule_sources(state, &rule.id, &select_stmt);
         tracing::info!("Restored running rule {}", rule.id);
@@ -1258,6 +1260,7 @@ fn spawn_rule_task(
     rule_id: String,
     select_stmt: SelectStmt,
     actions: Vec<HashMap<String, Value>>,
+    rule_options: Option<HashMap<String, Value>>,
 ) {
     let rx = stream_bus.subscribe(&resolve_source_topic(stream_manager, &select_stmt.from));
     let rule_mgr = rule_manager.clone();
@@ -1288,6 +1291,30 @@ fn spawn_rule_task(
         }
     });
 
+    // Event-time mode for windowed rules: boundaries derive from payload
+    // timestamps (stream TIMESTAMP field or well-known keys) instead of the
+    // wall clock, with a late-tolerance grace window for out-of-order rows.
+    let event_time = EventTimeConfig {
+        enabled: rule_options
+            .as_ref()
+            .and_then(|o| o.get("isEventTime"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        late_tolerance_ms: rule_options
+            .as_ref()
+            .and_then(|o| o.get("lateTolerance"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+        timestamp_field: stream_manager
+            .get_stream(&resolve_source_topic(stream_manager, &select_stmt.from))
+            .and_then(|s| {
+                s.options
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
+                    .map(|(_, v)| v.clone())
+            }),
+    };
+
     let handle = match window {
         None => tokio::spawn(run_stateless_rule(
             rule_mgr,
@@ -1316,6 +1343,7 @@ fn spawn_rule_task(
                 rx,
                 duration,
                 sink_tx,
+                event_time,
             ))
         }
         Some(WindowDef::HoppingTime {
@@ -1350,6 +1378,7 @@ fn spawn_rule_task(
                 window_length,
                 delay_dur,
                 sink_tx,
+                event_time,
             ))
         }
     };
@@ -1362,6 +1391,51 @@ fn is_rule_running(rule_mgr: &RuleManager, rule_id: &str) -> bool {
         // Rule deleted mid-flight: stop processing.
         None => false,
     }
+}
+
+/// Event-time configuration for windowed rules: when `enabled`, window
+/// boundaries derive from payload event timestamps instead of arrival time,
+/// with `late_tolerance_ms` grace for out-of-order events.
+#[derive(Clone, Default)]
+struct EventTimeConfig {
+    enabled: bool,
+    late_tolerance_ms: i64,
+    timestamp_field: Option<String>,
+}
+
+fn parse_timestamp_val(v: &Value) -> Option<i64> {
+    if let Some(n) = v.as_i64() {
+        return Some(n);
+    }
+    if let Some(n) = v.as_u64() {
+        return Some(n as i64);
+    }
+    if let Some(f) = v.as_f64() {
+        return Some(f as i64);
+    }
+    if let Some(s) = v.as_str() {
+        if let Ok(n) = s.parse::<i64>() {
+            return Some(n);
+        }
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+            return Some(dt.timestamp_millis());
+        }
+    }
+    None
+}
+
+fn extract_event_timestamp(data: &HashMap<String, Value>, configured_field: Option<&str>) -> i64 {
+    if let Some(field) = configured_field {
+        if let Some(v) = data.get(field).and_then(parse_timestamp_val) {
+            return v;
+        }
+    }
+    for key in ["timestamp", "ts", "event_time", "time"] {
+        if let Some(v) = data.get(key).and_then(parse_timestamp_val) {
+            return v;
+        }
+    }
+    chrono::Utc::now().timestamp_millis()
 }
 
 /// Optional sink `dataTemplate` from action options, rendered against the
@@ -1940,9 +2014,16 @@ async fn run_tumbling_window_rule(
     mut rx: broadcast::Receiver<StreamRecord>,
     duration: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
 ) {
     let mut ticker = tokio::time::interval(duration);
     let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    // Event-time state: event-timestamped rows, the watermark, and the start
+    // of the currently open event-time window (aligned to its length).
+    let mut et_buffer: Vec<(i64, HashMap<String, Value>)> = Vec::new();
+    let mut watermark: i64 = i64::MIN;
+    let mut window_start: Option<i64> = None;
+    let window_millis = duration.as_millis() as i64;
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -1952,6 +2033,49 @@ async fn run_tumbling_window_rule(
                             continue;
                         }
                         rule_mgr.inc_source_records(&rule_id, 1);
+                        if event_time.enabled {
+                            let event_ts = extract_event_timestamp(
+                                &record.data,
+                                event_time.timestamp_field.as_deref(),
+                            );
+                            if event_ts < watermark {
+                                // Late arrival beyond the tolerance horizon: drop.
+                                continue;
+                            }
+                            watermark = watermark
+                                .max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                            let aligned =
+                                event_ts - event_ts.rem_euclid(window_millis.max(1));
+                            if window_start.is_none() {
+                                window_start = Some(aligned);
+                            }
+                            et_buffer.push((event_ts, record.data));
+                            // Close every window the watermark has passed.
+                            while let Some(t0) = window_start {
+                                let t_end = t0.saturating_add(window_millis);
+                                if watermark < t_end {
+                                    break;
+                                }
+                                let batch: Vec<HashMap<String, Value>> = et_buffer
+                                    .iter()
+                                    .filter(|(ts, _)| *ts >= t0 && *ts < t_end)
+                                    .map(|(_, data)| data.clone())
+                                    .collect();
+                                et_buffer.retain(|(ts, _)| *ts >= t_end);
+                                window_start = Some(t_end);
+                                if batch.is_empty() {
+                                    continue;
+                                }
+                                if let Some(output) =
+                                    Evaluator::eval_aggregate(&select_stmt, &batch)
+                                {
+                                    let output_record = StreamRecord::new(output);
+                                    enqueue_sink_record(&sink, output_record).await;
+                                    rule_mgr.inc_sink_records(&rule_id, 1);
+                                }
+                            }
+                            continue;
+                        }
                         buffer.push(record.data);
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -1959,6 +2083,10 @@ async fn run_tumbling_window_rule(
                 }
             }
             _ = ticker.tick() => {
+                if event_time.enabled {
+                    // Windows close on watermark advance, never on the clock.
+                    continue;
+                }
                 if buffer.is_empty() {
                     continue;
                 }
@@ -2021,6 +2149,7 @@ async fn run_hopping_window_rule(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_sliding_window_rule(
     rule_mgr: RuleManager,
     rule_id: String,
@@ -2029,8 +2158,13 @@ async fn run_sliding_window_rule(
     length: std::time::Duration,
     delay: Option<std::time::Duration>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
 ) {
     let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
+    // Event-time state: event-timestamped rows plus the watermark.
+    let mut et_buffer: Vec<(i64, HashMap<String, Value>)> = Vec::new();
+    let mut watermark: i64 = i64::MIN;
+    let window_millis = length.as_millis() as i64;
     loop {
         match rx.recv().await {
             Ok(record) => {
@@ -2038,8 +2172,6 @@ async fn run_sliding_window_rule(
                     continue;
                 }
                 rule_mgr.inc_source_records(&rule_id, 1);
-                let now = std::time::Instant::now();
-                buffer.push((now, record.data));
                 // If delay is configured, wait for the delay duration before evaluating
                 // so events arriving during the delay window are captured.
                 if let Some(delay_dur) = delay {
@@ -2047,6 +2179,37 @@ async fn run_sliding_window_rule(
                         tokio::time::sleep(delay_dur).await;
                     }
                 }
+                if event_time.enabled {
+                    let event_ts = extract_event_timestamp(
+                        &record.data,
+                        event_time.timestamp_field.as_deref(),
+                    );
+                    if event_ts < watermark {
+                        // Late arrival beyond the tolerance horizon: drop.
+                        continue;
+                    }
+                    watermark =
+                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    et_buffer.push((event_ts, record.data));
+                    et_buffer.sort_by_key(|(ts, _)| *ts);
+                    // Lower-bounded horizon only: expiry is purely age-based
+                    // (`ts >= event_ts - length`). Newer buffered rows must
+                    // survive out-of-order arrivals within the window.
+                    et_buffer.retain(|(ts, _)| *ts >= event_ts.saturating_sub(window_millis));
+                    if et_buffer.is_empty() {
+                        continue;
+                    }
+                    let batch: Vec<HashMap<String, Value>> =
+                        et_buffer.iter().map(|(_, data)| data.clone()).collect();
+                    if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
+                        let output_record = StreamRecord::new(output);
+                        enqueue_sink_record(&sink, output_record).await;
+                        rule_mgr.inc_sink_records(&rule_id, 1);
+                    }
+                    continue;
+                }
+                let now = std::time::Instant::now();
+                buffer.push((now, record.data));
                 let eval_time = std::time::Instant::now();
                 // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
                 buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
@@ -2497,6 +2660,7 @@ async fn import_ruleset(State(state): State<AppState>, Json(payload): Json<Value
                     def.id.clone(),
                     select_stmt,
                     def.actions.clone(),
+                    def.options.clone(),
                 );
             }
         }

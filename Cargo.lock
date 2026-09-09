@@ -1788,6 +1788,7 @@ version = "0.420.0-beta"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "futures",
  "parking_lot",
  "rekuiper-conf",

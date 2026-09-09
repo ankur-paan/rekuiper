@@ -16,9 +16,9 @@ No item may be marked complete without:
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
 | **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 3 | 0 |
-| **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
+| **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 1 | 1 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **12** | **5** |
+| **Total** | | **17 Tasks** | **13** | **4** |
 
 ---
 
@@ -84,13 +84,9 @@ No item may be marked complete without:
 
 ## Epic 4: Rule Execution Options & Event-Time Tracking
 
-- [ ] **Ticket 4.1: `isEventTime` & Watermarking Engine**
-  - **Problem**: All window engines use local machine arrival time (`chrono::Utc::now()`). Rule option `"isEventTime": true` is ignored.
-  - **Requirements**:
-    - Extract record timestamp from payload (e.g. `timestamp` field) when `isEventTime: true`.
-    - Implement watermark tracking and `lateTolerance` window bounds.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-core/src/model.rs`
-  - **Verification**: Test out-of-order records processed in event-time order, with late records discarded past `lateTolerance`.
+- [x] **Ticket 4.1: `isEventTime` & Watermarking Engine**
+  - **Status**: Completed & Verified. `spawn_rule_task` accepts rule options and derives `EventTimeConfig` (`isEventTime`, `lateTolerance`, stream `TIMESTAMP` field); timestamp extraction tries the configured field, then `timestamp`/`ts`/`event_time`/`time` (int/float/RFC3339/numeric-string), then wall clock. Sliding windows buffer `(event_ts, row)`, drop rows with `event_ts < W`, advance `W = max(W, ts - tol)`, and evaluate over the age-pruned horizon; tumbling windows align `[Tstart, Tend)` in event time and close on watermark. Covered by `test_event_time_watermark_and_late_tolerance` in `fvt_compat.rs` (out-of-order acceptance, expiry, late drop, source 4 / sink 3 metrics).
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 4.2: Enforce Buffer Length and Error Dispatch Options**
   - **Problem**: Rule option `bufferLength` is ignored; bounded channel is hardcoded to 10,000. Option `sendError` is not checked.
