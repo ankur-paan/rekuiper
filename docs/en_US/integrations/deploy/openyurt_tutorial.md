@@ -152,8 +152,8 @@ As an edge streaming software, eKuiper usually deploys in the edge side. We will
 the deployment.
 
 ```shell
-$ git clone https://github.com/lf-edge/ekuiper
-$ cd ekuiper/deploy/chart/Kuiper
+$ git clone https://github.com/ankur-paan/rekuiper.git
+$ cd rekuiper/deploy/chart/ekuiper
 ```
 
 In order to deploy the eKuiper to the edge-node, we will modify the template file in the helm chart.

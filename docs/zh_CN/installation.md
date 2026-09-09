@@ -198,20 +198,23 @@ eKuiper Helm chart 发布在 GitHub Container Registry (OCI) 上。
 1. 获取源代码
 
    ```shell
-   $ git clone https://github.com/lf-edge/ekuiper.git
+   $ git clone https://github.com/ankur-paan/rekuiper.git
+   $ cd rekuiper
    ```
 
 2. 编译
 
    ```shell
-   $ make
+   # 编译 Release 二进制文件（存放于 target/release/）
+   $ cargo build --release
+   # 或者编译并归档至 bin/
+   $ make build
    ```
 
-3. 启动 eKuiper
+3. 启动 rekuiper
 
    ```shell
-   $ cd _build/kuiper-x.x.x-linux-amd64/
-   $ bin/kuiperd
+   $ ./bin/kuiperd --etc etc
    ```
 
 ### 编译打包和 Docker 镜像

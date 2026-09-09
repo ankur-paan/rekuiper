@@ -7,7 +7,7 @@ A lightweight IoT edge analytic software
 
 - From GitHub
 ```
-git clone https://github.com/lf-edge/ekuiper.git
+git clone https://github.com/ankur-paan/rekuiper.git
 cd deploy/chart/ekuiper
 helm install my-ekuiper .
 ```

@@ -128,8 +128,8 @@ $ sudo iptables -t nat -A OUTPUT -d 172.31.0.236 -j DNAT --to-destination 34.209
 eKuiper 作为边缘流处理软件，通常部署在边缘端。 我们将使用 eKuiper helm chart 来加速部署。
 
 ```shell
-$ git clone https://github.com/lf-edge/ekuiper
-$ cd ekuiper/deploy/chart/Kuiper
+$ git clone https://github.com/ankur-paan/rekuiper.git
+$ cd rekuiper/deploy/chart/ekuiper
 ```
 
 为了将 eKuiper 部署到 edge-node，我们将修改 helm chart 中的模板文件。
