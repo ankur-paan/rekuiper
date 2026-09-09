@@ -1613,3 +1613,303 @@ fn test_object_json_parity() {
         json!(42)
     );
 }
+
+// ---------------------------------------------------------------------------
+// String, regex & encoding functions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_string_regex_encoding_parity() {
+    let empty = empty();
+
+    // regexp_matches: anchored and unanchored patterns, null propagation.
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_matches('device_123', '^[a-z]+_[0-9]+$') AS v FROM demo",
+            &empty
+        ),
+        json!(true)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_matches('device_123', '^[0-9]+$') AS v FROM demo",
+            &empty
+        ),
+        json!(false)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_matches('abc123', '[0-9]+') AS v FROM demo",
+            &empty
+        ),
+        json!(true)
+    );
+    assert_eq!(
+        eval_one("SELECT regexp_matches(null, 'abc') AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT regexp_matches('abc', null) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT regexp_matches('abc', '([') AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // regexp_replace: global substitution, no-match passthrough.
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_replace('a1 b2 c3', '[0-9]', 'X') AS v FROM demo",
+            &empty
+        ),
+        json!("aX bX cX")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_replace('foo bar', 'missing', 'x') AS v FROM demo",
+            &empty
+        ),
+        json!("foo bar")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_replace('aaa', 'a', 'bb') AS v FROM demo",
+            &empty
+        ),
+        json!("bbbbbb")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_replace(null, 'a', 'b') AS v FROM demo",
+            &empty
+        ),
+        Value::Null
+    );
+
+    // regexp_substring: capture group wins, else whole match, else null.
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_substring('device_001', 'device_([0-9]+)') AS v FROM demo",
+            &empty
+        ),
+        json!("001")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_substring('temp: 36.5C', '[0-9]+\\.[0-9]+') AS v FROM demo",
+            &empty
+        ),
+        json!("36.5")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT regexp_substring('abc', '[0-9]+') AS v FROM demo",
+            &empty
+        ),
+        Value::Null
+    );
+
+    // split_value is 0-based: leading '/' yields an empty first segment.
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', 0) AS v FROM demo",
+            &empty
+        ),
+        json!("")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', 1) AS v FROM demo",
+            &empty
+        ),
+        json!("test")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', 2) AS v FROM demo",
+            &empty
+        ),
+        json!("device001")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', 3) AS v FROM demo",
+            &empty
+        ),
+        json!("message")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', 99) AS v FROM demo",
+            &empty
+        ),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT split_value('/test/device001/message', '/', -1) AS v FROM demo",
+            &empty
+        ),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT split_value('a,b,c', ',', 1) AS v FROM demo", &empty),
+        json!("b")
+    );
+
+    // numbytes counts UTF-8 bytes, not chars.
+    assert_eq!(
+        eval_one("SELECT numbytes('hello') AS v FROM demo", &empty),
+        json!(5)
+    );
+    assert_eq!(
+        eval_one("SELECT numbytes('你好世界') AS v FROM demo", &empty),
+        json!(12)
+    );
+    assert_eq!(
+        eval_one("SELECT numbytes('🚀') AS v FROM demo", &empty),
+        json!(4)
+    );
+    assert_eq!(
+        eval_one("SELECT numbytes('') AS v FROM demo", &empty),
+        json!(0)
+    );
+    assert_eq!(
+        eval_one("SELECT numbytes(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // chr maps code points (incl. non-ASCII) to single-char strings.
+    assert_eq!(
+        eval_one("SELECT chr(65) AS v FROM demo", &empty),
+        json!("A")
+    );
+    assert_eq!(
+        eval_one("SELECT chr(97) AS v FROM demo", &empty),
+        json!("a")
+    );
+    assert_eq!(
+        eval_one("SELECT chr(8364) AS v FROM demo", &empty),
+        json!("€")
+    );
+    assert_eq!(
+        eval_one("SELECT chr(128640) AS v FROM demo", &empty),
+        json!("🚀")
+    );
+    assert_eq!(
+        eval_one("SELECT chr(-1) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT chr(1114112) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT chr(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // trunc cuts toward zero; whole results come back integral.
+    assert_eq!(
+        eval_one("SELECT trunc(123.456, 2) AS v FROM demo", &empty),
+        json!(123.45)
+    );
+    assert_eq!(
+        eval_one("SELECT trunc(123.456, 0) AS v FROM demo", &empty),
+        json!(123)
+    );
+    assert_eq!(
+        eval_one("SELECT trunc(-123.456, 2) AS v FROM demo", &empty),
+        json!(-123.45)
+    );
+    assert_eq!(
+        eval_one("SELECT trunc(123.456) AS v FROM demo", &empty),
+        json!(123)
+    );
+    assert_eq!(
+        eval_one("SELECT trunc(123.999, 0) AS v FROM demo", &empty),
+        json!(123)
+    );
+    assert_eq!(
+        eval_one("SELECT trunc(null, 2) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // hex2dec / dec2hex round-trip.
+    assert_eq!(
+        eval_one("SELECT hex2dec('0x1A') AS v FROM demo", &empty),
+        json!(26)
+    );
+    assert_eq!(
+        eval_one("SELECT hex2dec('1A') AS v FROM demo", &empty),
+        json!(26)
+    );
+    assert_eq!(
+        eval_one("SELECT hex2dec('ff') AS v FROM demo", &empty),
+        json!(255)
+    );
+    assert_eq!(
+        eval_one("SELECT dec2hex(26) AS v FROM demo", &empty),
+        json!("0x1a")
+    );
+    assert_eq!(
+        eval_one("SELECT dec2hex(16) AS v FROM demo", &empty),
+        json!("0x10")
+    );
+    assert_eq!(
+        eval_one("SELECT dec2hex(0) AS v FROM demo", &empty),
+        json!("0x0")
+    );
+    assert_eq!(
+        eval_one("SELECT dec2hex(-26) AS v FROM demo", &empty),
+        json!("-0x1a")
+    );
+    assert_eq!(
+        eval_one("SELECT hex2dec(dec2hex(255)) AS v FROM demo", &empty),
+        json!(255)
+    );
+    assert_eq!(
+        eval_one("SELECT hex2dec('zz') AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT dec2hex('abc') AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // crc32 IEEE vectors.
+    assert_eq!(
+        eval_one("SELECT crc32('123456789') AS v FROM demo", &empty),
+        json!(3421780262i64)
+    );
+    assert_eq!(
+        eval_one("SELECT crc32('') AS v FROM demo", &empty),
+        json!(0)
+    );
+    assert_eq!(
+        eval_one("SELECT crc32(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+
+    // sha1 / sha384 vectors (verified against Python hashlib).
+    assert_eq!(
+        eval_one("SELECT sha1('hello world') AS v FROM demo", &empty),
+        json!("2aae6c35c94fcfb415dbe95f408b9ce91ee846ed")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT sha384('hello world') AS v FROM demo",
+            &empty
+        ),
+        json!("fdbd8e75a67f29f701a4e040385e2e23986303ea10239211af907fcbb83578b3e417cb71ce646efd0819dd8c088de1bd")
+    );
+    assert_eq!(
+        eval_one("SELECT sha1(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT sha384(null) AS v FROM demo", &empty),
+        Value::Null
+    );
+}

@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 5 | 2 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 6 | 1 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **7** | **10** |
+| **Total** | | **17 Tasks** | **8** | **9** |
 
 ---
 
@@ -57,19 +57,8 @@ No item may be marked complete without:
   - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.6: String, Regex & Encoding Functions
-- [ ] **Functions**:
-  - `regexp_matches(str, regex)`: Returns true if regex matches anywhere in `str`.
-  - `regexp_replace(str, regex, repl)`: Replaces all regex occurrences with `repl`.
-  - `regexp_substring(str, regex)`: Extracts first regex capture or match.
-  - `split_value(str, delimiter, index)`: 1-based index from delimited string.
-  - `numbytes(str)`: Byte length of UTF-8 string.
-  - `chr(code)`: Converts ASCII/Unicode code integer into 1-character string.
-  - `trunc(num, decimals)`: Truncates numeric value to `decimals` decimal places without rounding.
-  - `hex2dec(hex_str)`, `dec2hex(num)`: Hexadecimal to decimal string conversion.
-  - `crc32(str)`: CRC32 checksum integer.
-  - `sha1(str)`, `sha384(str)`: Cryptographic hex digests.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Regex edge cases, multibyte UTF-8 byte counting, and hash verification vectors.
+- [x] **Status**: Completed & Verified. Implemented `regexp_matches`/`regexp_replace`/`regexp_substring` (invalid patterns and misses to Null; group-1 preferred), 0-based `split_value`, UTF-8 `numbytes`, `chr` (validated Unicode scalar), `trunc` (toward-zero, [0,34] clamp, integral results), `hex2dec`/`dec2hex` (`0x`-prefixed lowercase, signed), IEEE `crc32`, and `sha1`/`sha384` hex digests (vectors verified against Python hashlib). Covered by `test_string_regex_encoding_parity` in `test_sql_functions.rs`.
+  - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.7: Statistical & Window Aggregate Functions
 - [ ] **Functions**:

@@ -1733,6 +1733,18 @@ impl Evaluator {
             "md5" => Self::func_md5(args),
             "sha256" => Self::func_sha256(args),
             "sha512" => Self::func_sha512(args),
+            "sha1" => Self::func_sha1(args),
+            "sha384" => Self::func_sha384(args),
+            "crc32" => Self::func_crc32(args),
+            "regexp_matches" => Self::func_regexp_matches(args),
+            "regexp_replace" => Self::func_regexp_replace(args),
+            "regexp_substring" => Self::func_regexp_substring(args),
+            "split_value" => Self::func_split_value(args),
+            "numbytes" => Self::func_numbytes(args),
+            "chr" => Self::func_chr(args),
+            "trunc" => Self::func_trunc(args),
+            "hex2dec" => Self::func_hex2dec(args),
+            "dec2hex" => Self::func_dec2hex(args),
             "encode" => Self::func_encode(args),
             "base64_encode" => Self::func_base64_encode(args),
             "decode" => Self::func_decode(args),
@@ -3483,6 +3495,220 @@ impl Evaluator {
         match Self::hash_input(&args[0]) {
             Some(bytes) => Value::String(format!("{:x}", sha2::Sha512::digest(bytes))),
             None => Value::Null,
+        }
+    }
+
+    fn func_sha1(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::hash_input(&args[0]) {
+            Some(bytes) => Value::String(format!("{:x}", sha1::Sha1::digest(bytes))),
+            None => Value::Null,
+        }
+    }
+
+    fn func_sha384(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match Self::hash_input(&args[0]) {
+            Some(bytes) => Value::String(format!("{:x}", sha2::Sha384::digest(bytes))),
+            None => Value::Null,
+        }
+    }
+
+    fn func_crc32(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        Value::from(crc32fast::hash(&Self::to_string_always(&args[0]).into_bytes()) as i64)
+    }
+
+    fn func_regexp_matches(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let (Some(text), Some(pattern)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        match regex::Regex::new(pattern) {
+            Ok(re) => Value::Bool(re.is_match(text)),
+            Err(_) => Value::Null,
+        }
+    }
+
+    fn func_regexp_replace(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let (Some(text), Some(pattern), Some(repl)) =
+            (args[0].as_str(), args[1].as_str(), args[2].as_str())
+        else {
+            return Value::Null;
+        };
+        match regex::Regex::new(pattern) {
+            Ok(re) => Value::String(re.replace_all(text, repl).into_owned()),
+            Err(_) => Value::Null,
+        }
+    }
+
+    fn func_regexp_substring(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let (Some(text), Some(pattern)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        let Ok(re) = regex::Regex::new(pattern) else {
+            return Value::Null;
+        };
+        let Some(caps) = re.captures(text) else {
+            return Value::Null;
+        };
+        match caps.get(1).or_else(|| caps.get(0)) {
+            Some(m) => Value::String(m.as_str().to_string()),
+            None => Value::Null,
+        }
+    }
+
+    /// 0-based split: index counts from the leading (possibly empty) segment.
+    fn func_split_value(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let (Some(text), Some(sep)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        let Some(index) = Self::to_i64_arg(&args[2]) else {
+            return Value::Null;
+        };
+        if index < 0 || sep.is_empty() {
+            return Value::Null;
+        }
+        let parts: Vec<&str> = text.split(sep).collect();
+        match parts.get(index as usize) {
+            Some(part) => Value::String(part.to_string()),
+            None => Value::Null,
+        }
+    }
+
+    fn func_numbytes(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        match &args[0] {
+            Value::String(s) => Value::from(s.len() as i64),
+            _ => Value::Null,
+        }
+    }
+
+    fn func_chr(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        let Some(code) = Self::to_i64_arg(&args[0]) else {
+            return Value::Null;
+        };
+        if !(0..=u32::MAX as i64).contains(&code) {
+            return Value::Null;
+        }
+        match char::from_u32(code as u32) {
+            Some(c) => Value::String(c.to_string()),
+            None => Value::Null,
+        }
+    }
+
+    /// Truncate toward zero at `decimals` places (clamped to [0, 34]).
+    /// Whole results come back as integers.
+    fn func_trunc(args: &[Value]) -> Value {
+        if args.is_empty() || args.len() > 2 {
+            return Value::Null;
+        }
+        if args.iter().any(|v| v.is_null()) {
+            return Value::Null;
+        }
+        let Some(num) = Self::to_f64(&args[0]) else {
+            return Value::Null;
+        };
+        if !num.is_finite() {
+            return Value::Null;
+        }
+        let decimals = if args.len() == 2 {
+            let Some(d) = Self::to_i64_arg(&args[1]) else {
+                return Value::Null;
+            };
+            d.clamp(0, 34)
+        } else {
+            0
+        };
+        let factor = 10f64.powi(decimals as i32);
+        let truncated = (num * factor).trunc() / factor;
+        // Whole results as integers when exactly representable.
+        if decimals == 0
+            && (-9_007_199_254_740_992.0..=9_007_199_254_740_992.0).contains(&truncated)
+        {
+            return Value::from(truncated as i64);
+        }
+        match serde_json::Number::from_f64(truncated) {
+            Some(n) => Value::Number(n),
+            None => Value::Null,
+        }
+    }
+
+    fn func_hex2dec(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        let Some(s) = args[0].as_str() else {
+            return Value::Null;
+        };
+        let trimmed = s.trim();
+        let hex = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed);
+        match i64::from_str_radix(hex, 16) {
+            Ok(n) => Value::from(n),
+            Err(_) => Value::Null,
+        }
+    }
+
+    fn func_dec2hex(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        let Some(n) = Self::to_i64_arg(&args[0]) else {
+            return Value::Null;
+        };
+        if n >= 0 {
+            Value::String(format!("0x{:x}", n))
+        } else {
+            Value::String(format!("-0x{:x}", n.unsigned_abs()))
         }
     }
 
