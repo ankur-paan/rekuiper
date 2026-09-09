@@ -214,7 +214,24 @@ impl Evaluator {
     fn is_aggregate_call(name: &str) -> bool {
         matches!(
             name.to_ascii_lowercase().as_str(),
-            "count" | "sum" | "avg" | "min" | "max" | "collect" | "lead" | "latest"
+            "count"
+                | "sum"
+                | "avg"
+                | "min"
+                | "max"
+                | "collect"
+                | "lead"
+                | "latest"
+                | "median"
+                | "stddev"
+                | "stddevs"
+                | "var"
+                | "vars"
+                | "percentile"
+                | "percentile_disc"
+                | "last_value"
+                | "merge_agg"
+                | "row_number"
         )
     }
 
@@ -228,6 +245,16 @@ impl Evaluator {
             "collect" => Self::agg_collect(args, records),
             "lead" => Self::agg_lead(args, records),
             "latest" => Self::agg_latest(args, records),
+            "median" => Self::agg_median(args, records),
+            "stddev" => Self::agg_stddev(args, records),
+            "stddevs" => Self::agg_stddevs(args, records),
+            "var" => Self::agg_var(args, records),
+            "vars" => Self::agg_vars(args, records),
+            "percentile" => Self::agg_percentile(args, records),
+            "percentile_disc" => Self::agg_percentile_disc(args, records),
+            "last_value" => Self::agg_last_value(args, records),
+            "merge_agg" => Self::agg_merge_agg(args, records),
+            "row_number" => Self::agg_row_number(args, records),
             _ => Value::Null,
         }
     }
@@ -646,6 +673,21 @@ impl Evaluator {
                 &call_id,
                 partition_key.unwrap_or(""),
             );
+        }
+        if lowered == "row_number" {
+            if !args.is_empty() {
+                return Value::Null;
+            }
+            let call_id = Self::column_name(expr, 0);
+            let state_key = format!("row_number:{}:{}", call_id, partition_key.unwrap_or(""));
+            let mut guard = state.state.write();
+            let next = guard
+                .get(&state_key)
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .saturating_add(1);
+            guard.insert(state_key, Value::from(next));
+            return Value::from(next);
         }
         // Contextual system functions resolve against the record itself.
         if let Some(v) = Self::eval_context_call(name, args, record) {
@@ -1152,6 +1194,239 @@ impl Evaluator {
             .get(offset as usize)
             .map(|rec| Self::eval_val(&args[0], rec))
             .unwrap_or(default)
+    }
+
+    /// Sorted numeric column values across the window batch, skipping
+    /// nulls and non-numerics. Shared by the statistical aggregates.
+    fn agg_sorted_numbers(arg: &Expr, records: &[HashMap<String, Value>]) -> Vec<f64> {
+        let mut vals: Vec<f64> = Self::agg_numeric_values(arg, records)
+            .iter()
+            .filter_map(|v| v.as_f64())
+            .collect();
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        vals
+    }
+
+    fn agg_median(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return Value::Null;
+        }
+        // Median over the raw values preserves integer results for odd
+        // counts; the even-count average is always a float.
+        let mut raw: Vec<Value> = Vec::new();
+        for rec in records {
+            let v = Self::eval_val(&args[0], rec);
+            if v.is_null() || !v.is_number() {
+                continue;
+            }
+            raw.push(v);
+        }
+        if raw.is_empty() {
+            return Value::Null;
+        }
+        raw.sort_by(|a, b| Self::compare_values(a, b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = raw.len() / 2;
+        if raw.len() % 2 == 1 {
+            raw[mid].clone()
+        } else {
+            let (Some(lo), Some(hi)) = (raw[mid - 1].as_f64(), raw[mid].as_f64()) else {
+                return Value::Null;
+            };
+            serde_json::json!((lo + hi) / 2.0)
+        }
+    }
+
+    /// Shared sum-of-squared-deviations helper; returns `(ssd, count)`.
+    fn agg_ssd(args: &[Expr], records: &[HashMap<String, Value>]) -> Option<(f64, usize)> {
+        if args.len() != 1 {
+            return None;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return None;
+        }
+        let vals = Self::agg_sorted_numbers(&args[0], records);
+        if vals.is_empty() {
+            return None;
+        }
+        let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+        let ssd: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum();
+        Some((ssd, vals.len()))
+    }
+
+    fn agg_stddev(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        match Self::agg_ssd(args, records) {
+            None => Value::Null,
+            Some((_, 0)) => Value::Null,
+            Some((ssd, n)) => serde_json::json!((ssd / n as f64).sqrt()),
+        }
+    }
+
+    fn agg_stddevs(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        match Self::agg_ssd(args, records) {
+            // Sample statistics need at least 2 points (0 dof otherwise).
+            None => Value::Null,
+            Some((_, n)) if n < 2 => Value::Null,
+            Some((ssd, n)) => serde_json::json!((ssd / (n - 1) as f64).sqrt()),
+        }
+    }
+
+    fn agg_var(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        match Self::agg_ssd(args, records) {
+            None => Value::Null,
+            Some((_, 0)) => Value::Null,
+            Some((ssd, n)) => serde_json::json!(ssd / n as f64),
+        }
+    }
+
+    fn agg_vars(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        match Self::agg_ssd(args, records) {
+            None => Value::Null,
+            Some((_, n)) if n < 2 => Value::Null,
+            Some((ssd, n)) => serde_json::json!(ssd / (n - 1) as f64),
+        }
+    }
+
+    /// Evaluate the percentile fraction `p` against the first batch record
+    /// (constants in practice); `None` when missing, non-numeric or outside
+    /// `[0, 1]`.
+    fn agg_percentile_p(args: &[Expr], records: &[HashMap<String, Value>]) -> Option<f64> {
+        if args.len() != 2 {
+            return None;
+        }
+        if matches!(args[0], Expr::Wildcard) {
+            return None;
+        }
+        let first = records.first()?;
+        let p = Self::to_f64(&Self::eval_val(&args[1], first))?;
+        if !(0.0..=1.0).contains(&p) {
+            return None;
+        }
+        Some(p)
+    }
+
+    fn agg_percentile(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        let Some(p) = Self::agg_percentile_p(args, records) else {
+            return Value::Null;
+        };
+        let vals = Self::agg_sorted_numbers(&args[0], records);
+        let n = vals.len();
+        if n == 0 {
+            return Value::Null;
+        }
+        if n == 1 {
+            return serde_json::json!(vals[0]);
+        }
+        let rank = p * (n - 1) as f64;
+        let i = rank.floor() as usize;
+        if i + 1 >= n {
+            return serde_json::json!(vals[n - 1]);
+        }
+        let frac = rank - i as f64;
+        serde_json::json!(vals[i] + frac * (vals[i + 1] - vals[i]))
+    }
+
+    fn agg_percentile_disc(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        let Some(p) = Self::agg_percentile_p(args, records) else {
+            return Value::Null;
+        };
+        // Reuse the numeric ordering but keep original values so integer
+        // types survive.
+        let mut raw: Vec<Value> = Vec::new();
+        for rec in records {
+            let v = Self::eval_val(&args[0], rec);
+            if v.is_null() || !v.is_number() {
+                continue;
+            }
+            raw.push(v);
+        }
+        if raw.is_empty() {
+            return Value::Null;
+        }
+        raw.sort_by(|a, b| Self::compare_values(a, b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = raw.len();
+        let index = if p == 0.0 {
+            0
+        } else {
+            ((p * n as f64).ceil() as usize)
+                .saturating_sub(1)
+                .min(n - 1)
+        };
+        raw[index].clone()
+    }
+
+    fn agg_last_value(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.is_empty() || args.len() > 2 {
+            return Value::Null;
+        }
+        let ignore_nulls = if args.len() == 2 {
+            let Some(first) = records.first() else {
+                return Value::Null;
+            };
+            Self::eval_val(&args[1], first).as_bool().unwrap_or(false)
+        } else {
+            false
+        };
+        if matches!(args[0], Expr::Wildcard) {
+            if !ignore_nulls {
+                return records
+                    .last()
+                    .map(|rec| {
+                        Value::Object(rec.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    })
+                    .unwrap_or(Value::Null);
+            }
+            return records
+                .iter()
+                .rev()
+                .find(|rec| rec.values().any(|v| !v.is_null()))
+                .map(|rec| Value::Object(rec.iter().map(|(k, v)| (k.clone(), v.clone())).collect()))
+                .unwrap_or(Value::Null);
+        }
+        if !ignore_nulls {
+            return records
+                .last()
+                .map(|rec| Self::eval_val(&args[0], rec))
+                .unwrap_or(Value::Null);
+        }
+        records
+            .iter()
+            .rev()
+            .map(|rec| Self::eval_val(&args[0], rec))
+            .find(|v| !v.is_null())
+            .unwrap_or(Value::Null)
+    }
+
+    fn agg_merge_agg(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let mut merged = serde_json::Map::new();
+        if matches!(args[0], Expr::Wildcard) {
+            for rec in records {
+                for (k, v) in rec {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+            return Value::Object(merged);
+        }
+        for rec in records {
+            if let Value::Object(map) = Self::eval_val(&args[0], rec) {
+                for (k, v) in map {
+                    merged.insert(k, v);
+                }
+            }
+        }
+        Value::Object(merged)
+    }
+
+    fn agg_row_number(args: &[Expr], _records: &[HashMap<String, Value>]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        Value::from(1)
     }
 
     fn op_str(op: &BinaryOperator) -> &'static str {
@@ -1778,6 +2053,7 @@ impl Evaluator {
             "latest" => Self::func_latest_scalar(args),
             "had_changed" => Self::func_had_changed_scalar(args),
             "changed_col" => Self::func_changed_col_scalar(args),
+            "row_number" => Self::func_row_number_scalar(args),
             // ---- System & metadata ----
             "isnull" => Value::Bool(match args.first() {
                 Some(v) => v.is_null(),
@@ -4188,6 +4464,13 @@ impl Evaluator {
             return Value::Null;
         }
         args[0].clone()
+    }
+
+    fn func_row_number_scalar(args: &[Value]) -> Value {
+        if !args.is_empty() {
+            return Value::Null;
+        }
+        Value::from(1)
     }
 
     fn func_had_changed_scalar(args: &[Value]) -> Value {

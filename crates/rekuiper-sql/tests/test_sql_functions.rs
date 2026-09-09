@@ -1913,3 +1913,219 @@ fn test_string_regex_encoding_parity() {
         Value::Null
     );
 }
+
+// ---------------------------------------------------------------------------
+// Statistical & window aggregate functions
+// ---------------------------------------------------------------------------
+
+/// N = 8, sum = 40, mean = 5.0, sum-of-squared-deviations = 32.
+fn stats_batch() -> Vec<Record> {
+    [2, 4, 4, 4, 5, 5, 7, 9]
+        .iter()
+        .map(|x| rec(&[("x", json!(x))]))
+        .collect()
+}
+
+#[test]
+fn test_statistical_window_aggregates_parity() {
+    let rows = stats_batch();
+
+    // Central tendency and dispersion (population vs sample).
+    assert_eq!(
+        eval_agg_one("SELECT median(x) AS v FROM demo", &rows),
+        json!(4.5)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT stddev(x) AS v FROM demo", &rows),
+        json!(2.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT var(x) AS v FROM demo", &rows),
+        json!(4.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT stddevs(x) AS v FROM demo", &rows),
+        json!(2.138089935299395)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT vars(x) AS v FROM demo", &rows),
+        json!(4.571428571428571)
+    );
+    // Odd counts keep the middle element untouched.
+    let odd = vec![
+        rec(&[("x", json!(1))]),
+        rec(&[("x", json!(3))]),
+        rec(&[("x", json!(5))]),
+    ];
+    assert_eq!(
+        eval_agg_one("SELECT median(x) AS v FROM demo", &odd),
+        json!(3)
+    );
+    // Single-point populations are exact zeros.
+    let one = vec![rec(&[("x", json!(7))])];
+    assert_eq!(
+        eval_agg_one("SELECT stddev(x) AS v FROM demo", &one),
+        json!(0.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT var(x) AS v FROM demo", &one),
+        json!(0.0)
+    );
+    // Samples need at least two points.
+    assert_eq!(
+        eval_agg_one("SELECT stddevs(x) AS v FROM demo", &one),
+        Value::Null
+    );
+    assert_eq!(
+        eval_agg_one("SELECT vars(x) AS v FROM demo", &one),
+        Value::Null
+    );
+
+    // Continuous percentiles interpolate; discrete picks exact elements.
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, 0.5) AS v FROM demo", &rows),
+        json!(4.5)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, 0.0) AS v FROM demo", &rows),
+        json!(2.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, 1.0) AS v FROM demo", &rows),
+        json!(9.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, 0.25) AS v FROM demo", &rows),
+        json!(4.0)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile_disc(x, 0.5) AS v FROM demo", &rows),
+        json!(4)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile_disc(x, 0.0) AS v FROM demo", &rows),
+        json!(2)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile_disc(x, 1.0) AS v FROM demo", &rows),
+        json!(9)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, 1.5) AS v FROM demo", &rows),
+        Value::Null
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile(x, -0.1) AS v FROM demo", &rows),
+        Value::Null
+    );
+    assert_eq!(
+        eval_agg_one("SELECT percentile_disc(x, 2) AS v FROM demo", &rows),
+        Value::Null
+    );
+
+    // last_value with and without null-skipping.
+    let history = vec![
+        rec(&[("a", json!(10)), ("b", json!("first"))]),
+        rec(&[("a", Value::Null), ("b", json!("second"))]),
+        rec(&[("a", json!(30)), ("b", Value::Null)]),
+    ];
+    assert_eq!(
+        eval_agg_one("SELECT last_value(a, false) AS v FROM demo", &history),
+        json!(30)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT last_value(b, false) AS v FROM demo", &history),
+        Value::Null
+    );
+    assert_eq!(
+        eval_agg_one("SELECT last_value(b, true) AS v FROM demo", &history),
+        json!("second")
+    );
+    assert_eq!(
+        eval_agg_one("SELECT last_value(a) AS v FROM demo", &history),
+        json!(30)
+    );
+    assert_eq!(
+        eval_agg_one("SELECT last_value(*) AS v FROM demo", &history),
+        json!({"a": 30, "b": Value::Null})
+    );
+
+    // merge_agg combines maps left to right; non-objects are skipped.
+    let maps = vec![
+        rec(&[("sub", json!({"k1": 1, "k2": 2})), ("val", json!(10))]),
+        rec(&[("sub", json!({"k2": 99, "k3": 3})), ("val", json!(20))]),
+    ];
+    assert_eq!(
+        eval_agg_one("SELECT merge_agg(sub) AS v FROM demo", &maps),
+        json!({"k1": 1, "k2": 99, "k3": 3})
+    );
+    assert_eq!(
+        eval_agg_one("SELECT merge_agg(val) AS v FROM demo", &maps),
+        json!({})
+    );
+    assert_eq!(
+        eval_agg_one("SELECT merge_agg(*) AS v FROM demo", &maps),
+        json!({"sub": {"k2": 99, "k3": 3}, "val": 20})
+    );
+
+    // row_number: 1 per batch, sequential per stream, partitioned per key.
+    assert_eq!(
+        eval_agg_one("SELECT row_number() AS v FROM demo", &rows),
+        json!(1)
+    );
+    assert_eq!(
+        eval_one("SELECT row_number() AS v FROM demo", &empty()),
+        json!(1)
+    );
+    let mut parser = Parser::new("SELECT row_number() AS n FROM demo");
+    let stmt = parser.parse_select().expect("Should parse");
+    let state = RuleState::default();
+    for expected in [1, 2, 3] {
+        let out = Evaluator::eval_select_stateful(&stmt, &empty(), &state).expect("row projects");
+        assert_eq!(out.get("n"), Some(&json!(expected)));
+    }
+    let mut parser = Parser::new("SELECT row_number() OVER (PARTITION BY dev) AS n FROM demo");
+    let stmt = parser.parse_select().expect("Should parse");
+    let state = RuleState::default();
+    for (dev, expected) in [("a", 1), ("a", 2), ("b", 1), ("a", 3), ("b", 2)] {
+        let out = Evaluator::eval_select_stateful(&stmt, &rec(&[("dev", json!(dev))]), &state)
+            .expect("row projects");
+        assert_eq!(out.get("n"), Some(&json!(expected)), "dev {}", dev);
+    }
+
+    // Empty batches and all-null columns degrade gracefully.
+    let empty_batch: Vec<Record> = vec![];
+    for sql in [
+        "SELECT median(x) AS v FROM demo",
+        "SELECT stddev(x) AS v FROM demo",
+        "SELECT stddevs(x) AS v FROM demo",
+        "SELECT var(x) AS v FROM demo",
+        "SELECT vars(x) AS v FROM demo",
+        "SELECT percentile(x, 0.5) AS v FROM demo",
+        "SELECT percentile_disc(x, 0.5) AS v FROM demo",
+        "SELECT latest(x) AS v FROM demo",
+    ] {
+        assert_eq!(eval_agg_one(sql, &empty_batch), Value::Null, "{}", sql);
+    }
+    assert_eq!(
+        eval_agg_one("SELECT collect(x) AS v FROM demo", &empty_batch),
+        json!([])
+    );
+    assert_eq!(
+        eval_agg_one("SELECT merge_agg(x) AS v FROM demo", &empty_batch),
+        json!({})
+    );
+    assert_eq!(
+        eval_agg_one("SELECT row_number() AS v FROM demo", &empty_batch),
+        json!(1)
+    );
+    let nulls = vec![rec(&[("x", Value::Null)]), rec(&[("x", Value::Null)])];
+    assert_eq!(
+        eval_agg_one("SELECT median(x) AS v FROM demo", &nulls),
+        Value::Null
+    );
+    assert_eq!(
+        eval_agg_one("SELECT collect(x) AS v FROM demo", &nulls),
+        json!([])
+    );
+}

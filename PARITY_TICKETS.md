@@ -14,11 +14,11 @@ No item may be marked complete without:
 | Epic | Description | Total Items | Completed | Remaining |
 | :--- | :--- | :---: | :---: | :---: |
 | **Epic 1** | Real Streaming Source Lifecycle (MQTT & File) | 2 | 2 | 0 |
-| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 6 | 1 |
+| **Epic 2** | SQL Function Library Parity (118 Missing Functions) | 7 | 7 | 0 |
 | **Epic 3** | Windowing Engine Parity (Hopping, Sliding, Hop-Count) | 3 | 0 | 3 |
 | **Epic 4** | Rule Execution Options & Event-Time Tracking | 2 | 0 | 2 |
 | **Epic 5** | REST API Realism & System Introspection | 3 | 0 | 3 |
-| **Total** | | **17 Tasks** | **8** | **9** |
+| **Total** | | **17 Tasks** | **9** | **8** |
 
 ---
 
@@ -61,17 +61,8 @@ No item may be marked complete without:
   - **Files**: `Cargo.toml`, `crates/rekuiper-sql/Cargo.toml`, `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ### Ticket 2.7: Statistical & Window Aggregate Functions
-- [ ] **Functions**:
-  - `median(col)`: Computes statistical median over window records.
-  - `stddev(col)` / `stddevs(col)`: Sample and population standard deviation.
-  - `var(col)` / `vars(col)`: Sample and population variance.
-  - `percentile(col, p)`: Continuous percentile interpolation over window.
-  - `percentile_disc(col, p)`: Discrete percentile over window.
-  - `last_value(col)`: Most recent value in window buffer.
-  - `merge_agg(col)`: Merges all map objects in the window into a single combined map.
-  - `row_number()`: Evaluates sequential 1-based index of row within window or partition.
-- **Files**: `crates/rekuiper-sql/src/eval.rs`
-- **Verification**: Exact statistical formulas matching eKuiper's math over tumbling/count window buffers.
+- [x] **Status**: Completed & Verified. Implemented `median` (type-preserving odd counts), population `stddev`/`var` (0.0 on singletons) and sample `stddevs`/`vars` (Null under 2 points), continuous `percentile` (linear interpolation) and discrete `percentile_disc` (type-preserving), `last_value` (column/wildcard with null-skipping flag), `merge_agg` (left-to-right map merge, `{}` when nothing merges), and `row_number` (1 per batch, stateful per-partition counters). All wired into `is_aggregate_call`/`eval_aggregate_call`, with `row_number` also stateful via `RuleState` and scalar-fallback to 1. Covered by `test_statistical_window_aggregates_parity` in `test_sql_functions.rs` (Python-verified formulas, partitioning, empty/all-null batches).
+  - **Files**: `crates/rekuiper-sql/src/eval.rs`, `crates/rekuiper-sql/tests/test_sql_functions.rs`.
 
 ---
 
