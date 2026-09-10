@@ -6,12 +6,12 @@
 [![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.421--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
 [![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-100%25%20Covered-green.svg)](openapi.json)
-[![Throughput](https://img.shields.io/badge/throughput-320k%2B%20eps-success.svg)](#-performance--competitive-benchmarks)
+[![Throughput](https://img.shields.io/badge/throughput-320k--540k%2B%20eps-success.svg)](#-performance--competitive-benchmarks)
 [![Latency](https://img.shields.io/badge/tail%20latency-15%20µs-brightgreen.svg)](#-performance--competitive-benchmarks)
 [![Memory Footprint](https://img.shields.io/badge/RSS-%3C%2010%20MB-blue.svg)](#-performance--competitive-benchmarks)
 [![Zero GC](https://img.shields.io/badge/GC%20Pauses-ZERO-success.svg)](#-performance--competitive-benchmarks)
 
-> **🚀 Pure Rust edge stream processing engine — zero GC pauses, 320,000+ eps throughput, 15 µs deterministic latency, < 10 MB RAM footprint, and 100% drop-in eKuiper API compatibility.**
+> **🚀 Pure Rust edge stream processing engine — zero GC pauses, 320,000 – 540,000+ eps throughput, 15 µs deterministic latency, < 10 MB RAM footprint, and 100% drop-in eKuiper API compatibility.**
 
 ---
 
@@ -22,7 +22,7 @@ The benchmark below evaluates `rekuiper` against upstream Go eKuiper, Apache Fli
 | Feature / Metric | `rekuiper` (0.421-beta) | Upstream Go eKuiper (v2.x) | Apache Flink | Redpanda Connect (Benthos) | Telegraf |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Core Language** | **Pure Rust** | Go (Golang) | Java / Scala (JVM) | Go (Golang) | Go (Golang) |
-| **Throughput (1 Core)** | **320,000+ eps** | ~25,000 – 35,000 eps | ~40,000 – 60,000 eps | ~30,000 – 45,000 eps | ~20,000 – 30,000 eps |
+| **Throughput (1 Core)** | **320,000 – 540,000+ eps** | ~25,000 – 35,000 eps | ~40,000 – 60,000 eps | ~30,000 – 45,000 eps | ~20,000 – 30,000 eps |
 | **Tail Latency (p99)** | **~15 µs (0.015 ms)** | ~1.5 ms – 8.0 ms (GC spikes) | ~5.0 ms – 25.0 ms (JVM GC) | ~2.0 ms – 10.0 ms | ~3.0 ms – 12.0 ms |
 | **Garbage Collection** | **ZERO GC (Deterministic)**| Stop-The-World Sweeps | Heavy JVM GC Pauses | Stop-The-World Sweeps | Stop-The-World Sweeps |
 | **Idle Memory (RSS)** | **~8.2 MB – 11 MB** | ~45 MB – 85 MB | ~512 MB – 1.2 GB | ~35 MB – 70 MB | ~40 MB – 80 MB |
@@ -35,9 +35,9 @@ The benchmark below evaluates `rekuiper` against upstream Go eKuiper, Apache Fli
 
 ### 🔬 Key Technical Specifications
 
-- **Throughput**: **324,706+ events/sec** (up to **370,766 events/sec**) sustained on a single commodity CPU core.
+- **Throughput**: **546,605 events/sec** on Linux x86_64 (91.47 ms for 50k events) and **370,766 events/sec** on Windows (134.85 ms) sustained on a single commodity CPU core.
 - **Latency**: **15 µs** deterministic p99 execution — zero GC jitter, no pause phases.
-- **Memory Footprint**: **8.2 MB** idle RSS, scaling sub-linearly under load.
+- **Memory Footprint**: **8.2 MB** idle RSS (Alpine musl static), scaling sub-linearly under load.
 - **Micro Binary**: **9.60 MB** self-contained Alpine musl static binary with zero runtime dependencies.
 - **Cold Boot Time**: **12.5 – 14.5 milliseconds** internal daemon bootstrap from invocation to accepting requests.
 - **API Coverage**: **100% OpenAPI 3.0 route parity** (all 98 REST endpoints and 140 operations validated with authentic implementations).
@@ -51,6 +51,14 @@ cargo test --release --test perf_throughput -- --nocapture
 ```
 
 ```text
+# Linux (WSL2 / Ubuntu 24.04 x86_64)
+=== Performance Benchmark: Streaming SQL Pipeline ===
+Records Ingested : 50,000
+Elapsed Time     : 91.47 ms
+Throughput       : 546,605.6 events/sec (Assert: > 20,000 eps)
+Result           : PASSED (Zero GC pauses, deterministic execution)
+
+# Windows (x86_64 MSVC)
 === Performance Benchmark: Streaming SQL Pipeline ===
 Records Ingested : 50,000
 Elapsed Time     : 134.8 ms

@@ -9,7 +9,7 @@ Released under the permissive **MIT License** (and dual Apache-2.0), `rekuiper` 
 ## 🚀 Performance Highlights (Verified Actual Benchmarks)
 
 Under reproducible end-to-end streaming evaluation (ingesting 50,000 telemetry records through full JSON deserialization, SQL arithmetic expressions, and filtering):
-- **324,000+ Sustained Events/Sec Throughput**: Measured 324,706 to 370,766 events/sec (processed in 134.8 to 154.0 ms on a single commodity CPU core).
+- **320,000 to 540,000+ Sustained Events/Sec Throughput**: Measured 546,605 events/sec on Linux x86_64 (91.47 ms for 50,000 records) and 370,766 events/sec on Windows (134.8 ms) sustained on a single commodity CPU core.
 - **Deterministic 15 µs Tail Latency (p99)**: Zero stop-the-world garbage collection pauses, zero jitter, deterministic bounded actor sink queue.
 - **Ultra-Compact Footprint**: 9.60 MB stripped release binary, ~8.2 MB idle RAM consumption.
 - **Cold Startup in ~13 ms (< 15 ms)**: 12.5 – 14.5 ms internal daemon bootstrap for instantaneous recovery on industrial gateways and edge microcontrollers.

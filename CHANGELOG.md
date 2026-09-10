@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.421.0-beta] - 2026-09-10
 
 ### Highlights
-- **Engine Throughput Record**: Sustained **324,000+ to 370,000+ events/sec** (up to 370k eps, 134–154 ms for 50,000 events) on single CPU core with zero GC pauses and deterministic sub-millisecond execution.
+- **Engine Throughput Record**: Sustained **320,000 to 540,000+ events/sec** (up to 546k eps on Linux x86_64, 370k eps on Windows, 91–134 ms for 50,000 events) on single CPU core with zero GC pauses and deterministic sub-millisecond execution.
 - **100% Authentic Forensic Route Parity**: Complete eradication of scaffolded stubs with authentic persistence, disk I/O, secret masking, and robust error handling across all 98 REST endpoints.
 
 ### Added & Improved
