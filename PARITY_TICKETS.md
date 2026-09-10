@@ -21,8 +21,8 @@ No item may be marked complete without:
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 2 | 0 |
-| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **24** | **3** |
+| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 1 | 2 |
+| **Total** | | **27 Tasks** | **25** | **2** |
 
 ---
 
@@ -156,13 +156,9 @@ No item may be marked complete without:
 
 ## Epic 9: Plugin Ecosystem & Extension Realism
 
-- [ ] **Ticket 9.1: Universal Source & Sink Plugin Registry**
-  - **Problem**: `/plugins/sources` and `/plugins/sinks` return `empty_array`.
-  - **Implementation**:
-    - Extend `PluginManager` to store and list source and sink plugin definitions using the existing KV store backing.
-    - Support install, update, and delete for source and sink plugins matching `/plugins/functions`.
-  - **Verification**: CRUD integration test installing, listing, and deleting a source and sink plugin definition.
-  - **Files**: `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 9.1: Universal Source & Sink Plugin Registry**
+  - **Status**: Completed & Verified. Implemented complete native source and sink plugin registries in `crates/rekuiper-server/src/routes.rs` backed by `PluginManager` and KV persistence (`/plugins/sources`, `/plugins/sinks`, `/plugins/sources/:name`, `/plugins/sinks/:name`); added support for install (`POST`), retrieval (`GET`), in-place update (`PUT`), and deletion (`DELETE`) for both sources and sinks; supported built-in fallback introspection for standard sources/sinks (e.g. `mqtt`); wired prebuilt plugin discovery endpoints. Covered by `test_source_and_sink_plugin_registries` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 9.2: Portable Plugin Process Lifecycle Manager**
   - **Problem**: `/plugins/portables` returns `empty_array` and `/plugins/portables/:name/status` returns `{}`.

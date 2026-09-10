@@ -4519,3 +4519,169 @@ async fn test_batch_request_pipeline() {
         .send()
         .await;
 }
+
+#[tokio::test]
+async fn test_source_and_sink_plugin_registries() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Initial state: no native plugins installed
+    for path in ["/plugins/sources", "/plugins/sinks"] {
+        let resp = client
+            .get(format!("{}{}", base_url, path))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+        assert!(items.is_empty());
+    }
+
+    // 2. Built-in introspection returns 200 OK
+    let resp = client
+        .get(format!("{}/plugins/sources/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mqtt_src: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(mqtt_src["name"], "mqtt");
+    assert_eq!(mqtt_src["plugin_type"], "source");
+
+    let resp = client
+        .get(format!("{}/plugins/sinks/mqtt", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mqtt_snk: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(mqtt_snk["name"], "mqtt");
+    assert_eq!(mqtt_snk["plugin_type"], "sink");
+
+    // Non-existent returns 404
+    let resp = client
+        .get(format!("{}/plugins/sources/non_existent_src", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 3. Source plugin CRUD lifecycle
+    let resp = client
+        .post(format!("{}/plugins/sources", base_url))
+        .json(&serde_json::json!({
+            "name": "custom_src",
+            "file": "file:///tmp/custom_src.zip",
+            "description": "Initial Custom Source"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/plugins/sources", base_url))
+        .send()
+        .await
+        .unwrap();
+    let sources: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["name"], "custom_src");
+    assert_eq!(sources[0]["plugin_type"], "source");
+
+    let resp = client
+        .get(format!("{}/plugins/sources/custom_src", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let src_info: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(src_info["description"], "Initial Custom Source");
+
+    // Update source plugin
+    let resp = client
+        .put(format!("{}/plugins/sources/custom_src", base_url))
+        .json(&serde_json::json!({
+            "description": "Updated Custom Source"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/plugins/sources/custom_src", base_url))
+        .send()
+        .await
+        .unwrap();
+    let updated_src: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(updated_src["description"], "Updated Custom Source");
+
+    // Delete source plugin
+    let resp = client
+        .delete(format!("{}/plugins/sources/custom_src", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/plugins/sources", base_url))
+        .send()
+        .await
+        .unwrap();
+    let sources_after: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(sources_after.is_empty());
+
+    // 4. Sink plugin CRUD lifecycle
+    let resp = client
+        .post(format!("{}/plugins/sinks", base_url))
+        .json(&serde_json::json!({
+            "name": "custom_snk",
+            "file": "file:///tmp/custom_snk.zip",
+            "description": "Custom Sink"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/plugins/sinks", base_url))
+        .send()
+        .await
+        .unwrap();
+    let sinks: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(sinks.len(), 1);
+    assert_eq!(sinks[0]["name"], "custom_snk");
+    assert_eq!(sinks[0]["plugin_type"], "sink");
+
+    let resp = client
+        .delete(format!("{}/plugins/sinks/custom_snk", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/plugins/sinks", base_url))
+        .send()
+        .await
+        .unwrap();
+    let sinks_after: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(sinks_after.is_empty());
+
+    // 5. Prebuild endpoints return 200 OK
+    for path in [
+        "/plugins/sources/prebuild",
+        "/plugins/sinks/prebuild",
+        "/plugins/functions/prebuild",
+    ] {
+        let resp = client
+            .get(format!("{}{}", base_url, path))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {}", path);
+    }
+}

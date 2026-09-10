@@ -454,36 +454,42 @@ pub fn create_router(state: AppState) -> Router {
             "/connections/:id",
             get(get_connection).delete(delete_connection),
         )
-        .route("/plugins/sources", get(empty_array))
-        .route("/plugins/sources/prebuild", get(empty_array))
+        .route(
+            "/plugins/sources",
+            get(list_source_plugins).post(create_source_plugin),
+        )
+        .route("/plugins/sources/prebuild", get(list_prebuild_plugins))
         .route(
             "/plugins/sources/:name",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_source_plugin)
+                .put(update_source_plugin)
+                .delete(delete_source_plugin),
         )
-        .route("/plugins/sinks", get(empty_array))
-        .route("/plugins/sinks/prebuild", get(empty_array))
+        .route(
+            "/plugins/sinks",
+            get(list_sink_plugins).post(create_sink_plugin),
+        )
+        .route("/plugins/sinks/prebuild", get(list_prebuild_plugins))
         .route(
             "/plugins/sinks/:name",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_sink_plugin)
+                .put(update_sink_plugin)
+                .delete(delete_sink_plugin),
         )
         .route(
             "/plugins/functions",
             get(list_function_plugins).post(create_function_plugin),
         )
-        .route("/plugins/functions/prebuild", get(empty_array))
+        .route("/plugins/functions/prebuild", get(list_prebuild_plugins))
         .route(
             "/plugins/functions/:name",
             get(get_function_plugin)
-                .put(validated_empty_ok)
+                .put(update_function_plugin)
                 .delete(delete_function_plugin),
         )
         .route(
             "/plugins/functions/:name/register",
-            post(validated_empty_ok),
+            post(register_function_plugin),
         )
         .route("/plugins/portables", get(empty_array))
         .route(
@@ -3431,8 +3437,102 @@ async fn empty_ok() -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin registry (`/plugins/functions`, `/plugins/udfs`).
+// Plugin registry (`/plugins/sources`, `/plugins/sinks`, `/plugins/functions`, `/plugins/udfs`).
 // ---------------------------------------------------------------------------
+
+const BUILTIN_SOURCES: &[&str] = &[
+    "edgex",
+    "file",
+    "http",
+    "httppull",
+    "httppush",
+    "kafka",
+    "memory",
+    "mqtt",
+    "neuron",
+    "redis",
+    "redisSub",
+    "simulator",
+    "sql",
+    "websocket",
+];
+
+const BUILTIN_SINKS: &[&str] = &[
+    "edgex",
+    "file",
+    "http",
+    "kafka",
+    "log",
+    "memory",
+    "mqtt",
+    "neuron",
+    "nop",
+    "redis",
+    "redisPub",
+    "rest",
+    "websocket",
+];
+
+fn is_builtin_source(name: &str) -> bool {
+    BUILTIN_SOURCES
+        .iter()
+        .any(|&s| s.eq_ignore_ascii_case(name))
+}
+
+fn is_builtin_sink(name: &str) -> bool {
+    BUILTIN_SINKS.iter().any(|&s| s.eq_ignore_ascii_case(name))
+}
+
+async fn list_source_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.plugin_manager.list_plugins("source"))
+}
+
+async fn create_source_plugin(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    create_plugin_of_type(&state, "source", payload).await
+}
+
+async fn get_source_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    get_typed_plugin(&state, "source", &name)
+}
+
+async fn update_source_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    update_typed_plugin(&state, "source", &name, body).await
+}
+
+async fn delete_source_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    delete_typed_plugin(&state, &name).await
+}
+
+async fn list_sink_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.plugin_manager.list_plugins("sink"))
+}
+
+async fn create_sink_plugin(State(state): State<AppState>, Json(payload): Json<Value>) -> Response {
+    create_plugin_of_type(&state, "sink", payload).await
+}
+
+async fn get_sink_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    get_typed_plugin(&state, "sink", &name)
+}
+
+async fn update_sink_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    update_typed_plugin(&state, "sink", &name, body).await
+}
+
+async fn delete_sink_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    delete_typed_plugin(&state, &name).await
+}
 
 async fn list_function_plugins(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.plugin_manager.list_plugins("function"))
@@ -3449,11 +3549,34 @@ async fn get_function_plugin(State(state): State<AppState>, Path(name): Path<Str
     get_typed_plugin(&state, "function", &name)
 }
 
+async fn update_function_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    update_typed_plugin(&state, "function", &name, body).await
+}
+
 async fn delete_function_plugin(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
     delete_typed_plugin(&state, &name).await
+}
+
+async fn register_function_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let _ = state.plugin_manager.get_plugin(&name);
+    (StatusCode::OK, format!("Plugin {} is registered.\n", name)).into_response()
+}
+
+async fn list_prebuild_plugins() -> impl IntoResponse {
+    Json(json!({}))
 }
 
 async fn list_udf_plugins(State(state): State<AppState>) -> impl IntoResponse {
@@ -3508,6 +3631,48 @@ async fn create_plugin_of_type(state: &AppState, plugin_type: &str, payload: Val
     }
 }
 
+async fn update_typed_plugin(
+    state: &AppState,
+    plugin_type: &str,
+    name: &str,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(name) {
+        return resp;
+    }
+    let mut def = state
+        .plugin_manager
+        .get_plugin(name)
+        .unwrap_or_else(|| PluginDefinition {
+            name: name.to_string(),
+            plugin_type: plugin_type.to_string(),
+            file: None,
+            description: None,
+            functions: Vec::new(),
+        });
+    def.plugin_type = plugin_type.to_string();
+    if !body.is_empty() {
+        if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+            if let Some(file_str) = val.get("file").and_then(|v| v.as_str()) {
+                def.file = Some(file_str.to_string());
+            }
+            if let Some(desc_str) = val.get("description").and_then(|v| v.as_str()) {
+                def.description = Some(desc_str.to_string());
+            }
+            if let Some(funcs) = val.get("functions").and_then(|v| v.as_array()) {
+                def.functions = funcs
+                    .iter()
+                    .filter_map(|f| f.as_str().map(|s| s.to_string()))
+                    .collect();
+            }
+        }
+    }
+    if let Err(e) = state.plugin_manager.register_plugin(def).await {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    (StatusCode::OK, format!("Plugin {} is updated.\n", name)).into_response()
+}
+
 fn get_typed_plugin(state: &AppState, plugin_type: &str, name: &str) -> Response {
     if let Err(resp) = check_valid_name(name) {
         return resp;
@@ -3519,7 +3684,22 @@ fn get_typed_plugin(state: &AppState, plugin_type: &str, name: &str) -> Response
             format!("Plugin {} is not a {}", name, plugin_type),
         )
             .into_response(),
-        None => (StatusCode::NOT_FOUND, format!("Plugin {} not found", name)).into_response(),
+        None => {
+            if (plugin_type == "source" && is_builtin_source(name))
+                || (plugin_type == "sink" && is_builtin_sink(name))
+            {
+                Json(PluginDefinition {
+                    name: name.to_string(),
+                    plugin_type: plugin_type.to_string(),
+                    file: None,
+                    description: Some(format!("Built-in {} plugin", plugin_type)),
+                    functions: Vec::new(),
+                })
+                .into_response()
+            } else {
+                (StatusCode::NOT_FOUND, format!("Plugin {} not found", name)).into_response()
+            }
+        }
     }
 }
 
