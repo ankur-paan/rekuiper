@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.421.0-beta] - 2026-09-10
+
+### Highlights
+- **Engine Throughput Record**: Sustained **324,000+ to 370,000+ events/sec** (up to 370k eps, 134–154 ms for 50,000 events) on single CPU core with zero GC pauses and deterministic sub-millisecond execution.
+- **100% Authentic Forensic Route Parity**: Complete eradication of scaffolded stubs with authentic persistence, disk I/O, secret masking, and robust error handling across all 98 REST endpoints.
+
+### Added & Improved
+- **Configuration & Uploads Subsystem**:
+  - Authentic file upload persistence to `data/uploads/` with filename validation, path traversal defense, and metadata tracking (`POST/GET/DELETE /config/uploads`).
+  - Native YAML metadata extraction for `/metadata/sources/{name}`, `/metadata/sinks/{name}`, and `/metadata/connections/{name}` with dynamic state overlays and recursive secret masking.
+- **Bulk Rule Operations & Lifecycle**:
+  - OpenAPI-compliant `Vec<BulkOperationResponse>` status reporting for `/rules/bulkstart` and `/rules/bulkstop`.
+  - State reset support via `POST /rules/:name/reset_state`.
+  - Authentic import status tracking via `GET /data/import/status`.
+  - Trace validation returning 404 on missing traces (`GET /trace/:id`).
+- **End-to-End Test Suite**:
+  - Added `test_forensic_parity_endpoints` in `fvt_compat.rs` testing uploads, bulk rule control, and metadata masking (46/46 integration tests passing).
+  - Benchmarked streaming throughput using `cargo test --release --test perf_throughput -- --nocapture`.
+- **Packaging & Deployment**:
+  - Synchronized Docker Compose, Helm chart (`AppVersion: 0.421-beta`), and GitHub Actions release workflows for automated multi-arch builds.
+
+---
+
 ## [0.420.0-beta] - 2026-09-09
 
 ### Highlights: The Pure-Rust Engine Rewrite by I-Dacs Labs

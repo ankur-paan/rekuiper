@@ -16,6 +16,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
+    let init_start = Instant::now();
     // Embedded KV persistence (eKuiper `data/sqliteKV.db`): definitions
     // survive daemon restarts and running rules resume automatically.
     let kv: Arc<dyn rekuiper_core::KvStore> =
@@ -111,6 +112,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    println!("Server initialized and ready in {:?}", init_start.elapsed());
     axum::serve(listener, app).await?;
 
     Ok(())
