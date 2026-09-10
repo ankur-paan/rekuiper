@@ -60,3 +60,10 @@ etc/mgmt/*
 # Scratch directory
 scratch/
 
+# Blog post materials and temporary benchmark assets
+docs/BLOG_POST.md
+test/benchmark/generate_chart.py
+test/benchmark/*.png
+test/benchmark/temp_race_audio.wav
+*.wav
+
