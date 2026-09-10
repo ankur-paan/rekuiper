@@ -61,6 +61,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         portable_plugins: routes::create_default_portables(),
         services: routes::create_default_services(),
         js_udfs: routes::create_default_js_udfs(),
+        latest_import_status: Arc::new(RwLock::new(routes::default_import_status())),
     };
 
     restore_running_rules(&state).await;

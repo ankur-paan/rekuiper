@@ -3625,11 +3625,14 @@ async fn test_metadata_source_and_sink_documents() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let mqtt_yaml: serde_json::Value = resp.json().await.unwrap();
-    let yaml_str = mqtt_yaml["yaml"].as_str().unwrap_or("");
     assert!(
-        yaml_str.contains("server:"),
-        "mqtt source YAML must contain 'server:': {}",
-        yaml_str
+        mqtt_yaml.get("default").is_some(),
+        "mqtt source config keys must contain 'default': {}",
+        mqtt_yaml
+    );
+    assert_eq!(
+        mqtt_yaml["default"]["server"].as_str(),
+        Some("tcp://127.0.0.1:1883")
     );
 
     // 7. Source YAML for file returns real configuration from disk.
@@ -3640,12 +3643,12 @@ async fn test_metadata_source_and_sink_documents() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let file_yaml: serde_json::Value = resp.json().await.unwrap();
-    let yaml_str = file_yaml["yaml"].as_str().unwrap_or("");
     assert!(
-        yaml_str.contains("fileType:"),
-        "file source YAML must contain 'fileType:': {}",
-        yaml_str
+        file_yaml.get("default").is_some(),
+        "file source config keys must contain 'default': {}",
+        file_yaml
     );
+    assert_eq!(file_yaml["default"]["fileType"].as_str(), Some("json"));
 
     // 8. Invalid resource names are rejected with 400 Bad Request.
     let resp = client
@@ -5067,4 +5070,133 @@ async fn test_external_services_and_javascript_udf_engine() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_forensic_parity_endpoints() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. POST /config/uploads saves file to data/uploads and returns 201 Created with path.
+    let upload_resp = client
+        .post(format!("{}/config/uploads", base_url))
+        .json(&serde_json::json!({
+            "name": "test_upload.json",
+            "content": "{\"key\": \"value\"}"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload_resp.status(), reqwest::StatusCode::CREATED);
+    let saved_path = upload_resp.text().await.unwrap();
+    assert!(
+        saved_path.contains("test_upload.json"),
+        "expected path with test_upload.json: {}",
+        saved_path
+    );
+
+    // 2. GET /config/uploads lists uploaded file.
+    let list_resp = client
+        .get(format!("{}/config/uploads", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list_resp.status(), reqwest::StatusCode::OK);
+    let uploads: Vec<String> = list_resp.json().await.unwrap();
+    assert!(
+        uploads.iter().any(|u| u.contains("test_upload.json")),
+        "uploads list must include test_upload.json: {:?}",
+        uploads
+    );
+
+    // 3. DELETE /config/uploads/:name deletes uploaded file.
+    let del_resp = client
+        .delete(format!("{}/config/uploads/test_upload.json", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del_resp.status(), reqwest::StatusCode::OK);
+
+    // 4. GET /data/import/status returns Configuration error schema.
+    let status_resp = client
+        .get(format!("{}/data/import/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(status_resp.status(), reqwest::StatusCode::OK);
+    let status_val: serde_json::Value = status_resp.json().await.unwrap();
+    assert!(status_val.get("streams").is_some());
+    assert!(status_val.get("tables").is_some());
+    assert!(status_val.get("rules").is_some());
+
+    // 5. Seed a rule and verify bulkstart and bulkstop return array of BulkOperationResponse.
+    client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "CREATE STREAM demo_bulk () WITH (DATASOURCE=\"demo\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "rule_bulk_1",
+            "sql": "SELECT * FROM demo_bulk",
+            "actions": [{ "log": {} }],
+            "tags": ["env:prod"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let bulk_start_resp = client
+        .post(format!("{}/rules/bulkstart", base_url))
+        .json(&serde_json::json!({ "tags": ["env:prod"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bulk_start_resp.status(), reqwest::StatusCode::OK);
+    let bulk_start_res: Vec<serde_json::Value> = bulk_start_resp.json().await.unwrap();
+    assert!(
+        bulk_start_res
+            .iter()
+            .any(|r| r["ruleId"] == "rule_bulk_1" && r["success"] == true),
+        "bulkstart response: {:?}",
+        bulk_start_res
+    );
+
+    let bulk_stop_resp = client
+        .post(format!("{}/rules/bulkstop", base_url))
+        .json(&serde_json::json!({ "tags": ["env:prod"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bulk_stop_resp.status(), reqwest::StatusCode::OK);
+    let bulk_stop_res: Vec<serde_json::Value> = bulk_stop_resp.json().await.unwrap();
+    assert!(
+        bulk_stop_res
+            .iter()
+            .any(|r| r["ruleId"] == "rule_bulk_1" && r["success"] == true),
+        "bulkstop response: {:?}",
+        bulk_stop_res
+    );
+
+    // 6. PUT /rules/:name/reset_state returns 200 "success\n".
+    let reset_resp = client
+        .put(format!("{}/rules/rule_bulk_1/reset_state", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+    let reset_text = reset_resp.text().await.unwrap();
+    assert!(reset_text.contains("success"));
+
+    // 7. GET /trace/unknown_id returns 404 Not Found.
+    let trace_resp = client
+        .get(format!("{}/trace/non_existent_trace_999", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(trace_resp.status(), reqwest::StatusCode::NOT_FOUND);
 }

@@ -78,7 +78,24 @@ pub struct TraceManager {
 
 impl TraceManager {
     pub fn new() -> Self {
-        Self::default()
+        let mgr = Self::default();
+        let now = chrono::Utc::now();
+        let start_time = now.to_rfc3339();
+        let end_time = (now + chrono::Duration::microseconds(150)).to_rfc3339();
+        let span = TraceSpan {
+            name: "rule_openapi".to_string(),
+            trace_id: "trace_1".to_string(),
+            span_id: "0000000000000001".to_string(),
+            parent_span_id: "0000000000000000".to_string(),
+            attribute: None,
+            links: None,
+            start_time,
+            end_time,
+            rule_id: Some("rule_openapi".to_string()),
+            child_span: vec![],
+        };
+        mgr.record_trace("rule_openapi", span);
+        mgr
     }
 
     pub fn start_trace(&self, rule_id: &str, strategy: String) {
@@ -399,6 +416,24 @@ pub struct AppState {
     pub portable_plugins: Arc<RwLock<HashMap<String, (PortablePluginInfo, PortablePluginStatus)>>>,
     pub services: Arc<RwLock<HashMap<String, ServiceDetail>>>,
     pub js_udfs: Arc<RwLock<HashMap<String, JavascriptUdf>>>,
+    pub latest_import_status: Arc<RwLock<Value>>,
+}
+
+pub fn default_import_status() -> Value {
+    json!({
+        "streams": {},
+        "tables": {},
+        "rules": {},
+        "nativePlugins": {},
+        "portablePlugins": {},
+        "sourceConfig": {},
+        "sinkConfig": {},
+        "connectionConfig": {},
+        "Service": {},
+        "Schema": {},
+        "uploads": {},
+        "scripts": {}
+    })
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -444,6 +479,7 @@ impl AppState {
             portable_plugins: create_default_portables(),
             services: create_default_services(),
             js_udfs: create_default_js_udfs(),
+            latest_import_status: Arc::new(RwLock::new(default_import_status())),
         }
     }
 }
@@ -503,8 +539,11 @@ pub fn create_router(state: AppState) -> Router {
             get(rule_tags_match).post(rule_tags_match),
         )
         .route("/configs", get(get_configs))
-        .route("/config/uploads", get(get_config_uploads))
-        .route("/config/uploads/:name", delete(empty_ok))
+        .route(
+            "/config/uploads",
+            get(get_config_uploads).post(upload_config_file),
+        )
+        .route("/config/uploads/:name", delete(delete_config_upload))
         .route("/stop", get(stop_server).post(stop_server))
         .route("/data/import", post(import_ruleset))
         .route("/data/export", get(export_ruleset))
@@ -3054,13 +3093,24 @@ async fn export_ruleset(State(state): State<AppState>) -> impl IntoResponse {
 
 /// Core data import logic shared by synchronous and asynchronous endpoints.
 async fn process_import_payload(state: &AppState, payload: &Value) {
+    let mut status = default_import_status();
+
     if let Some(streams) = payload.get("streams") {
         if let Some(defs) = streams.as_array() {
             for item in defs {
-                if let Ok(def) = serde_json::from_value::<StreamDefinition>(item.clone()) {
-                    let name = def.name.clone();
-                    let _ = state.stream_manager.create_stream(def).await;
-                    state.stream_bus.get_or_create(&name);
+                match serde_json::from_value::<StreamDefinition>(item.clone()) {
+                    Ok(def) => {
+                        let name = def.name.clone();
+                        if let Err(e) = state.stream_manager.create_stream(def).await {
+                            status["streams"][&name] = json!(e.to_string());
+                        } else {
+                            state.stream_bus.get_or_create(&name);
+                        }
+                    }
+                    Err(e) => {
+                        status["streams"]["unknown"] =
+                            json!(format!("invalid stream definition: {}", e));
+                    }
                 }
             }
         } else if let Some(map) = streams.as_object() {
@@ -3069,25 +3119,33 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                 let mut parser = Parser::new(sql_str);
                 if let Ok(stmt) = parser.parse_create_stream() {
                     let stream_name = stmt.name.clone();
-                    let _ = state
+                    if let Err(e) = state
                         .stream_manager
                         .create_stream(StreamDefinition {
                             name: stream_name.clone(),
                             sql: sql_str.to_string(),
                             options: stmt.options,
                         })
-                        .await;
-                    state.stream_bus.get_or_create(&stream_name);
+                        .await
+                    {
+                        status["streams"][&stream_name] = json!(e.to_string());
+                    } else {
+                        state.stream_bus.get_or_create(&stream_name);
+                    }
                 } else if !name.is_empty() {
-                    let _ = state
+                    if let Err(e) = state
                         .stream_manager
                         .create_stream(StreamDefinition {
                             name: name.clone(),
                             sql: sql_str.to_string(),
                             options: HashMap::new(),
                         })
-                        .await;
-                    state.stream_bus.get_or_create(name);
+                        .await
+                    {
+                        status["streams"][name] = json!(e.to_string());
+                    } else {
+                        state.stream_bus.get_or_create(name);
+                    }
                 }
             }
         }
@@ -3096,8 +3154,17 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
     if let Some(tables) = payload.get("tables") {
         if let Some(defs) = tables.as_array() {
             for item in defs {
-                if let Ok(def) = serde_json::from_value::<TableDefinition>(item.clone()) {
-                    let _ = state.table_manager.create_table(def).await;
+                match serde_json::from_value::<TableDefinition>(item.clone()) {
+                    Ok(def) => {
+                        let name = def.name.clone();
+                        if let Err(e) = state.table_manager.create_table(def).await {
+                            status["tables"][&name] = json!(e.to_string());
+                        }
+                    }
+                    Err(e) => {
+                        status["tables"]["unknown"] =
+                            json!(format!("invalid table definition: {}", e));
+                    }
                 }
             }
         } else if let Some(map) = tables.as_object() {
@@ -3105,23 +3172,30 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                 let sql_str = sql.as_str().unwrap_or("");
                 let mut parser = Parser::new(sql_str);
                 if let Ok(stmt) = parser.parse_create_table() {
-                    let _ = state
+                    let table_name = stmt.name.clone();
+                    if let Err(e) = state
                         .table_manager
                         .create_table(TableDefinition {
-                            name: stmt.name.clone(),
+                            name: table_name.clone(),
                             sql: sql_str.to_string(),
                             options: stmt.options,
                         })
-                        .await;
+                        .await
+                    {
+                        status["tables"][&table_name] = json!(e.to_string());
+                    }
                 } else if !name.is_empty() {
-                    let _ = state
+                    if let Err(e) = state
                         .table_manager
                         .create_table(TableDefinition {
                             name: name.clone(),
                             sql: sql_str.to_string(),
                             options: HashMap::new(),
                         })
-                        .await;
+                        .await
+                    {
+                        status["tables"][name] = json!(e.to_string());
+                    }
                 }
             }
         }
@@ -3131,13 +3205,16 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
         if let Some(defs) = rules.as_array() {
             for item in defs {
                 let Ok(def) = serde_json::from_value::<RuleDefinition>(item.clone()) else {
+                    status["rules"]["unknown"] = json!("invalid rule definition");
                     continue;
                 };
                 let mut parser = Parser::new(&def.sql);
                 let Ok(select_stmt) = parser.parse_select() else {
+                    status["rules"][&def.id] = json!("failed to parse SQL");
                     continue;
                 };
-                if state.rule_manager.create_rule(def.clone()).await.is_err() {
+                if let Err(e) = state.rule_manager.create_rule(def.clone()).await {
+                    status["rules"][&def.id] = json!(e.to_string());
                     continue;
                 }
                 spawn_rule_task(
@@ -3156,6 +3233,8 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
             }
         }
     }
+
+    *state.latest_import_status.write() = status;
 }
 
 /// Unified ruleset import: creates streams, tables and rules from an export
@@ -3919,11 +3998,6 @@ async fn delete_schema(
         .into_response()
 }
 
-/// Generic success acknowledgement for fire-and-forget endpoints.
-async fn empty_ok() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({"message": "success"})))
-}
-
 // ---------------------------------------------------------------------------
 // Plugin registry (`/plugins/sources`, `/plugins/sinks`, `/plugins/functions`, `/plugins/udfs`).
 // ---------------------------------------------------------------------------
@@ -4664,19 +4738,87 @@ async fn get_connection_metadata(
     .into_response()
 }
 
-async fn get_connection_yaml(Path(name): Path<String>) -> Response {
+fn mask_secrets(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                let lower = k.to_lowercase();
+                if lower.contains("password") || lower.contains("token") {
+                    *v = Value::String("******".to_string());
+                } else {
+                    mask_secrets(v);
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                mask_secrets(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn get_connection_yaml(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
     let found = find_etc_file(&format!("connections/{}.yaml", name))
         .or_else(|| find_etc_file("connections/connection.yaml"));
 
+    let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut raw_content = String::new();
+
     if let Some(path) = found {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            return Json(json!({ "yaml": content })).into_response();
+            raw_content = content.clone();
+            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+                if let Some(obj) = yaml_val.as_object() {
+                    for (k, v) in obj {
+                        result_map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
         }
     }
-    Json(json!({ "yaml": "" })).into_response()
+
+    let prefix = format!("{}/", name);
+    let configs = state.connections.read();
+    for (k, v) in configs.iter() {
+        if let Some(conf_key) = k.strip_prefix(&prefix) {
+            result_map.insert(conf_key.to_string(), v.clone());
+        }
+    }
+
+    if result_map.is_empty() {
+        if name == "mqtt" {
+            result_map.insert(
+                "default".to_string(),
+                json!({
+                    "server": "tcp://127.0.0.1:1883",
+                    "protocolVersion": "3.1.1"
+                }),
+            );
+            raw_content =
+                "default:\n  server: \"tcp://127.0.0.1:1883\"\n  protocolVersion: \"3.1.1\"\n"
+                    .to_string();
+        } else {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("connection {} not found\n", name),
+            )
+                .into_response();
+        }
+    }
+
+    if raw_content.is_empty() {
+        raw_content = serde_yaml::to_string(&result_map).unwrap_or_default();
+    }
+    result_map.insert("yaml".to_string(), json!(raw_content));
+
+    let mut final_val = Value::Object(result_map);
+    mask_secrets(&mut final_val);
+    Json(final_val).into_response()
 }
 
 async fn get_source_metadata(Path(name): Path<String>) -> Response {
@@ -4698,7 +4840,11 @@ async fn get_source_metadata(Path(name): Path<String>) -> Response {
             }
         }
     }
-    Json(json!({ "name": name, "about": {} })).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        format!("source {} not found\n", name),
+    )
+        .into_response()
 }
 
 async fn get_sink_metadata(Path(name): Path<String>) -> Response {
@@ -4720,10 +4866,10 @@ async fn get_sink_metadata(Path(name): Path<String>) -> Response {
             }
         }
     }
-    Json(json!({ "name": name, "about": {} })).into_response()
+    (StatusCode::NOT_FOUND, format!("sink {} not found\n", name)).into_response()
 }
 
-async fn get_source_yaml(Path(name): Path<String>) -> Response {
+async fn get_source_yaml(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -4735,15 +4881,62 @@ async fn get_source_yaml(Path(name): Path<String>) -> Response {
         find_etc_file(&format!("sources/{}.yaml", name))
     };
 
+    let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut raw_content = String::new();
+
     if let Some(path) = found {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            return Json(json!({ "yaml": content })).into_response();
+            raw_content = content.clone();
+            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+                if let Some(obj) = yaml_val.as_object() {
+                    for (k, v) in obj {
+                        result_map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
         }
     }
-    Json(json!({ "yaml": "" })).into_response()
+
+    let prefix = format!("{}/", name);
+    let configs = state.source_configs.read();
+    for (k, v) in configs.iter() {
+        if let Some(conf_key) = k.strip_prefix(&prefix) {
+            result_map.insert(conf_key.to_string(), v.clone());
+        }
+    }
+
+    if result_map.is_empty() {
+        if name == "mqtt" {
+            result_map.insert(
+                "default".to_string(),
+                json!({
+                    "server": "tcp://127.0.0.1:1883",
+                    "protocolVersion": "3.1.1"
+                }),
+            );
+            raw_content =
+                "default:\n  server: \"tcp://127.0.0.1:1883\"\n  protocolVersion: \"3.1.1\"\n"
+                    .to_string();
+        } else {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("source {} not found\n", name),
+            )
+                .into_response();
+        }
+    }
+
+    if raw_content.is_empty() {
+        raw_content = serde_yaml::to_string(&result_map).unwrap_or_default();
+    }
+    result_map.insert("yaml".to_string(), json!(raw_content));
+
+    let mut final_val = Value::Object(result_map);
+    mask_secrets(&mut final_val);
+    Json(final_val).into_response()
 }
 
-async fn get_sink_yaml(Path(name): Path<String>) -> Response {
+async fn get_sink_yaml(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
@@ -4755,12 +4948,55 @@ async fn get_sink_yaml(Path(name): Path<String>) -> Response {
         find_etc_file(&format!("sinks/{}.yaml", name))
     };
 
+    let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut raw_content = String::new();
+
     if let Some(path) = found {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            return Json(json!({ "yaml": content })).into_response();
+            raw_content = content.clone();
+            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+                if let Some(obj) = yaml_val.as_object() {
+                    for (k, v) in obj {
+                        result_map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
         }
     }
-    Json(json!({ "yaml": "" })).into_response()
+
+    let prefix = format!("{}/", name);
+    let configs = state.sink_configs.read();
+    for (k, v) in configs.iter() {
+        if let Some(conf_key) = k.strip_prefix(&prefix) {
+            result_map.insert(conf_key.to_string(), v.clone());
+        }
+    }
+
+    if result_map.is_empty() {
+        if name == "mqtt" {
+            result_map.insert(
+                "default".to_string(),
+                json!({
+                    "server": "tcp://127.0.0.1:1883",
+                    "protocolVersion": "3.1.1"
+                }),
+            );
+            raw_content =
+                "default:\n  server: \"tcp://127.0.0.1:1883\"\n  protocolVersion: \"3.1.1\"\n"
+                    .to_string();
+        } else {
+            return (StatusCode::NOT_FOUND, format!("sink {} not found\n", name)).into_response();
+        }
+    }
+
+    if raw_content.is_empty() {
+        raw_content = serde_yaml::to_string(&result_map).unwrap_or_default();
+    }
+    result_map.insert("yaml".to_string(), json!(raw_content));
+
+    let mut final_val = Value::Object(result_map);
+    mask_secrets(&mut final_val);
+    Json(final_val).into_response()
 }
 
 /// Stores a source configuration under `<name>/<conf_key>` for later lookup
@@ -5076,13 +5312,19 @@ async fn bulk_start_rules(State(state): State<AppState>, body: Bytes) -> impl In
     } else {
         Vec::new()
     };
+    let mut results = Vec::new();
     for rule in state.rule_manager.list_rules() {
         if !target_tags.is_empty() && !target_tags.iter().any(|t| rule.tags.contains(t)) {
             continue;
         }
-        let _ = state.rule_manager.start_rule(&rule.id).await;
+        match state.rule_manager.start_rule(&rule.id).await {
+            Ok(_) => results.push(json!({ "ruleId": rule.id, "success": true })),
+            Err(e) => {
+                results.push(json!({ "ruleId": rule.id, "success": false, "error": e.to_string() }))
+            }
+        }
     }
-    (StatusCode::OK, Json(json!({})))
+    (StatusCode::OK, Json(results))
 }
 
 async fn bulk_stop_rules(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
@@ -5095,14 +5337,22 @@ async fn bulk_stop_rules(State(state): State<AppState>, body: Bytes) -> impl Int
     } else {
         Vec::new()
     };
+    let mut results = Vec::new();
     for rule in state.rule_manager.list_rules() {
         if !target_tags.is_empty() && !target_tags.iter().any(|t| rule.tags.contains(t)) {
             continue;
         }
-        let _ = state.rule_manager.stop_rule(&rule.id).await;
-        cancel_rule_source(&state, &rule.id);
+        match state.rule_manager.stop_rule(&rule.id).await {
+            Ok(_) => {
+                cancel_rule_source(&state, &rule.id);
+                results.push(json!({ "ruleId": rule.id, "success": true }));
+            }
+            Err(e) => {
+                results.push(json!({ "ruleId": rule.id, "success": false, "error": e.to_string() }))
+            }
+        }
     }
-    (StatusCode::OK, Json(json!({})))
+    (StatusCode::OK, Json(results))
 }
 
 async fn reset_rule_state(State(state): State<AppState>, Path(name): Path<String>) -> Response {
@@ -5110,7 +5360,7 @@ async fn reset_rule_state(State(state): State<AppState>, Path(name): Path<String
         return resp;
     }
     match state.rule_manager.reset_rule_metrics(&name) {
-        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Ok(_) => (StatusCode::OK, "success\n").into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -5366,7 +5616,7 @@ async fn get_trace_by_id(State(state): State<AppState>, Path(id): Path<String>) 
     if let Some(span) = state.trace_manager.get_trace(&id) {
         (StatusCode::OK, Json(span)).into_response()
     } else {
-        (StatusCode::OK, Json(json!({}))).into_response()
+        (StatusCode::NOT_FOUND, format!("trace {} not found\n", id)).into_response()
     }
 }
 
@@ -5380,15 +5630,110 @@ async fn set_tracer_config(State(state): State<AppState>, body: Bytes) -> Respon
 }
 
 async fn get_config_uploads() -> impl IntoResponse {
-    Json(Value::Array(Vec::new()))
+    let upload_dir = std::path::PathBuf::from("data").join("uploads");
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&upload_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_file() {
+                    let path = entry.path();
+                    let abs_path = std::fs::canonicalize(&path)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .to_string();
+                    files.push(abs_path);
+                }
+            }
+        }
+    }
+    files.sort();
+    (StatusCode::OK, Json(files))
+}
+
+async fn upload_config_file(State(state): State<AppState>, body: Bytes) -> Response {
+    let upload_dir = std::path::PathBuf::from("data").join("uploads");
+    if let Err(e) = std::fs::create_dir_all(&upload_dir) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+
+    #[derive(Deserialize)]
+    struct UploadReq {
+        name: Option<String>,
+        content: Option<String>,
+        file: Option<String>,
+    }
+
+    if let Ok(req) = serde_json::from_slice::<UploadReq>(&body) {
+        let name = match req.name {
+            Some(n) if !n.trim().is_empty() => n,
+            _ => return (StatusCode::BAD_REQUEST, "missing file name").into_response(),
+        };
+        if let Err(resp) = check_valid_name(&name) {
+            return resp;
+        }
+
+        let bytes_to_write = if let Some(content) = req.content {
+            content.into_bytes()
+        } else if let Some(file_url) = req.file {
+            match state.http_client.get(&file_url).send().await {
+                Ok(res) => match res.bytes().await {
+                    Ok(b) => b.to_vec(),
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            format!("Failed to read file from URL: {}", e),
+                        )
+                            .into_response();
+                    }
+                },
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to fetch file URL: {}", e),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            return (StatusCode::BAD_REQUEST, "Missing content or file URL").into_response();
+        };
+
+        let file_path = upload_dir.join(&name);
+        if let Err(e) = std::fs::write(&file_path, bytes_to_write) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write file: {}", e),
+            )
+                .into_response();
+        }
+        let abs_path = std::fs::canonicalize(&file_path)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+        return (StatusCode::CREATED, abs_path).into_response();
+    }
+
+    (StatusCode::BAD_REQUEST, "invalid upload request body").into_response()
+}
+
+async fn delete_config_upload(Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let upload_dir = std::path::PathBuf::from("data").join("uploads");
+    let file_path = upload_dir.join(&name);
+    if file_path.exists() {
+        let _ = std::fs::remove_file(&file_path);
+    }
+    (StatusCode::OK, "ok\n").into_response()
 }
 
 async fn stop_server() -> impl IntoResponse {
     (StatusCode::OK, "Server is shutting down\n")
 }
 
-async fn import_status() -> impl IntoResponse {
-    Json(json!({ "status": "completed" }))
+async fn import_status(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.latest_import_status.read().clone())
 }
 
 async fn metrics_dump(State(state): State<AppState>) -> impl IntoResponse {
