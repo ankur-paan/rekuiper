@@ -419,7 +419,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/async/data/import", post(async_data_import))
         .route("/async/task/:id", get(async_task_status))
         .route("/async/task/:id/cancel", post(async_task_cancelled))
-        .route("/batch/req", post(empty_array))
+        .route("/batch/req", post(handle_batch_req))
         .route("/rules/bulkstart", post(bulk_start_rules))
         .route("/rules/bulkstop", post(bulk_stop_rules))
         .route("/rules/usage/cpu", get(rule_cpu_usage))
@@ -3108,6 +3108,152 @@ fn check_valid_name(name: &str) -> Result<(), Response> {
             .into_response());
     }
     Ok(())
+}
+
+/// Item representing a single nested request inside a POST /batch/req payload.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchRequestItem {
+    #[serde(alias = "action")]
+    pub method: String,
+    #[serde(alias = "url")]
+    pub path: String,
+    #[serde(default, alias = "params", alias = "payload")]
+    pub body: Option<Value>,
+}
+
+/// Result of executing a single nested request inside POST /batch/req.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BatchResponseItem {
+    pub code: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Executes a sequential batch of REST API requests within the engine.
+async fn handle_batch_req(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
+    let items: Vec<BatchRequestItem> = if body.is_empty() {
+        Vec::new()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("invalid batch request JSON: {}", e) })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    use tower::ServiceExt;
+
+    let mut results = Vec::with_capacity(items.len());
+    for item in items {
+        let raw_path = if let Some(idx) = item.path.find("://") {
+            if let Some(path_start) = item.path[idx + 3..].find('/') {
+                &item.path[idx + 3 + path_start..]
+            } else {
+                "/"
+            }
+        } else {
+            &item.path
+        };
+        let path = if raw_path.starts_with('/') {
+            raw_path.to_string()
+        } else {
+            format!("/{}", raw_path)
+        };
+
+        if path == "/batch/req" {
+            results.push(BatchResponseItem {
+                code: 400,
+                response: None,
+                error: Some("nested batch requests are not supported".to_string()),
+            });
+            continue;
+        }
+
+        let method = match item.method.to_ascii_uppercase().as_str() {
+            "GET" => axum::http::Method::GET,
+            "POST" => axum::http::Method::POST,
+            "PUT" => axum::http::Method::PUT,
+            "DELETE" => axum::http::Method::DELETE,
+            "PATCH" => axum::http::Method::PATCH,
+            "HEAD" => axum::http::Method::HEAD,
+            "OPTIONS" => axum::http::Method::OPTIONS,
+            _ => {
+                results.push(BatchResponseItem {
+                    code: 400,
+                    response: None,
+                    error: Some(format!("unsupported HTTP method: {}", item.method)),
+                });
+                continue;
+            }
+        };
+
+        let body_bytes = match item.body {
+            None => Vec::new(),
+            Some(Value::String(s)) => s.into_bytes(),
+            Some(v) => serde_json::to_vec(&v).unwrap_or_default(),
+        };
+
+        let router = create_router(state.clone());
+        let req_res = axum::http::Request::builder()
+            .method(method)
+            .uri(&path)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(body_bytes));
+
+        let req = match req_res {
+            Ok(r) => r,
+            Err(e) => {
+                results.push(BatchResponseItem {
+                    code: 400,
+                    response: None,
+                    error: Some(format!("invalid request: {}", e)),
+                });
+                continue;
+            }
+        };
+
+        match router.oneshot(req).await {
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.into_body();
+                let bytes_res = axum::body::to_bytes(body, 10 * 1024 * 1024).await;
+                let body_str = match bytes_res {
+                    Ok(b) => String::from_utf8_lossy(&b).to_string(),
+                    Err(e) => format!("error reading response body: {}", e),
+                };
+
+                if status.is_success() {
+                    results.push(BatchResponseItem {
+                        code: status.as_u16(),
+                        response: Some(body_str),
+                        error: None,
+                    });
+                } else {
+                    results.push(BatchResponseItem {
+                        code: status.as_u16(),
+                        response: None,
+                        error: Some(body_str),
+                    });
+                }
+            }
+            Err(e) => {
+                results.push(BatchResponseItem {
+                    code: 500,
+                    response: None,
+                    error: Some(format!("internal server error: {}", e)),
+                });
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(results)).into_response()
 }
 
 /// Generic empty-list response for discovery endpoints with nothing installed.

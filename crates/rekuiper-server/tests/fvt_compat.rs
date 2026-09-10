@@ -4370,3 +4370,152 @@ async fn test_async_task_lifecycle_and_cancellation() {
         .send()
         .await;
 }
+
+#[tokio::test]
+async fn test_batch_request_pipeline() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Empty batch request returns empty array
+    let resp = client
+        .post(format!("{}/batch/req", base_url))
+        .json(&serde_json::json!([]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(items.is_empty());
+
+    // 2. Batch request creating a stream, checking it, and pinging
+    let batch_payload = serde_json::json!([
+        {
+            "method": "POST",
+            "path": "/streams",
+            "body": "{\"sql\":\"CREATE STREAM demobatch () WITH (DATASOURCE=\\\"/data1\\\", TYPE=\\\"websocket\\\")\"}"
+        },
+        {
+            "method": "GET",
+            "path": "/streams/demobatch"
+        },
+        {
+            "method": "GET",
+            "path": "/ping"
+        }
+    ]);
+
+    let resp = client
+        .post(format!("{}/batch/req", base_url))
+        .json(&batch_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(items.len(), 3);
+
+    // Stream creation response
+    assert_eq!(items[0]["code"], 201);
+    assert!(items[0]["response"]
+        .as_str()
+        .unwrap()
+        .contains("Stream demobatch is created"));
+
+    // Stream get response
+    assert_eq!(items[1]["code"], 200);
+    assert!(items[1]["response"].as_str().unwrap().contains("demobatch"));
+
+    // Ping response
+    assert_eq!(items[2]["code"], 200);
+    assert_eq!(items[2]["response"].as_str().unwrap(), "pong");
+
+    // 3. Verify server state directly
+    let resp = client
+        .get(format!("{}/streams/demobatch", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 4. Batch request with object body (creating a rule) and error cases
+    let batch_2 = serde_json::json!([
+        {
+            "action": "POST",
+            "url": "/rules",
+            "payload": {
+                "id": "rule_batch_1",
+                "sql": "SELECT * FROM demobatch",
+                "actions": [{"log": {}}]
+            }
+        },
+        {
+            "method": "GET",
+            "path": "/rules/rule_batch_1"
+        },
+        {
+            "method": "GET",
+            "path": "/streams/non_existent_stream"
+        },
+        {
+            "method": "POST",
+            "path": "/batch/req",
+            "body": "[]"
+        },
+        {
+            "method": "INVALID_METHOD",
+            "path": "/ping"
+        }
+    ]);
+
+    let resp = client
+        .post(format!("{}/batch/req", base_url))
+        .json(&batch_2)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let items: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert_eq!(items.len(), 5);
+
+    // Rule created
+    assert_eq!(items[0]["code"], 201);
+    assert!(items[0]["response"]
+        .as_str()
+        .unwrap()
+        .contains("rule_batch_1 was created"));
+
+    // Rule fetched
+    assert_eq!(items[1]["code"], 200);
+    assert!(items[1]["response"]
+        .as_str()
+        .unwrap()
+        .contains("rule_batch_1"));
+
+    // Not found stream
+    assert_eq!(items[2]["code"], 404);
+    assert!(items[2]["error"].as_str().unwrap().contains("not found"));
+
+    // Nested batch request rejected
+    assert_eq!(items[3]["code"], 400);
+    assert!(items[3]["error"]
+        .as_str()
+        .unwrap()
+        .contains("nested batch requests are not supported"));
+
+    // Invalid method rejected
+    assert_eq!(items[4]["code"], 400);
+    assert!(items[4]["error"]
+        .as_str()
+        .unwrap()
+        .contains("unsupported HTTP method"));
+
+    // 5. Cleanup
+    let _ = client
+        .delete(format!("{}/rules/rule_batch_1", base_url))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{}/streams/demobatch", base_url))
+        .send()
+        .await;
+}

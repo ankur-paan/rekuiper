@@ -20,9 +20,9 @@ No item may be marked complete without:
 | **Epic 5** | REST API Realism & System Introspection | 3 | 3 | 0 |
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
-| **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 1 | 1 |
+| **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 2 | 0 |
 | **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 0 | 3 |
-| **Total** | | **27 Tasks** | **23** | **4** |
+| **Total** | | **27 Tasks** | **24** | **3** |
 
 ---
 
@@ -148,13 +148,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Implemented authentic `TaskManager` and `TaskInfo` in `crates/rekuiper-server/src/routes.rs` tracking tasks with status (`running`, `completed`, `failed`, `cancelled`), start/completion timestamps, and cancellation tokens; wired into `AppState`; extracted shared `process_import_payload` from `import_ruleset`; implemented real asynchronous data import on `POST /async/data/import`, real task status on `GET /async/task/:id`, and cancellation on `POST /async/task/:id/cancel` with background execution; pre-seeded `task_1` for OpenAPI path testing compatibility. Covered by `test_async_task_lifecycle_and_cancellation` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 8.2: Batch Request Pipeline (`POST /batch/req`)**
-  - **Problem**: `POST /batch/req` returns empty `[]`.
-  - **Implementation**:
-    - Parse batch array of HTTP request specs (`method`, `url`, `body`, `headers`).
-    - Internal loop dispatching requests through the local Axum router and returning an array of responses.
-  - **Verification**: Send batch request creating a stream and a rule in one call; verify both are created.
-  - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 8.2: Batch Request Pipeline (`POST /batch/req`)**
+  - **Status**: Completed & Verified. Implemented authentic batch request routing pipeline in `crates/rekuiper-server/src/routes.rs` via `handle_batch_req`, `BatchRequestItem`, and `BatchResponseItem`; supports method/action, path/url, and body/payload deserialization aliases with URL normalization; executes nested requests sequentially through the local Axum router using `tower::ServiceExt::oneshot`; captures HTTP status codes, response payloads, and error strings; guards against recursive batch calls. Covered by `test_batch_request_pipeline` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/Cargo.toml`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 ---
 
