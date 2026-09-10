@@ -106,6 +106,11 @@ impl PluginManager {
             .insert(normalize_udf_name(name), handler);
     }
 
+    /// Unregister an in-process scalar handler.
+    pub fn unregister_udf(&self, name: &str) {
+        self.handlers.write().remove(&normalize_udf_name(name));
+    }
+
     pub fn call_udf(&self, name: &str, args: &[Value]) -> Option<Value> {
         self.handlers
             .read()

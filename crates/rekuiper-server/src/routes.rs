@@ -397,6 +397,8 @@ pub struct AppState {
     pub trace_manager: TraceManager,
     pub task_manager: TaskManager,
     pub portable_plugins: Arc<RwLock<HashMap<String, (PortablePluginInfo, PortablePluginStatus)>>>,
+    pub services: Arc<RwLock<HashMap<String, ServiceDetail>>>,
+    pub js_udfs: Arc<RwLock<HashMap<String, JavascriptUdf>>>,
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -440,6 +442,8 @@ impl AppState {
             trace_manager: TraceManager::new(),
             task_manager: TaskManager::new(),
             portable_plugins: create_default_portables(),
+            services: create_default_services(),
+            js_udfs: create_default_js_udfs(),
         }
     }
 }
@@ -584,21 +588,22 @@ pub fn create_router(state: AppState) -> Router {
             "/plugins/udfs/:name",
             get(get_udf_plugin).delete(delete_udf_plugin),
         )
-        .route("/services", get(empty_array))
+        .route("/services", get(list_services).post(create_service))
         .route(
             "/services/:name",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_service).put(update_service).delete(delete_service),
         )
-        .route("/services/functions", get(empty_array))
-        .route("/services/functions/:name", get(validated_empty_object))
-        .route("/udf/javascript", get(empty_array))
+        .route("/services/functions", get(list_service_functions))
+        .route("/services/functions/:name", get(get_service_function))
+        .route(
+            "/udf/javascript",
+            get(list_javascript_udfs).post(create_javascript_udf),
+        )
         .route(
             "/udf/javascript/:id",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_javascript_udf)
+                .put(update_javascript_udf)
+                .delete(delete_javascript_udf),
         )
         .route("/schemas/:kind", get(list_schemas).post(create_schema))
         .route(
@@ -3336,30 +3341,439 @@ async fn handle_batch_req(State(state): State<AppState>, body: Bytes) -> impl In
     (StatusCode::OK, Json(results)).into_response()
 }
 
-/// Generic empty-list response for discovery endpoints with nothing installed.
-async fn empty_array() -> impl IntoResponse {
-    Json(Value::Array(Vec::new()))
+// ---------------------------------------------------------------------------
+// External Services and Functions registry (`/services`, `/services/:name`,
+// `/services/functions`, `/services/functions/:name`) and
+// Embedded JavaScript UDF engine (`/udf/javascript`, `/udf/javascript/:id`).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JavascriptUdf {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub script: String,
+    #[serde(default, rename = "isAgg")]
+    pub is_agg: bool,
 }
 
-/// Validated variants of the discovery stubs below: they accept any number of
-/// path captures (`Path<HashMap<..>>` also matches capture-less routes) and
-/// reject names with invalid characters before responding as usual.
-async fn validated_empty_object(Path(params): Path<HashMap<String, String>>) -> Response {
-    for name in params.values() {
-        if let Err(resp) = check_valid_name(name) {
-            return resp;
-        }
-    }
-    Json(json!({})).into_response()
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalFunction {
+    #[serde(rename = "ServiceName")]
+    pub service_name: String,
+    #[serde(rename = "InterfaceName")]
+    pub interface_name: String,
+    #[serde(rename = "Addr")]
+    pub addr: String,
+    #[serde(rename = "MethodName")]
+    pub method_name: String,
+    #[serde(rename = "FuncName")]
+    pub func_name: String,
 }
 
-async fn validated_empty_ok(Path(params): Path<HashMap<String, String>>) -> Response {
-    for name in params.values() {
-        if let Err(resp) = check_valid_name(name) {
-            return resp;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceDetail {
+    #[serde(default, rename = "About")]
+    pub about: HashMap<String, Value>,
+    #[serde(default, rename = "Interfaces")]
+    pub interfaces: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<ExternalFunction>,
+}
+
+pub fn compile_and_register_js_udf(udf: &JavascriptUdf) -> Result<(), String> {
+    let script = udf.script.trim();
+    if script.is_empty() {
+        return Err("script cannot be empty".to_string());
+    }
+    let fn_name = udf.id.trim();
+    if fn_name.is_empty() {
+        return Err("id cannot be empty".to_string());
+    }
+
+    let mut context = boa_engine::Context::default();
+    if let Err(e) = context.eval(boa_engine::Source::from_bytes(script.as_bytes())) {
+        return Err(format!("JavaScript compilation error: {:?}", e));
+    }
+
+    let fn_name_owned = fn_name.to_string();
+    let script_owned = script.to_string();
+    let handler: rekuiper_core::plugin::UdfFn = Arc::new(move |args: &[Value]| {
+        let mut context = boa_engine::Context::default();
+        if let Err(e) = context.eval(boa_engine::Source::from_bytes(script_owned.as_bytes())) {
+            tracing::warn!("JS UDF {} script init error: {:?}", fn_name_owned, e);
+            return Value::Null;
+        }
+        let args_json = serde_json::to_string(args).unwrap_or_else(|_| "[]".to_string());
+        let invoke_code = format!(
+            "JSON.stringify((function() {{ let r = {}.apply(null, {}); return r === undefined ? null : r; }})())",
+            fn_name_owned, args_json
+        );
+        match context.eval(boa_engine::Source::from_bytes(invoke_code.as_bytes())) {
+            Ok(res) => {
+                if let Some(s) = res.as_string() {
+                    serde_json::from_str(&s.to_std_string_escaped()).unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            }
+            Err(e) => {
+                tracing::warn!("JS UDF {} execution error: {:?}", fn_name_owned, e);
+                Value::Null
+            }
+        }
+    });
+
+    rekuiper_core::plugin::get_global_udf_registry().register_udf(fn_name, handler);
+    Ok(())
+}
+
+pub fn create_default_services() -> Arc<RwLock<HashMap<String, ServiceDetail>>> {
+    let mut map = HashMap::new();
+    let mut about = HashMap::new();
+    about.insert(
+        "description".to_string(),
+        json!("EdgeX Foundry service integration"),
+    );
+    about.insert("author".to_string(), json!("EMQ"));
+    about.insert("version".to_string(), json!("1.0.0"));
+
+    let mut interfaces = HashMap::new();
+    interfaces.insert(
+        "core-data".to_string(),
+        json!({
+            "protocol": "rest",
+            "port": 59900
+        }),
+    );
+
+    let echo_fn = ExternalFunction {
+        service_name: "edgex".to_string(),
+        interface_name: "core-data".to_string(),
+        addr: "tcp://localhost:59900".to_string(),
+        method_name: "echo".to_string(),
+        func_name: "echo".to_string(),
+    };
+
+    let detail = ServiceDetail {
+        about,
+        interfaces,
+        functions: vec![echo_fn],
+    };
+    map.insert("edgex".to_string(), detail);
+    Arc::new(RwLock::new(map))
+}
+
+pub fn create_default_js_udfs() -> Arc<RwLock<HashMap<String, JavascriptUdf>>> {
+    let mut map = HashMap::new();
+    let func1 = JavascriptUdf {
+        id: "func1".to_string(),
+        description: "Default echo JavaScript function".to_string(),
+        script: "function func1(x) { return x; }".to_string(),
+        is_agg: false,
+    };
+    let _ = compile_and_register_js_udf(&func1);
+    map.insert("func1".to_string(), func1);
+    Arc::new(RwLock::new(map))
+}
+
+async fn list_services(State(state): State<AppState>) -> impl IntoResponse {
+    let services = state.services.read();
+    let mut names: Vec<String> = services.keys().cloned().collect();
+    names.sort();
+    Json(names)
+}
+
+async fn create_service(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+
+    if state.services.read().contains_key(&name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Service '{}' already exists", name),
+        )
+            .into_response();
+    }
+
+    let mut about = HashMap::new();
+    if let Some(ab) = body.get("About").and_then(|v| v.as_object()) {
+        for (k, v) in ab {
+            about.insert(k.clone(), v.clone());
+        }
+    } else if let Some(file) = body.get("file").and_then(|v| v.as_str()) {
+        about.insert("file".to_string(), json!(file));
+    }
+
+    let mut interfaces = HashMap::new();
+    if let Some(ifaces) = body.get("Interfaces").and_then(|v| v.as_object()) {
+        for (k, v) in ifaces {
+            interfaces.insert(k.clone(), v.clone());
         }
     }
-    (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
+
+    let mut functions = Vec::new();
+    if let Some(funcs) = body.get("functions").and_then(|v| v.as_array()) {
+        for f in funcs {
+            if let Ok(func) = serde_json::from_value::<ExternalFunction>(f.clone()) {
+                functions.push(func);
+            }
+        }
+    }
+
+    if functions.is_empty() {
+        for (iface_name, iface_val) in &interfaces {
+            if let Some(methods) = iface_val.get("methods").and_then(|m| m.as_array()) {
+                for m in methods {
+                    if let Some(m_str) = m.as_str() {
+                        functions.push(ExternalFunction {
+                            service_name: name.clone(),
+                            interface_name: iface_name.clone(),
+                            addr: iface_val
+                                .get("addr")
+                                .and_then(|a| a.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            method_name: m_str.to_string(),
+                            func_name: m_str.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let detail = ServiceDetail {
+        about,
+        interfaces,
+        functions,
+    };
+    state.services.write().insert(name.clone(), detail);
+    (
+        StatusCode::CREATED,
+        format!("Service '{}' registered", name),
+    )
+        .into_response()
+}
+
+async fn get_service(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let services = state.services.read();
+    if let Some(service) = services.get(&name) {
+        Json(service.clone()).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Service '{}' not found", name),
+        )
+            .into_response()
+    }
+}
+
+async fn update_service(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let mut services = state.services.write();
+    let entry = match services.get_mut(&name) {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("Service '{}' not found", name),
+            )
+                .into_response();
+        }
+    };
+
+    if let Some(ab) = body.get("About").and_then(|v| v.as_object()) {
+        for (k, v) in ab {
+            entry.about.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(ifaces) = body.get("Interfaces").and_then(|v| v.as_object()) {
+        for (k, v) in ifaces {
+            entry.interfaces.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(funcs) = body.get("functions").and_then(|v| v.as_array()) {
+        let mut new_funcs = Vec::new();
+        for f in funcs {
+            if let Ok(func) = serde_json::from_value::<ExternalFunction>(f.clone()) {
+                new_funcs.push(func);
+            }
+        }
+        if !new_funcs.is_empty() {
+            entry.functions = new_funcs;
+        }
+    }
+
+    (StatusCode::OK, "Service updated").into_response()
+}
+
+async fn delete_service(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if state.services.write().remove(&name).is_some() {
+        (StatusCode::OK, format!("Service '{}' deleted", name)).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Service '{}' not found", name),
+        )
+            .into_response()
+    }
+}
+
+async fn list_service_functions(State(state): State<AppState>) -> impl IntoResponse {
+    let services = state.services.read();
+    let mut list = Vec::new();
+    for svc in services.values() {
+        for f in &svc.functions {
+            list.push(f.clone());
+        }
+    }
+    list.sort_by(|a, b| a.func_name.cmp(&b.func_name));
+    Json(list)
+}
+
+async fn get_service_function(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let services = state.services.read();
+    for svc in services.values() {
+        for f in &svc.functions {
+            if f.func_name.eq_ignore_ascii_case(&name) {
+                return Json(f.clone()).into_response();
+            }
+        }
+    }
+    (
+        StatusCode::NOT_FOUND,
+        format!("External function '{}' not found", name),
+    )
+        .into_response()
+}
+
+async fn list_javascript_udfs(State(state): State<AppState>) -> impl IntoResponse {
+    let udfs = state.js_udfs.read();
+    let mut ids: Vec<String> = udfs.keys().cloned().collect();
+    ids.sort();
+    Json(ids)
+}
+
+async fn create_javascript_udf(
+    State(state): State<AppState>,
+    Json(udf): Json<JavascriptUdf>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&udf.id) {
+        return resp;
+    }
+    if state.js_udfs.read().contains_key(&udf.id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("JavaScript UDF '{}' already exists", udf.id),
+        )
+            .into_response();
+    }
+    if let Err(e) = compile_and_register_js_udf(&udf) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    state.js_udfs.write().insert(udf.id.clone(), udf.clone());
+    (
+        StatusCode::CREATED,
+        format!("JavaScript UDF '{}' created", udf.id),
+    )
+        .into_response()
+}
+
+async fn get_javascript_udf(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    let udfs = state.js_udfs.read();
+    if let Some(udf) = udfs.get(&id) {
+        Json(udf.clone()).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("JavaScript UDF '{}' not found", id),
+        )
+            .into_response()
+    }
+}
+
+async fn update_javascript_udf(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    let mut udf = state
+        .js_udfs
+        .read()
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| JavascriptUdf {
+            id: id.clone(),
+            description: String::new(),
+            script: format!("function {}(x) {{ return x; }}", id),
+            is_agg: false,
+        });
+
+    if let Some(desc) = body.get("description").and_then(|v| v.as_str()) {
+        udf.description = desc.to_string();
+    }
+    if let Some(sc) = body.get("script").and_then(|v| v.as_str()) {
+        if !sc.trim().is_empty() {
+            udf.script = sc.to_string();
+        }
+    }
+    if let Some(agg) = body.get("isAgg").and_then(|v| v.as_bool()) {
+        udf.is_agg = agg;
+    }
+    udf.id = id.clone();
+
+    if let Err(e) = compile_and_register_js_udf(&udf) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    state.js_udfs.write().insert(id, udf);
+    (StatusCode::OK, "JavaScript UDF updated").into_response()
+}
+
+async fn delete_javascript_udf(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&id) {
+        return resp;
+    }
+    if state.js_udfs.write().remove(&id).is_some() {
+        rekuiper_core::plugin::get_global_udf_registry().unregister_udf(&id);
+        (StatusCode::OK, "JavaScript UDF deleted").into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("JavaScript UDF '{}' not found", id),
+        )
+            .into_response()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4165,6 +4579,37 @@ async fn list_function_metadata(State(state): State<AppState>) -> impl IntoRespo
             }
         }
     }
+
+    let js_udfs = state.js_udfs.read();
+    for (id, udf) in js_udfs.iter() {
+        if seen.insert(id.clone()) {
+            list.push(json!({
+                "name": id,
+                "category": "udf",
+                "description": if udf.description.is_empty() { format!("JavaScript UDF {}", id) } else { udf.description.clone() },
+                "aggregate": udf.is_agg,
+                "arity": "unknown",
+                "example": format!("{}()", id),
+            }));
+        }
+    }
+
+    let services = state.services.read();
+    for svc in services.values() {
+        for f in &svc.functions {
+            if seen.insert(f.func_name.clone()) {
+                list.push(json!({
+                    "name": f.func_name,
+                    "category": "service",
+                    "description": format!("External service function provided by {}", f.service_name),
+                    "aggregate": false,
+                    "arity": "unknown",
+                    "example": format!("{}()", f.func_name),
+                }));
+            }
+        }
+    }
+
     Json(list)
 }
 

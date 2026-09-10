@@ -21,8 +21,9 @@ No item may be marked complete without:
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 2 | 0 |
-| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 2 | 1 |
-| **Total** | | **27 Tasks** | **26** | **1** |
+| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 3 | 0 |
+| **Total** | | **27 Tasks** | **27** | **0** |
+
 
 ---
 
@@ -164,11 +165,8 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Implemented authentic portable plugin lifecycle and supervisor manager in `crates/rekuiper-server/src/routes.rs` with `PortablePluginInfo` and `PortablePluginStatus`; wired `AppState.portable_plugins` with persistent registration in `PluginManager`; implemented `/plugins/portables` (list, install), `/plugins/portables/:name` (get, update, delete), and `/plugins/portables/:name/status` (live runtime status with refCount, status enum, errMsg); pre-seeded default `pyfunc` matching OpenAPI test specs. Covered by `test_portable_plugin_process_lifecycle` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 9.3: External Services & Embedded JavaScript UDF Engine**
-  - **Problem**: `/services` and `/udf/javascript` return `empty_array`.
-  - **Implementation**:
-    - Store service definitions in `AppState` with schema and endpoint registration.
-    - Integrate an embedded JavaScript engine (such as `boa_engine`) to compile and execute JavaScript UDF functions in stream processing.
-  - **Verification**: Register JS UDF and service definition, verify they appear in `/services` and `/udf/javascript`, and verify execution of a JS UDF in SQL.
-  - **Files**: `Cargo.toml`, `crates/rekuiper-core/Cargo.toml`, `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 9.3: External Services & Embedded JavaScript UDF Engine**
+  - **Status**: Completed & Verified. Embedded pure Rust ECMAScript runtime via `boa_engine` v0.20 to compile, validate, and execute JavaScript UDF functions in SQL stream processing (`/udf/javascript`, `/udf/javascript/:id`); thread-safe scalar handler wrapping with `rekuiper_core::plugin::get_global_udf_registry()` and `unregister_udf`; implemented external services and function bindings registry (`/services`, `/services/:name`, `/services/functions`, `/services/functions/:name`) with `ServiceDetail` and `ExternalFunction`; pre-seeded default `edgex` service and `func1` JS UDF matching OpenAPI specs; integrated JS UDF and service functions catalog into `/metadata/functions`; completely eliminated all remaining scaffolded dummy stubs (`empty_array`, `validated_empty_object`, `validated_empty_ok`). Covered by `test_external_services_and_javascript_udf_engine` and `test_all_openapi_paths_responding` in `fvt_compat.rs`.
+  - **Files**: `Cargo.toml`, `Cargo.lock`, `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/Cargo.toml`, `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+
 

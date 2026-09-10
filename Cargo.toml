@@ -53,6 +53,7 @@ crc32fast = "1.5"
 sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
+boa_engine = "0.20"
 
 # Internal crate dependencies
 rekuiper-core = { path = "crates/rekuiper-core" }

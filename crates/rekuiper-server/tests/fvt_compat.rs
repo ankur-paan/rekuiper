@@ -4810,3 +4810,261 @@ async fn test_portable_plugin_process_lifecycle() {
     let names_after: Vec<String> = resp.json().await.unwrap();
     assert!(!names_after.contains(&"mirror".to_string()));
 }
+
+#[tokio::test]
+async fn test_external_services_and_javascript_udf_engine() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Verify default JS UDFs and register a new executable JS UDF
+    let resp = client
+        .get(format!("{}/udf/javascript", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let udfs: Vec<String> = resp.json().await.unwrap();
+    assert!(udfs.contains(&"func1".to_string()));
+
+    let resp = client
+        .post(format!("{}/udf/javascript", base_url))
+        .json(&serde_json::json!({
+            "id": "js_multiply",
+            "description": "multiply two numbers in JS",
+            "script": "function js_multiply(a, b) { return a * b; }",
+            "isAgg": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/udf/javascript", base_url))
+        .send()
+        .await
+        .unwrap();
+    let udfs: Vec<String> = resp.json().await.unwrap();
+    assert!(udfs.contains(&"js_multiply".to_string()));
+
+    let resp = client
+        .get(format!("{}/udf/javascript/js_multiply", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let udf_val: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(udf_val["id"], "js_multiply");
+    assert_eq!(udf_val["description"], "multiply two numbers in JS");
+
+    // Direct invocation via global registry
+    let res = rekuiper_core::plugin::get_global_udf_registry()
+        .call_udf("js_multiply", &[serde_json::json!(6), serde_json::json!(7)]);
+    assert_eq!(res, Some(serde_json::json!(42)));
+
+    // Update JS UDF
+    let resp = client
+        .put(format!("{}/udf/javascript/js_multiply", base_url))
+        .json(&serde_json::json!({
+            "description": "updated multiply adding offset",
+            "script": "function js_multiply(a, b) { return (a * b) + 10; }"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let res = rekuiper_core::plugin::get_global_udf_registry()
+        .call_udf("js_multiply", &[serde_json::json!(6), serde_json::json!(7)]);
+    assert_eq!(res, Some(serde_json::json!(52)));
+
+    // Test SQL rule execution calling js_multiply
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "CREATE STREAM js_stream () WITH (DATASOURCE=\"js_stream\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "rule_js_calc",
+            "sql": "SELECT js_multiply(a, b) AS product FROM js_stream",
+            "actions": [{
+                "log": {}
+            }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let resp = client
+        .post(format!("{}/streams/js_stream/data", base_url))
+        .json(&serde_json::json!({
+            "a": 5,
+            "b": 8
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let status = wait_for_rule_status(&client, &base_url, "rule_js_calc", 1, 1).await;
+    assert_eq!(status["status"], "running");
+
+    let _ = client
+        .delete(format!("{}/rules/rule_js_calc", base_url))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{}/streams/js_stream", base_url))
+        .send()
+        .await;
+
+    // Delete JS UDF
+    let resp = client
+        .delete(format!("{}/udf/javascript/js_multiply", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/udf/javascript/js_multiply", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let res = rekuiper_core::plugin::get_global_udf_registry()
+        .call_udf("js_multiply", &[serde_json::json!(6), serde_json::json!(7)]);
+    assert_eq!(res, None);
+
+    // 2. Services and external functions registry
+    let resp = client
+        .get(format!("{}/services", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let services: Vec<String> = resp.json().await.unwrap();
+    assert!(services.contains(&"edgex".to_string()));
+
+    let resp = client
+        .get(format!("{}/services/edgex", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let edgex_detail: serde_json::Value = resp.json().await.unwrap();
+    assert!(edgex_detail.get("About").is_some());
+    assert!(edgex_detail.get("Interfaces").is_some());
+
+    let resp = client
+        .get(format!("{}/services/functions", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let funcs: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(funcs.iter().any(|f| f["FuncName"] == "echo"));
+
+    let resp = client
+        .get(format!("{}/services/functions/echo", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let echo_fn: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(echo_fn["ServiceName"], "edgex");
+
+    // Register a new service
+    let resp = client
+        .post(format!("{}/services", base_url))
+        .json(&serde_json::json!({
+            "name": "weather_service",
+            "About": {
+                "description": "Weather forecasting service",
+                "version": "2.0"
+            },
+            "Interfaces": {
+                "forecast": {
+                    "addr": "http://weather.local:8080",
+                    "methods": ["get_temp", "get_humidity"]
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/services", base_url))
+        .send()
+        .await
+        .unwrap();
+    let services: Vec<String> = resp.json().await.unwrap();
+    assert!(services.contains(&"weather_service".to_string()));
+
+    let resp = client
+        .get(format!("{}/services/functions/get_temp", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let temp_fn: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(temp_fn["ServiceName"], "weather_service");
+    assert_eq!(temp_fn["MethodName"], "get_temp");
+
+    // Update service
+    let resp = client
+        .put(format!("{}/services/weather_service", base_url))
+        .json(&serde_json::json!({
+            "About": {
+                "description": "Updated weather forecasting service",
+                "version": "2.1"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/services/weather_service", base_url))
+        .send()
+        .await
+        .unwrap();
+    let updated_svc: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(updated_svc["About"]["version"], "2.1");
+
+    // Delete service
+    let resp = client
+        .delete(format!("{}/services/weather_service", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/services/weather_service", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let resp = client
+        .get(format!("{}/services/functions/get_temp", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
