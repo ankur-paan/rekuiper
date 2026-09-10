@@ -2,7 +2,8 @@
 """
 Renders a high-production 60 FPS MP4 video comparing all 5 streaming engines
 in Material Design 3 (M3) Light Theme with bouncing balls, realistic ballistic sparks,
-3D glossy spheres, and empirical benchmark data extrapolated to 1,000,000 events.
+3D glossy spheres, vector rank badges, synchronized multi-pitch audio, and empirical
+benchmark data extrapolated to 1,000,000 events.
 Outputs: test/benchmark/rekuiper_benchmark_race_1m.mp4
 """
 import subprocess
@@ -10,16 +11,22 @@ import math
 import os
 import sys
 import random
+import wave
+import struct
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 1920
 HEIGHT = 1080
 FPS = 60
 TOTAL_RECORDS = 1_000_000
-DURATION_SEC = 25.5  # 25.5 second video for 1M events
+# 41.5 seconds ensures all 5 candidates finish (Benthos takes 38.47s)
+# plus 3 seconds of final victory display for the complete leaderboard
+DURATION_SEC = 41.5
 TOTAL_FRAMES = int(FPS * DURATION_SEC)
+AUDIO_SAMPLE_RATE = 44100
 
 OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rekuiper_benchmark_race_1m.mp4")
+TEMP_AUDIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_race_audio.wav")
 
 # Material Design 3 Light Theme Color Palette (RGB)
 BG_COLOR = (248, 249, 252)          # M3 Surface Container Low
@@ -41,7 +48,8 @@ LANES = [
         "elapsed": 2.3512,            # 1,000,000 / 425,308 eps
         "eps": 425308,
         "drops": 0,
-        "bounce_freq": 2.8,           # Bounces per second
+        "bounce_freq": 4.6,           # 4.6 bounces/sec
+        "pitch": 1046.50,             # C6 (High crystal ping)
     },
     {
         "name": "flink",
@@ -52,7 +60,8 @@ LANES = [
         "elapsed": 4.2880,            # 1,000,000 / 233,209 eps
         "eps": 233209,
         "drops": 0,
-        "bounce_freq": 1.6,
+        "bounce_freq": 3.2,           # 3.2 bounces/sec
+        "pitch": 783.99,              # G5 (Bright chime)
     },
     {
         "name": "telegraf",
@@ -63,7 +72,8 @@ LANES = [
         "elapsed": 16.3882,           # 1,000,000 / 61,019 eps
         "eps": 61019,
         "drops": 0,
-        "bounce_freq": 0.65,
+        "bounce_freq": 2.1,           # 2.1 bounces/sec
+        "pitch": 659.25,              # E5 (Vibrant bell)
     },
     {
         "name": "ekuiper",
@@ -74,7 +84,8 @@ LANES = [
         "elapsed": 22.5809,           # 1,000,000 / 44,287 eps
         "eps": 44287,
         "drops": 145842,
-        "bounce_freq": 0.48,
+        "bounce_freq": 1.6,           # 1.6 bounces/sec
+        "pitch": 523.25,              # C5 (Mid pop / drop buzz)
     },
     {
         "name": "benthos",
@@ -85,13 +96,14 @@ LANES = [
         "elapsed": 38.4720,           # 1,000,000 / 25,993 eps
         "eps": 25993,
         "drops": 0,
-        "bounce_freq": 0.28,
+        "bounce_freq": 1.2,           # 1.2 bounces/sec
+        "pitch": 392.00,              # G4 (Warm resonant thud)
     }
 ]
 
 # Track Geometry
 PADDING_LEFT = 480
-PADDING_RIGHT = 340
+PADDING_RIGHT = 380
 TRACK_WIDTH = WIDTH - PADDING_LEFT - PADDING_RIGHT
 LANE_HEIGHT = 160
 TOP_OFFSET = 180
@@ -115,10 +127,8 @@ def spawn_sparks(x, y, color, count=16, is_drop=False, direction=0):
     for _ in range(count):
         speed = random.uniform(3.0, 9.0)
         if direction == -1:
-            # Bounced off right bumper -> fly leftward with angular spread
             angle = math.pi + random.uniform(-0.8, 0.8)
         elif direction == 1:
-            # Bounced off left bumper -> fly rightward with angular spread
             angle = random.uniform(-0.8, 0.8)
         else:
             angle = random.uniform(0, math.pi * 2)
@@ -131,10 +141,63 @@ def spawn_sparks(x, y, color, count=16, is_drop=False, direction=0):
             "vy": math.sin(angle) * speed,
             "color": spark_color,
             "life": 1.0,
-            "decay": random.uniform(2.0, 3.2),  # lives ~0.35s - 0.5s
+            "decay": random.uniform(2.0, 3.2),
             "size": random.uniform(3.0, 5.5)
         })
     return new_sparks
+
+def draw_rank_badge(draw, x, y, rank_str, bg_color, border_color, text_color, label_str, label_color, font_pill, font_text):
+    """Draws a crisp vector pill badge without relying on unicode emojis."""
+    pill_w = 60
+    pill_h = 30
+    draw.rounded_rectangle([x, y, x + pill_w, y + pill_h], radius=15, fill=bg_color, outline=border_color, width=2)
+    bbox = font_pill.getbbox(rank_str)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+    draw.text((x + (pill_w - tw) // 2, y + (pill_h - th) // 2 - 2), rank_str, font=font_pill, fill=text_color)
+    draw.text((x + pill_w + 12, y + 3), label_str, font=font_text, fill=label_color)
+
+def generate_audio_track(bounce_events):
+    """Synthesizes high quality 44.1kHz audio of multi-pitch bouncing balls."""
+    print("Synthesizing multi-pitch audio track...")
+    total_samples = int(AUDIO_SAMPLE_RATE * DURATION_SEC)
+    audio_buffer = [0.0] * total_samples
+
+    sound_duration = 0.11
+    decay_samples = int(sound_duration * AUDIO_SAMPLE_RATE)
+
+    for (t_event, pitch, is_drop) in bounce_events:
+        start_idx = int(t_event * AUDIO_SAMPLE_RATE)
+        for i in range(decay_samples):
+            idx = start_idx + i
+            if idx >= total_samples:
+                break
+            t = i / AUDIO_SAMPLE_RATE
+            envelope = math.exp(-t * 22.0)
+            cur_freq = pitch * (1.0 - 0.18 * (t / sound_duration))
+            phase = 2.0 * math.pi * cur_freq * t
+            # Triangle wave for rich acoustic harmonics
+            sine_val = math.sin(phase)
+            tri_val = (2.0 / math.pi) * math.asin(max(-1.0, min(1.0, sine_val)))
+            if is_drop:
+                tri_val = 0.6 * tri_val + 0.4 * math.sin(phase * 2.0)
+            audio_buffer[idx] += tri_val * envelope * 0.25
+
+    # Peak normalize and convert to 16-bit PCM
+    max_val = max((abs(s) for s in audio_buffer), default=1.0)
+    norm_factor = 28000.0 / max(max_val, 0.001)
+    pcm_data = bytearray()
+    for s in audio_buffer:
+        val = int(max(-32767, min(32767, s * norm_factor)))
+        # Stereo (duplicate to L and R channels)
+        pcm_data.extend(struct.pack('<hh', val, val))
+
+    with wave.open(TEMP_AUDIO_FILE, 'wb') as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(AUDIO_SAMPLE_RATE)
+        wf.writeframes(pcm_data)
+    print(f"Audio synthesized successfully: {TEMP_AUDIO_FILE}")
 
 def render_video():
     print("=" * 70)
@@ -148,9 +211,30 @@ def render_video():
     font_lane_title = get_font(28, bold=True)
     font_lane_sub = get_font(18, bold=False)
     font_metrics = get_font(26, bold=True)
-    font_badge = get_font(22, bold=True)
+    font_pill = get_font(16, bold=True)
+    font_badge = get_font(20, bold=True)
 
-    # Launch FFmpeg process piping raw RGB frames
+    # 1. Pre-calculate bouncing events for audio synthesis
+    bounce_events = []
+    prev_states = [None] * len(LANES)
+    for f_idx in range(TOTAL_FRAMES):
+        sim_time = f_idx / FPS
+        for idx, lane in enumerate(LANES):
+            if sim_time < lane["elapsed"]:
+                period = 1.0 / lane["bounce_freq"]
+                cycle = (sim_time % period) / period
+                cur_bumper = "right" if cycle >= 0.48 and cycle < 0.52 else ("left" if cycle >= 0.98 or cycle < 0.02 else None)
+                if cur_bumper and cur_bumper != prev_states[idx]:
+                    bounce_events.append((sim_time, lane["pitch"], lane["drops"] > 0))
+                prev_states[idx] = cur_bumper
+            elif prev_states[idx] != "finished":
+                # Finish line chord trigger
+                bounce_events.append((sim_time, lane["pitch"] * 1.25, False))
+                prev_states[idx] = "finished"
+
+    generate_audio_track(bounce_events)
+
+    # Launch FFmpeg process piping raw RGB frames and muxing audio
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-f", "rawvideo",
@@ -159,10 +243,14 @@ def render_video():
         "-pix_fmt", "rgb24",
         "-r", str(FPS),
         "-i", "-",
+        "-i", TEMP_AUDIO_FILE,
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "17",
         "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
         OUTPUT_FILE
     ]
 
@@ -170,7 +258,6 @@ def render_video():
 
     # Global particle system for impact sparks
     sparks = []
-    # Track previous bumper state to trigger sparks on impact transition
     prev_bumper_states = [None] * len(LANES)
 
     for f_idx in range(TOTAL_FRAMES):
@@ -254,7 +341,6 @@ def render_video():
                     trail_x = bx - dx * (t_step * 14)
                     alpha_factor = 1.0 - (t_step * 0.16)
                     t_radius = int(BALL_RADIUS * alpha_factor)
-                    # Blend lane color towards track background for smooth anti-aliased trail
                     bg_color = bg
                     t_color = (
                         int(lane["color"][0] * alpha_factor * 0.4 + bg_color[0] * (1.0 - alpha_factor * 0.4)),
@@ -284,34 +370,60 @@ def render_video():
             # Right side: Real-time Stats & Badges
             stats_x = rail_x2 + 36
             metric_color = lane["color"] if finished else TEXT_PRIMARY
-            draw.text((stats_x, y_center - 24), f"{processed:,} events", font=font_metrics, fill=metric_color)
+            draw.text((stats_x, y_center - 26), f"{processed:,} events", font=font_metrics, fill=metric_color)
 
             if finished:
                 if idx == 0:
-                    badge_text = "🏆 1st PLACE (2.35s · 425k eps)"
-                    badge_color = (22, 163, 74)
+                    draw_rank_badge(
+                        draw, stats_x, y_center + 4,
+                        "1st", (254, 240, 138), (202, 138, 4), (161, 98, 7),
+                        "1st PLACE (2.35s · 425k eps)", (22, 163, 74),
+                        font_pill, font_badge
+                    )
                 elif idx == 1:
-                    badge_text = "🥈 2nd PLACE (4.29s · 233k eps)"
-                    badge_color = (2, 132, 199)
+                    draw_rank_badge(
+                        draw, stats_x, y_center + 4,
+                        "2nd", (241, 245, 249), (148, 163, 184), (71, 85, 105),
+                        "2nd PLACE (4.29s · 233k eps)", (2, 132, 199),
+                        font_pill, font_badge
+                    )
                 elif idx == 2:
-                    badge_text = "🥉 3rd PLACE (16.39s · 61k eps)"
-                    badge_color = (202, 138, 4)
+                    draw_rank_badge(
+                        draw, stats_x, y_center + 4,
+                        "3rd", (254, 243, 199), (217, 119, 6), (180, 83, 9),
+                        "3rd PLACE (16.39s · 61k eps)", (202, 138, 4),
+                        font_pill, font_badge
+                    )
+                elif idx == 3:
+                    draw_rank_badge(
+                        draw, stats_x, y_center + 4,
+                        "4th", (254, 226, 226), (239, 68, 68), (185, 28, 28),
+                        "4th PLACE (22.58s · 145k drops)", (220, 38, 38),
+                        font_pill, font_badge
+                    )
                 else:
-                    badge_text = f"FINISHED in {lane['elapsed']:.2f}s"
-                    badge_color = (100, 116, 139)
-                draw.text((stats_x, y_center + 10), badge_text, font=font_badge, fill=badge_color)
+                    draw_rank_badge(
+                        draw, stats_x, y_center + 4,
+                        "5th", (243, 232, 255), (168, 85, 247), (126, 34, 206),
+                        "5th PLACE (38.47s · 26k eps)", (124, 58, 237),
+                        font_pill, font_badge
+                    )
             elif lane["drops"] > 0 and sim_time > 3.0:
-                draw.text((stats_x, y_center + 10), f"⚠️ 145k DROPS (14.6%)", font=font_badge, fill=(220, 38, 38))
+                pill_w = 46
+                pill_h = 28
+                draw.rounded_rectangle([stats_x, y_center + 4, stats_x + pill_w, y_center + 4 + pill_h], radius=14, fill=(254, 226, 226), outline=(239, 68, 68), width=2)
+                bbox = font_pill.getbbox("!")
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+                draw.text((stats_x + (pill_w - tw) // 2, y_center + 4 + (pill_h - th) // 2 - 2), "!", font=font_pill, fill=(185, 28, 28))
+                draw.text((stats_x + pill_w + 10, y_center + 7), "145k DROPS (14.6% Loss)", font=font_badge, fill=(220, 38, 38))
             else:
                 pct = int(progress * 100)
-                draw.text((stats_x, y_center + 10), f"Processing... {pct}%", font=font_lane_sub, fill=TEXT_MUTED)
+                draw.text((stats_x, y_center + 8), f"Processing... {pct}%", font=font_lane_sub, fill=TEXT_MUTED)
 
         # 3. Always update & draw sparks across all lanes
-        # Even when balls finish or stop, sparks NEVER freeze; they continue flying,
-        # decelerating, and fading out smoothly!
         new_sparks = []
         for sp in sparks:
-            # Physical motion with gentle air drag
             sp["x"] += sp["vx"]
             sp["y"] += sp["vy"]
             sp["vx"] *= 0.95
@@ -328,14 +440,22 @@ def render_video():
         # Send raw frame to FFmpeg stdin
         proc.stdin.write(img.tobytes())
 
-        if (f_idx + 1) % 150 == 0:
+        if (f_idx + 1) % 250 == 0:
             pct_done = int((f_idx + 1) / TOTAL_FRAMES * 100)
             print(f"Rendered {f_idx + 1}/{TOTAL_FRAMES} frames ({pct_done}%)...")
 
     proc.stdin.close()
     proc.wait()
+
+    # Clean up temp audio file
+    if os.path.exists(TEMP_AUDIO_FILE):
+        try:
+            os.remove(TEMP_AUDIO_FILE)
+        except Exception:
+            pass
+
     file_size_mb = os.path.getsize(OUTPUT_FILE) / (1024 * 1024)
-    print(f"\nSUCCESS! 60 FPS M3 Light Video created: {OUTPUT_FILE} ({file_size_mb:.2f} MB)")
+    print(f"\nSUCCESS! 60 FPS M3 Light Video with Audio created: {OUTPUT_FILE} ({file_size_mb:.2f} MB)")
 
 if __name__ == "__main__":
     render_video()

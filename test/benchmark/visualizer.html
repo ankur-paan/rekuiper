@@ -336,7 +336,8 @@
         eps: 425308,
         drops: 0,
         ram: '8.2 MB',
-        freq: 587.33,             // D5
+        freq: 1046.50,            // C6 (High crystal ping)
+        bounceRate: 4.6,
         x: 0,
         dx: 1,
         bounces: 0,
@@ -354,7 +355,8 @@
         eps: 233209,
         drops: 0,
         ram: '1,022 MB',
-        freq: 440.00,             // A4
+        freq: 783.99,             // G5 (Bright chime)
+        bounceRate: 3.2,
         x: 0,
         dx: 1,
         bounces: 0,
@@ -372,7 +374,8 @@
         eps: 61019,
         drops: 0,
         ram: '50 MB',
-        freq: 329.63,             // E4
+        freq: 659.25,             // E5 (Vibrant bell)
+        bounceRate: 2.1,
         x: 0,
         dx: 1,
         bounces: 0,
@@ -390,7 +393,8 @@
         eps: 44287,
         drops: 145842,
         ram: '45 MB',
-        freq: 261.63,             // C4
+        freq: 523.25,             // C5 (Mid pop / buzzer on drops)
+        bounceRate: 1.6,
         x: 0,
         dx: 1,
         bounces: 0,
@@ -408,7 +412,8 @@
         eps: 25993,
         drops: 0,
         ram: '38 MB',
-        freq: 196.00,             // G3
+        freq: 392.00,             // G4 (Warm resonant thud)
+        bounceRate: 1.2,
         x: 0,
         dx: 1,
         bounces: 0,
@@ -425,6 +430,8 @@
     let speedMultiplier = 1.0;
     let audioEnabled = true;
     let audioCtx = null;
+    let masterGain = null;
+    let compressor = null;
 
     // Track Geometry
     const PADDING_LEFT = 240;
@@ -435,6 +442,18 @@
     function initAudio() {
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        compressor = audioCtx.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-12, audioCtx.currentTime);
+        compressor.knee.setValueAtTime(8, audioCtx.currentTime);
+        compressor.ratio.setValueAtTime(6, audioCtx.currentTime);
+        compressor.attack.setValueAtTime(0.002, audioCtx.currentTime);
+        compressor.release.setValueAtTime(0.08, audioCtx.currentTime);
+
+        masterGain = audioCtx.createGain();
+        masterGain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+
+        compressor.connect(masterGain);
+        masterGain.connect(audioCtx.destination);
       }
       if (audioCtx.state === 'suspended') {
         audioCtx.resume();
@@ -444,16 +463,22 @@
     function playBounceSound(freq, isWarning = false) {
       if (!audioEnabled || !audioCtx) return;
       try {
+        const now = audioCtx.currentTime;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.type = isWarning ? 'sawtooth' : 'sine';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+
+        // Warm, tactile rubber ball pop sound
+        osc.type = isWarning ? 'sawtooth' : 'triangle';
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.82, now + 0.09);
+
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.12);
+        gain.connect(compressor);
+        osc.start(now);
+        osc.stop(now + 0.11);
       } catch (e) {}
     }
 
@@ -557,9 +582,8 @@
             return;
           }
 
-          // Move ball based on relative speed
-          const relativeSpeed = lanes[0].elapsed / lane.elapsed;
-          const moveDist = BASE_PIXELS_PER_SEC * relativeSpeed * dt * speedMultiplier;
+          // Move ball based on its individual bounce rate so all engines actively bounce and make sound
+          const moveDist = trackWidth * 2 * lane.bounceRate * dt * speedMultiplier;
           lane.x += lane.dx * moveDist;
 
           // Bumper collision detection with directional spark ejection
@@ -698,27 +722,70 @@
         ctx.fillStyle = lane.finished ? lane.color : '#0f172a';
         ctx.fillText(`${(lane.processed).toLocaleString()} evt`, statsX, yCenter - 6);
 
-        ctx.font = '11px JetBrains Mono, monospace';
         if (lane.finished) {
+          const pillW = 38;
+          const pillH = 18;
+          let rankText, pillBg, pillBorder, pillColor, labelText, labelColor;
+
           if (idx === 0) {
-            ctx.fillStyle = '#16a34a';
-            ctx.fillText(`🏆 1st (2.35s)`, statsX, yCenter + 12);
+            rankText = '1st'; pillBg = '#fef08a'; pillBorder = '#ca8a04'; pillColor = '#854d0e';
+            labelText = '1st (2.35s · 425k eps)'; labelColor = '#16a34a';
           } else if (idx === 1) {
-            ctx.fillStyle = '#0284c7';
-            ctx.fillText(`🥈 2nd (4.29s)`, statsX, yCenter + 12);
+            rankText = '2nd'; pillBg = '#f1f5f9'; pillBorder = '#94a3b8'; pillColor = '#475569';
+            labelText = '2nd (4.29s · 233k eps)'; labelColor = '#0284c7';
           } else if (idx === 2) {
-            ctx.fillStyle = '#ca8a04';
-            ctx.fillText(`🥉 3rd (16.39s)`, statsX, yCenter + 12);
+            rankText = '3rd'; pillBg = '#fef3c7'; pillBorder = '#d97706'; pillColor = '#92400e';
+            labelText = '3rd (16.39s · 61k eps)'; labelColor = '#ca8a04';
+          } else if (idx === 3) {
+            rankText = '4th'; pillBg = '#fee2e2'; pillBorder = '#ef4444'; pillColor = '#b91c1c';
+            labelText = '4th (22.58s · 145k drops)'; labelColor = '#dc2626';
           } else {
-            ctx.fillStyle = '#64748b';
-            ctx.fillText(`DONE (${lane.finishTime.toFixed(2)}s)`, statsX, yCenter + 12);
+            rankText = '5th'; pillBg = '#f3e8ff'; pillBorder = '#a855f7'; pillColor = '#7e22ce';
+            labelText = '5th (38.47s · 26k eps)'; labelColor = '#7c3aed';
           }
-        } else if (lane.drops > 0) {
+
+          // Draw vector rank pill
+          ctx.fillStyle = pillBg;
+          ctx.strokeStyle = pillBorder;
+          ctx.lineWidth = 1.5;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(statsX, yCenter + 2, pillW, pillH, 9);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(statsX, yCenter + 2, pillW, pillH);
+          }
+          ctx.font = 'bold 10px Roboto, sans-serif';
+          ctx.fillStyle = pillColor;
+          ctx.fillText(rankText, statsX + 9, yCenter + 15);
+
+          ctx.font = 'bold 11px JetBrains Mono, monospace';
+          ctx.fillStyle = labelColor;
+          ctx.fillText(labelText, statsX + pillW + 8, yCenter + 15);
+        } else if (lane.drops > 0 && elapsedTime > 3.0) {
+          ctx.fillStyle = '#fee2e2';
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 1.5;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(statsX, yCenter + 2, 24, 18, 9);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(statsX, yCenter + 2, 24, 18);
+          }
+          ctx.font = 'bold 11px Roboto, sans-serif';
+          ctx.fillStyle = '#b91c1c';
+          ctx.fillText('!', statsX + 9, yCenter + 15);
+
+          ctx.font = 'bold 11px JetBrains Mono, monospace';
           ctx.fillStyle = '#dc2626';
-          ctx.fillText(`⚠️ 145k DROPS`, statsX, yCenter + 12);
+          ctx.fillText('145k DROPS (14.6%)', statsX + 32, yCenter + 15);
         } else {
+          ctx.font = '11px JetBrains Mono, monospace';
           ctx.fillStyle = '#64748b';
-          ctx.fillText(`${lane.bounces} bounces`, statsX, yCenter + 12);
+          ctx.fillText(`${lane.bounces} bounces`, statsX, yCenter + 15);
         }
       });
     }
