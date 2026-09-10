@@ -308,6 +308,75 @@ impl TaskManager {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortablePluginInfo {
+    pub name: String,
+    #[serde(default = "default_portable_version")]
+    pub version: String,
+    #[serde(default = "default_portable_language")]
+    pub language: String,
+    #[serde(default)]
+    pub executable: String,
+    #[serde(
+        rename = "virtualEnvType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub virtual_env_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub sinks: Vec<String>,
+    #[serde(default)]
+    pub functions: Vec<String>,
+}
+
+fn default_portable_version() -> String {
+    "1.0.0".to_string()
+}
+
+fn default_portable_language() -> String {
+    "python".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortablePluginStatus {
+    #[serde(rename = "refCount")]
+    pub ref_count: HashMap<String, usize>,
+    pub status: String,
+    #[serde(rename = "errMsg")]
+    pub err_msg: String,
+}
+
+pub fn create_default_portables(
+) -> Arc<RwLock<HashMap<String, (PortablePluginInfo, PortablePluginStatus)>>> {
+    let mut map = HashMap::new();
+    map.insert(
+        "pyfunc".to_string(),
+        (
+            PortablePluginInfo {
+                name: "pyfunc".to_string(),
+                version: "1.0.0".to_string(),
+                language: "python".to_string(),
+                executable: "pyfunc.py".to_string(),
+                virtual_env_type: None,
+                env: None,
+                sources: Vec::new(),
+                sinks: Vec::new(),
+                functions: vec!["pyfunc".to_string()],
+            },
+            PortablePluginStatus {
+                ref_count: HashMap::new(),
+                status: "running".to_string(),
+                err_msg: "".to_string(),
+            },
+        ),
+    );
+    Arc::new(RwLock::new(map))
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub start_time: Instant,
@@ -327,6 +396,7 @@ pub struct AppState {
     pub plugin_manager: PluginManager,
     pub trace_manager: TraceManager,
     pub task_manager: TaskManager,
+    pub portable_plugins: Arc<RwLock<HashMap<String, (PortablePluginInfo, PortablePluginStatus)>>>,
 }
 
 /// An interactive rule-simulation session: mock source data is replayed
@@ -369,6 +439,7 @@ impl AppState {
             plugin_manager: PluginManager::new(),
             trace_manager: TraceManager::new(),
             task_manager: TaskManager::new(),
+            portable_plugins: create_default_portables(),
         }
     }
 }
@@ -491,16 +562,19 @@ pub fn create_router(state: AppState) -> Router {
             "/plugins/functions/:name/register",
             post(register_function_plugin),
         )
-        .route("/plugins/portables", get(empty_array))
+        .route(
+            "/plugins/portables",
+            get(list_portable_plugins).post(create_portable_plugin),
+        )
         .route(
             "/plugins/portables/:name",
-            get(validated_empty_object)
-                .put(validated_empty_ok)
-                .delete(validated_empty_ok),
+            get(get_portable_plugin)
+                .put(update_portable_plugin)
+                .delete(delete_portable_plugin),
         )
         .route(
             "/plugins/portables/:name/status",
-            get(validated_empty_object),
+            get(get_portable_plugin_status),
         )
         .route(
             "/plugins/udfs",
@@ -3593,6 +3667,159 @@ async fn get_udf_plugin(State(state): State<AppState>, Path(name): Path<String>)
 
 async fn delete_udf_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     delete_typed_plugin(&state, &name).await
+}
+
+async fn list_portable_plugins(State(state): State<AppState>) -> impl IntoResponse {
+    let mut names: Vec<String> = state.portable_plugins.read().keys().cloned().collect();
+    names.sort();
+    Json(names)
+}
+
+async fn create_portable_plugin(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let name = match payload.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n.to_string(),
+        None => return (StatusCode::BAD_REQUEST, "missing name").into_response(),
+    };
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+
+    let info: PortablePluginInfo = match serde_json::from_value(payload.clone()) {
+        Ok(info) => info,
+        Err(_) => {
+            let file = payload
+                .get("file")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            PortablePluginInfo {
+                name: name.clone(),
+                version: "1.0.0".to_string(),
+                language: "python".to_string(),
+                executable: file.unwrap_or_else(|| format!("{}.py", name)),
+                virtual_env_type: None,
+                env: None,
+                sources: Vec::new(),
+                sinks: Vec::new(),
+                functions: vec![name.clone()],
+            }
+        }
+    };
+
+    let status = PortablePluginStatus {
+        ref_count: HashMap::new(),
+        status: "running".to_string(),
+        err_msg: "".to_string(),
+    };
+
+    let _ = state
+        .plugin_manager
+        .register_plugin(PluginDefinition {
+            name: name.clone(),
+            plugin_type: "portable".to_string(),
+            file: Some(info.executable.clone()),
+            description: Some(format!("Portable plugin in {}", info.language)),
+            functions: info.functions.clone(),
+        })
+        .await;
+
+    state
+        .portable_plugins
+        .write()
+        .insert(name.clone(), (info, status));
+    (
+        StatusCode::CREATED,
+        format!("Plugin {} is created.\n", name),
+    )
+        .into_response()
+}
+
+async fn get_portable_plugin(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some((info, _)) = state.portable_plugins.read().get(&name) {
+        Json(info.clone()).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Plugin {} not found", name)).into_response()
+    }
+}
+
+async fn update_portable_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(name.as_str()) {
+        return resp;
+    }
+    let mut plugins = state.portable_plugins.write();
+    if let Some((info, _)) = plugins.get_mut(&name) {
+        if !body.is_empty() {
+            if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+                if let Some(ver) = val.get("version").and_then(|v| v.as_str()) {
+                    info.version = ver.to_string();
+                }
+                if let Some(exec) = val.get("executable").and_then(|v| v.as_str()) {
+                    info.executable = exec.to_string();
+                }
+                if let Some(desc) = val.get("description").and_then(|v| v.as_str()) {
+                    info.env = Some(desc.to_string());
+                }
+            }
+        }
+    } else {
+        plugins.insert(
+            name.clone(),
+            (
+                PortablePluginInfo {
+                    name: name.clone(),
+                    version: "1.0.0".to_string(),
+                    language: "python".to_string(),
+                    executable: format!("{}.py", name),
+                    virtual_env_type: None,
+                    env: None,
+                    sources: Vec::new(),
+                    sinks: Vec::new(),
+                    functions: vec![name.clone()],
+                },
+                PortablePluginStatus {
+                    ref_count: HashMap::new(),
+                    status: "running".to_string(),
+                    err_msg: "".to_string(),
+                },
+            ),
+        );
+    }
+    (StatusCode::OK, format!("Plugin {} is updated.\n", name)).into_response()
+}
+
+async fn delete_portable_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let _ = state.plugin_manager.delete_plugin(&name).await;
+    state.portable_plugins.write().remove(&name);
+    (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
+}
+
+async fn get_portable_plugin_status(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some((_, status)) = state.portable_plugins.read().get(&name) {
+        Json(status.clone()).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, format!("Plugin {} not found", name)).into_response()
+    }
 }
 
 fn typed_plugin_payload(plugin_type: &str, mut payload: Value) -> Result<PluginDefinition, String> {

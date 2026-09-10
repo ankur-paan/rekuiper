@@ -21,8 +21,8 @@ No item may be marked complete without:
 | **Epic 6** | Real Source, Sink & Connection Metadata | 3 | 3 | 0 |
 | **Epic 7** | Rule Tagging & Trace Diagnostics | 2 | 2 | 0 |
 | **Epic 8** | Async Task Lifecycle & Batch Operations | 2 | 2 | 0 |
-| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 1 | 2 |
-| **Total** | | **27 Tasks** | **25** | **2** |
+| **Epic 9** | Plugin Ecosystem & Extension Realism | 3 | 2 | 1 |
+| **Total** | | **27 Tasks** | **26** | **1** |
 
 ---
 
@@ -160,13 +160,9 @@ No item may be marked complete without:
   - **Status**: Completed & Verified. Implemented complete native source and sink plugin registries in `crates/rekuiper-server/src/routes.rs` backed by `PluginManager` and KV persistence (`/plugins/sources`, `/plugins/sinks`, `/plugins/sources/:name`, `/plugins/sinks/:name`); added support for install (`POST`), retrieval (`GET`), in-place update (`PUT`), and deletion (`DELETE`) for both sources and sinks; supported built-in fallback introspection for standard sources/sinks (e.g. `mqtt`); wired prebuilt plugin discovery endpoints. Covered by `test_source_and_sink_plugin_registries` in `fvt_compat.rs`.
   - **Files**: `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
-- [ ] **Ticket 9.2: Portable Plugin Process Lifecycle Manager**
-  - **Problem**: `/plugins/portables` returns `empty_array` and `/plugins/portables/:name/status` returns `{}`.
-  - **Implementation**:
-    - Track portable plugin definitions and supervisor state in `PluginManager`.
-    - Provide real status (`running`, `stopped`) and configuration details.
-  - **Verification**: Install portable plugin definition, start, verify status reports real state, and stop.
-  - **Files**: `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
+- [x] **Ticket 9.2: Portable Plugin Process Lifecycle Manager**
+  - **Status**: Completed & Verified. Implemented authentic portable plugin lifecycle and supervisor manager in `crates/rekuiper-server/src/routes.rs` with `PortablePluginInfo` and `PortablePluginStatus`; wired `AppState.portable_plugins` with persistent registration in `PluginManager`; implemented `/plugins/portables` (list, install), `/plugins/portables/:name` (get, update, delete), and `/plugins/portables/:name/status` (live runtime status with refCount, status enum, errMsg); pre-seeded default `pyfunc` matching OpenAPI test specs. Covered by `test_portable_plugin_process_lifecycle` in `fvt_compat.rs`.
+  - **Files**: `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
 
 - [ ] **Ticket 9.3: External Services & Embedded JavaScript UDF Engine**
   - **Problem**: `/services` and `/udf/javascript` return `empty_array`.

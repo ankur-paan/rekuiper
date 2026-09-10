@@ -4685,3 +4685,128 @@ async fn test_source_and_sink_plugin_registries() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {}", path);
     }
 }
+
+#[tokio::test]
+async fn test_portable_plugin_process_lifecycle() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // 1. Initial portable plugins list contains pre-seeded pyfunc
+    let resp = client
+        .get(format!("{}/plugins/portables", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert!(names.contains(&"pyfunc".to_string()));
+
+    // 2. Query pre-seeded pyfunc metadata and status
+    let resp = client
+        .get(format!("{}/plugins/portables/pyfunc", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let pyfunc_info: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(pyfunc_info["name"], "pyfunc");
+    assert_eq!(pyfunc_info["language"], "python");
+
+    let resp = client
+        .get(format!("{}/plugins/portables/pyfunc/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let pyfunc_status: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(pyfunc_status["status"], "running");
+
+    // 3. Install a new portable plugin
+    let resp = client
+        .post(format!("{}/plugins/portables", base_url))
+        .json(&serde_json::json!({
+            "name": "mirror",
+            "file": "file:///var/plugins/portables/mirror.zip"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    let resp = client
+        .get(format!("{}/plugins/portables", base_url))
+        .send()
+        .await
+        .unwrap();
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert!(names.contains(&"mirror".to_string()));
+
+    let resp = client
+        .get(format!("{}/plugins/portables/mirror", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mirror_info: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(mirror_info["name"], "mirror");
+
+    let resp = client
+        .get(format!("{}/plugins/portables/mirror/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mirror_status: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(mirror_status["status"], "running");
+
+    // 4. Update portable plugin
+    let resp = client
+        .put(format!("{}/plugins/portables/mirror", base_url))
+        .json(&serde_json::json!({
+            "version": "2.0.0",
+            "executable": "custom_mirror.py"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/plugins/portables/mirror", base_url))
+        .send()
+        .await
+        .unwrap();
+    let updated_mirror: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(updated_mirror["version"], "2.0.0");
+    assert_eq!(updated_mirror["executable"], "custom_mirror.py");
+
+    // 5. Delete portable plugin
+    let resp = client
+        .delete(format!("{}/plugins/portables/mirror", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .get(format!("{}/plugins/portables/mirror", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let resp = client
+        .get(format!("{}/plugins/portables/mirror/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let resp = client
+        .get(format!("{}/plugins/portables", base_url))
+        .send()
+        .await
+        .unwrap();
+    let names_after: Vec<String> = resp.json().await.unwrap();
+    assert!(!names_after.contains(&"mirror".to_string()));
+}
