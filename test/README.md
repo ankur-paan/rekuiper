@@ -1,6 +1,12 @@
+# rekuiper Test Suite & Benchmarks
+
+> [!TIP]
+> Looking for the competitive 500,000-event streaming benchmarks (rekuiper vs Flink vs eKuiper vs Benthos vs Telegraf)?
+> See **[BENCHMARKS.md](BENCHMARKS.md)** and the automated scripts in **[`test/benchmark/`](benchmark/)**.
+
 ## Overview
 
-eKuiper FVT (functional verification tests)  covers following scenarios. 
+eKuiper FVT (functional verification tests) covers the following scenarios: 
 
 - Basic functions of HTTP REST-API 
 - Basic functions of CLI

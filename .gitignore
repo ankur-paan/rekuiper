@@ -38,6 +38,9 @@ corss_build_for_rpm.tar
 
 *.swp
 *.history
+__pycache__/
+*.pyc
+telemetry_*.jsonl
 
 */**/*.db
 

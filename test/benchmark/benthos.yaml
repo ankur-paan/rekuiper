@@ -1,0 +1,14 @@
+input:
+  stdin: {}
+
+pipeline:
+  processors:
+    - mapping: |
+        root.id = this.id
+        root.temp_f = (this.temp * 1.8) + 32
+    - filter_parts:
+        type: json
+        condition: "this.temp > 20.0"
+
+output:
+  drop: {}

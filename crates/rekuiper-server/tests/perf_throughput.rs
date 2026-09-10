@@ -70,7 +70,7 @@ async fn test_high_throughput_streaming_pipeline() {
     let tx = state.stream_bus.get_or_create("perf_stream");
     let start = std::time::Instant::now();
     let mut sent = 0u64;
-    for _chunk in 0..100 {
+    for _chunk in 0..1000 {
         for _ in 0..500 {
             let n = sent;
             let data: HashMap<String, Value> = serde_json::from_str(&format!(
@@ -97,12 +97,12 @@ async fn test_high_throughput_streaming_pipeline() {
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "consumer stalled at {seen}/50,000"
+                "consumer stalled at {seen}/500,000"
             );
             tokio::task::yield_now().await;
         }
     }
-    assert_eq!(sent, 50_000);
+    assert_eq!(sent, 500_000);
 
     // 5. Rule status reflects every ingested record.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -115,21 +115,21 @@ async fn test_high_throughput_streaming_pipeline() {
             .json()
             .await
             .unwrap();
-        if status["sourceRecordsInTotal"].as_u64().unwrap_or(0) >= 50_000 {
+        if status["sourceRecordsInTotal"].as_u64().unwrap_or(0) >= 500_000 {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "timed out waiting for 50,000 ingested records"
+            "timed out waiting for 500,000 ingested records"
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
     // 6. Throughput report + floor assertion.
     let elapsed = start.elapsed();
-    let events_per_sec = 50_000.0 / elapsed.as_secs_f64();
+    let events_per_sec = 500_000.0 / elapsed.as_secs_f64();
     println!("=== Performance Benchmark: Streaming SQL Pipeline ===");
-    println!("Records Ingested : 50,000");
+    println!("Records Ingested : 500,000");
     println!("Elapsed Time     : {:?}", elapsed);
     println!(
         "Throughput       : {:.2} events/sec (Assert: > 20,000 eps)",
