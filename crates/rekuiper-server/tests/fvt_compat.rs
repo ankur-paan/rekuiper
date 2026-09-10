@@ -6605,4 +6605,3 @@ async fn test_rule_stop_and_start_lifecycle() {
     let st2: serde_json::Value = status_resp2.json().await.unwrap();
     assert_eq!(st2["status"], "running");
 }
-
