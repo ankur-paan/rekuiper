@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | :--- | :--- |
-| v0.422.x-beta (Latest) | :white_check_mark: |
+| v0.423.x-beta (Latest) | :white_check_mark: |
+| v0.422.x-beta | :white_check_mark: |
 | v0.421.x-beta | :white_check_mark: |
 | v0.420.x-beta | :white_check_mark: |
 | < v0.420.0-beta | :x: |

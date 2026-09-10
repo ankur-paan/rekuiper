@@ -14,7 +14,7 @@ def run_rekuiper_bench(workspace_root=None):
         workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
     print("=" * 70)
-    print("Benchmarking rekuiper (Pure Rust, v0.422-beta) on 500,000 records...")
+    print("Benchmarking rekuiper (Pure Rust, v0.423-beta) on 500,000 records...")
     print("=" * 70)
 
     cmd = ["cargo", "test", "--release", "--test", "perf_throughput", "--", "--nocapture"]
@@ -52,7 +52,7 @@ def run_rekuiper_bench(workspace_root=None):
     print(f"  Status            : {'PASSED' if res.returncode == 0 else 'FAILED'}")
 
     return {
-        "engine": "rekuiper (0.422-beta)",
+        "engine": "rekuiper (0.423-beta)",
         "language": "Pure Rust",
         "records": records,
         "elapsed_s": elapsed,

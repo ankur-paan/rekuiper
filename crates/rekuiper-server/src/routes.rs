@@ -3745,12 +3745,37 @@ fn expr_to_string(expr: &Expr) -> String {
     }
 }
 
+fn activate_rule(state: &AppState, rule_id: &str) {
+    if let Some(rule) = state.rule_manager.get_rule(rule_id) {
+        let mut parser = Parser::new(&rule.sql);
+        if let Ok(select_stmt) = parser.parse_select() {
+            spawn_rule_task(
+                &state.rule_manager,
+                &state.stream_bus,
+                &state.stream_manager,
+                &state.table_manager,
+                &state.source_configs,
+                &state.http_client,
+                &state.trace_manager,
+                rule_id.to_string(),
+                select_stmt.clone(),
+                rule.actions.clone(),
+                rule.options.clone(),
+            );
+            bootstrap_rule_sources(state, rule_id, &select_stmt);
+        }
+    }
+}
+
 async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
     match state.rule_manager.start_rule(&name).await {
-        Ok(_) => (StatusCode::OK, format!("Rule {} was started", name)).into_response(),
+        Ok(_) => {
+            activate_rule(&state, &name);
+            (StatusCode::OK, format!("Rule {} was started", name)).into_response()
+        }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -3776,7 +3801,10 @@ async fn restart_rule(State(state): State<AppState>, Path(name): Path<String>) -
     let _ = state.rule_manager.stop_rule(&name).await;
     cancel_rule_source(&state, &name);
     match state.rule_manager.start_rule(&name).await {
-        Ok(_) => (StatusCode::OK, format!("Rule {} was restarted", name)).into_response(),
+        Ok(_) => {
+            activate_rule(&state, &name);
+            (StatusCode::OK, format!("Rule {} was restarted", name)).into_response()
+        }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -4002,10 +4030,33 @@ struct ImportCounts {
 /// Core data import logic shared by synchronous and asynchronous endpoints.
 /// Returns how many streams, tables and rules were actually created.
 async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCounts {
+    let actual_payload: Value = if let Some(content) = payload.get("content") {
+        if let Some(s) = content.as_str() {
+            serde_json::from_str::<Value>(s)
+                .or_else(|_| serde_yaml::from_str::<Value>(s))
+                .unwrap_or_else(|_| content.clone())
+        } else if content.is_object() {
+            content.clone()
+        } else {
+            payload.clone()
+        }
+    } else if let Some(file_val) = payload.get("file").and_then(|f| f.as_str()) {
+        let file_path = file_val.strip_prefix("file://").unwrap_or(file_val);
+        if let Ok(s) = std::fs::read_to_string(file_path) {
+            serde_json::from_str::<Value>(&s)
+                .or_else(|_| serde_yaml::from_str::<Value>(&s))
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        }
+    } else {
+        payload.clone()
+    };
+
     let mut status = default_import_status();
     let mut counts = ImportCounts::default();
 
-    if let Some(streams) = payload.get("streams") {
+    if let Some(streams) = actual_payload.get("streams") {
         if let Some(defs) = streams.as_array() {
             for item in defs {
                 match serde_json::from_value::<StreamDefinition>(item.clone()) {
@@ -4066,7 +4117,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCoun
         }
     }
 
-    if let Some(tables) = payload.get("tables") {
+    if let Some(tables) = actual_payload.get("tables") {
         if let Some(defs) = tables.as_array() {
             for item in defs {
                 match serde_json::from_value::<TableDefinition>(item.clone()) {
@@ -4124,21 +4175,25 @@ async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCoun
         }
     }
 
-    if let Some(rules) = payload.get("rules") {
+    if let Some(rules) = actual_payload.get("rules") {
         // Rules arrive either as an array of definitions or as a map of
         // id -> definition (missing ids are filled from the map keys).
         let defs: Vec<Value> = if let Some(arr) = rules.as_array() {
             arr.clone()
         } else if let Some(map) = rules.as_object() {
             map.iter()
-                .map(|(k, v)| {
-                    let mut obj = v.clone();
+                .filter_map(|(k, v)| {
+                    let mut obj = if let Some(s) = v.as_str() {
+                        serde_json::from_str::<Value>(s).ok()?
+                    } else {
+                        v.clone()
+                    };
                     if let Some(m) = obj.as_object_mut() {
                         if !m.contains_key("id") {
                             m.insert("id".to_string(), Value::String(k.clone()));
                         }
                     }
-                    obj
+                    Some(obj)
                 })
                 .collect()
         } else {
@@ -4168,10 +4223,11 @@ async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCoun
                 &state.http_client,
                 &state.trace_manager,
                 def.id.clone(),
-                select_stmt,
+                select_stmt.clone(),
                 def.actions.clone(),
                 def.options.clone(),
             );
+            bootstrap_rule_sources(state, &def.id, &select_stmt);
         }
     }
 

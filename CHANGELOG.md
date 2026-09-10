@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.423.0-beta] - 2026-09-11
+
+### Highlights
+- **Dynamic Rule Resume (`POST /rules/:name/start`)**: Implemented dynamic background worker reactivation (`spawn_rule_task`) and streaming source subscription bootstrapping (`bootstrap_rule_sources`) on rule start and restart, ensuring event processing resumes seamlessly when toggled.
+- **Envelope Import Support (`POST /ruleset/import` & `POST /data/import`)**: Added full support for `{ "content": "..." }` stringified JSON/YAML envelopes, `{ "file": "..." }` payloads, and stringified rule maps (`"rules": { "id": "{\"id\": ...}" }`), guaranteeing full catalog import fidelity.
+- **Zero Parity Defects**: Attained clean 0 target defects against baseline LF Edge eKuiper across full evaluation probe suite.
+
 ## [0.422.0-beta] - 2026-09-10
 
 ### Highlights

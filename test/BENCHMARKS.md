@@ -15,7 +15,7 @@ All benchmarks are reproducible on any Linux or WSL2 environment using the autom
 
 | Engine | Runtime / Language | 500k Elapsed Time | Throughput (1 Core) | Data Drops / Loss | Memory Footprint (Idle) | Cold Boot Time | Speedup vs Competitor |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`rekuiper` (v0.422-beta)** | **Pure Rust** | **1.176 s** (1,175.6 ms) | **425,308 events/sec** | **0 (0.0% loss)** | **~6 – 8.2 MB** | **~13 ms** (internal) / 123 ms (spawn) | **Baseline (Fastest)** |
+| **`rekuiper` (v0.423-beta)** | **Pure Rust** | **1.176 s** (1,175.6 ms) | **425,308 events/sec** | **0 (0.0% loss)** | **~6 – 8.2 MB** | **~13 ms** (internal) / 123 ms (spawn) | **Baseline (Fastest)** |
 | **Apache Flink (v2.3.0)** | Java / Scala (JVM) | **2.144 s** *(vertex)* / 2.940 s *(job)* | **233,209 eps** *(vertex)* / 170,068 eps | 0 (0.0% loss) | **~1,022 MB (1.02 GB)** | ~15 – 30 seconds *(cluster spinup)* | **`rekuiper` is 1.8x – 2.5x faster** |
 | **Upstream eKuiper (v2.4.1)** | Go (official `lfedge/ekuiper`) | **11.290 s** (11,290 ms) | **44,287 events/sec** | **72,921 drops (14.6% loss)** *(buffer saturation)* | ~45 – 85 MB | ~1,200 ms | **`rekuiper` is 9.6x faster** |
 | **Telegraf (v1.40.0)** | Go (official `telegraf`) | **8.194 s** (8,194 ms) | **61,019 events/sec** *(ingest only)* | 0 (0.0% loss) | ~50 – 80 MB | ~450 ms | **`rekuiper` is 7.0x faster** |

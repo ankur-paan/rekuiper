@@ -6473,3 +6473,136 @@ async fn test_ruletest_live_sse_port() {
     }
     assert!(refused, "SSE listener must stop after session delete");
 }
+
+#[tokio::test]
+async fn test_data_and_ruleset_import_content_envelope() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Test POST /data/import with stringified content envelope and stringified rule map
+    let import_payload = serde_json::json!({
+        "content": serde_json::json!({
+            "streams": {
+                "import_stream_1": "CREATE STREAM import_stream_1 () WITH (DATASOURCE=\"demo\", FORMAT=\"json\")"
+            },
+            "rules": {
+                "import_rule_1": serde_json::json!({
+                    "id": "import_rule_1",
+                    "sql": "SELECT * FROM import_stream_1",
+                    "actions": [{ "log": {} }]
+                }).to_string()
+            }
+        }).to_string()
+    });
+
+    let resp = client
+        .post(format!("{}/data/import", base_url))
+        .json(&import_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Verify stream exists
+    let st_resp = client
+        .get(format!("{}/streams/import_stream_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(st_resp.status(), reqwest::StatusCode::OK);
+
+    // Verify rule exists
+    let rule_resp = client
+        .get(format!("{}/rules/import_rule_1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rule_resp.status(), reqwest::StatusCode::OK);
+
+    // Test POST /ruleset/import
+    let ruleset_payload = serde_json::json!({
+        "content": serde_json::json!({
+            "rules": {
+                "import_rule_2": serde_json::json!({
+                    "id": "import_rule_2",
+                    "sql": "SELECT * FROM import_stream_1",
+                    "actions": [{ "log": {} }]
+                }).to_string()
+            }
+        }).to_string()
+    });
+
+    let r_resp = client
+        .post(format!("{}/ruleset/import", base_url))
+        .json(&ruleset_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r_resp.status(), reqwest::StatusCode::OK);
+
+    let rule2_resp = client
+        .get(format!("{}/rules/import_rule_2", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rule2_resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_rule_stop_and_start_lifecycle() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "CREATE STREAM cycle_st () WITH (DATASOURCE=\"cycle_ds\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "cycle_rule",
+            "sql": "SELECT * FROM cycle_st",
+            "actions": [{ "log": {} }]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Stop rule
+    let stop_resp = client
+        .post(format!("{}/rules/cycle_rule/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stop_resp.status(), reqwest::StatusCode::OK);
+
+    let status_resp = client
+        .get(format!("{}/rules/cycle_rule/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    let st: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(st["status"], "stopped");
+
+    // Start rule
+    let start_resp = client
+        .post(format!("{}/rules/cycle_rule/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_resp.status(), reqwest::StatusCode::OK);
+
+    let status_resp2 = client
+        .get(format!("{}/rules/cycle_rule/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    let st2: serde_json::Value = status_resp2.json().await.unwrap();
+    assert_eq!(st2["status"], "running");
+}
+

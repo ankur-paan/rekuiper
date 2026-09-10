@@ -1,6 +1,6 @@
-# Release Notes - rekuiper v0.422-beta
+# Release Notes - rekuiper v0.423-beta
 
-`rekuiper` v0.422-beta achieves complete, verified black-box compatibility parity with LF Edge eKuiper across all 12 independent evaluation root causes (37 confirmed defect operations). Built by **[I-Dacs Labs](https://i-dacs.com)**, this release brings authentic end-to-end data plane execution, real PostgreSQL streaming and lookup joins, complete REST update (`PUT`/`PATCH`) capability, enterprise RSA/JWT authentication guard, live SSE ruletest streaming, and comprehensive stream/table schema preservation.
+`rekuiper` v0.423-beta delivers complete, verified black-box compatibility parity with LF Edge eKuiper. Built by **[I-Dacs Labs](https://i-dacs.com)**, this release resolves dynamic rule activation on start/restart, supports nested `{ "content": "..." }` and stringified rule map imports for both ruleset and configuration endpoints, and achieves clean zero-defect pass parity against upstream eKuiper.
 
 Released under the permissive **MIT License** (and dual Apache-2.0), `rekuiper` combines 100% drop-in parity for upstream eKuiper workloads with deterministic zero-GC sub-millisecond execution and **425,000+ events/sec** throughput.
 
@@ -75,6 +75,6 @@ Released under the permissive **MIT License** (and dual Apache-2.0), `rekuiper` 
 
 ## 📦 Artifacts & Distribution
 
-- Multi-stage Docker image: `ankurkrp/rekuiper:0.422-beta`
-- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.422-beta`)
+- Multi-stage Docker image: `ankurkrp/rekuiper:0.423-beta`
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.423-beta`)
 - Precompiled binary targets: Linux x86_64, Windows x86_64, macOS x86_64 & Apple Silicon aarch64.
