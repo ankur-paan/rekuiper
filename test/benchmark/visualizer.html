@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Streaming Engine Benchmark Race - 500,000 Events</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #080c14;
+      color: #f0f4fc;
+      font-family: 'Outfit', -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-x: hidden;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1120px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(255, 87, 34, 0.1);
+      backdrop-filter: blur(16px);
+      padding: 28px 36px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 18px;
+    }
+
+    .title-group h1 {
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #ffffff 30%, #ff7043 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .title-group p {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .timer-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 800;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 6px 16px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .timer-badge span {
+      color: #64748b;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 8px 18px;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    button:hover {
+      background: #334155;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, #ff5722, #f43f5e);
+      border: none;
+      box-shadow: 0 4px 15px rgba(244, 63, 94, 0.35);
+    }
+
+    button.primary:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 6px 20px rgba(244, 63, 94, 0.5);
+    }
+
+    .speed-select {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #94a3b8;
+      margin-left: auto;
+    }
+
+    .speed-btn {
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+
+    .speed-btn.active {
+      background: #38bdf8;
+      color: #0f172a;
+      border-color: #38bdf8;
+    }
+
+    canvas {
+      width: 100%;
+      height: 480px;
+      background: #0b1120;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+      display: block;
+    }
+
+    .footer-legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .legend-card {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .legend-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: var(--lane-color);
+    }
+
+    .legend-card .name {
+      font-weight: 700;
+      font-size: 14px;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-card .sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .legend-card .metric {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--lane-color);
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="title-group">
+        <h1>⚡ Streaming Engine Bouncing Ball Race</h1>
+        <p>Real-time visual comparison of 500,000 events throughput on a single CPU core</p>
+      </div>
+      <div class="timer-badge">
+        <span>Elapsed:</span>
+        <div id="timer">00:00.000</div>
+      </div>
+    </header>
+
+    <div class="controls">
+      <button class="primary" id="playBtn">▶ Start Race</button>
+      <button id="resetBtn">↺ Reset</button>
+      <button id="audioBtn">🔊 Audio: ON</button>
+      <div class="speed-select">
+        <span>Playback Speed:</span>
+        <button class="speed-btn active" data-speed="1">1x</button>
+        <button class="speed-btn" data-speed="2">2x</button>
+        <button class="speed-btn" data-speed="5">5x</button>
+        <button class="speed-btn" data-speed="0.5">0.5x</button>
+      </div>
+    </div>
+
+    <canvas id="raceCanvas" width="1050" height="480"></canvas>
+
+    <div class="footer-legend">
+      <div class="legend-card" style="--lane-color: #ff5722;">
+        <div class="name">🦀 rekuiper (0.421-beta)</div>
+        <div class="sub">Pure Rust · RAM: 8.2 MB</div>
+        <div class="metric">425,308 eps · 1.176 s (1st 🏆)</div>
+      </div>
+      <div class="legend-card" style="--lane-color: #00e5ff;">
+        <div class="name">⚡ Apache Flink (2.3.0)</div>
+        <div class="sub">Java / JVM · RAM: 1,022 MB</div>
+        <div class="metric">233,209 eps · 2.144 s (2nd 🥈)</div>
+      </div>
+      <div class="legend-card" style="--lane-color: #00e676;">
+        <div class="name">📊 Telegraf (1.40.0)</div>
+        <div class="sub">Go · RAM: ~50 MB</div>
+        <div class="metric">61,019 eps · 8.194 s (3rd 🥉)</div>
+      </div>
+      <div class="legend-card" style="--lane-color: #ffb300;">
+        <div class="name">🐢 Upstream eKuiper (2.4.1)</div>
+        <div class="sub">Go · RAM: ~45 MB</div>
+        <div class="metric">44,287 eps · 11.290 s (⚠️ 72k Drops)</div>
+      </div>
+      <div class="legend-card" style="--lane-color: #e040fb;">
+        <div class="name">🐌 Redpanda Connect (Benthos)</div>
+        <div class="sub">Go · RAM: ~38 MB</div>
+        <div class="metric">25,993 eps · 19.236 s</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('raceCanvas');
+    const ctx = canvas.getContext('2d');
+    const TOTAL_RECORDS = 500000;
+
+    // Lanes definition based on authentic 500k empirical benchmarks
+    const lanes = [
+      {
+        name: 'rekuiper',
+        label: '🦀 rekuiper (Pure Rust)',
+        color: '#ff5722',
+        lightColor: '#ff8a65',
+        elapsed: 1.1756,
+        eps: 425308,
+        drops: 0,
+        ram: '8.2 MB',
+        freq: 587.33, // D5
+        x: 0,
+        dx: 1,
+        bounces: 0,
+        finished: false,
+        finishTime: 0,
+        processed: 0,
+        particles: []
+      },
+      {
+        name: 'flink',
+        label: '⚡ Apache Flink (JVM)',
+        color: '#00e5ff',
+        lightColor: '#80d8ff',
+        elapsed: 2.1440,
+        eps: 233209,
+        drops: 0,
+        ram: '1,022 MB',
+        freq: 440.00, // A4
+        x: 0,
+        dx: 1,
+        bounces: 0,
+        finished: false,
+        finishTime: 0,
+        processed: 0,
+        particles: []
+      },
+      {
+        name: 'telegraf',
+        label: '📊 Telegraf (Go)',
+        color: '#00e676',
+        lightColor: '#b9f6ca',
+        elapsed: 8.1941,
+        eps: 61019,
+        drops: 0,
+        ram: '50 MB',
+        freq: 329.63, // E4
+        x: 0,
+        dx: 1,
+        bounces: 0,
+        finished: false,
+        finishTime: 0,
+        processed: 0,
+        particles: []
+      },
+      {
+        name: 'ekuiper',
+        label: '🐢 Upstream eKuiper (Go)',
+        color: '#ffb300',
+        lightColor: '#ffe082',
+        elapsed: 11.2904,
+        eps: 44287,
+        drops: 72921,
+        ram: '45 MB',
+        freq: 261.63, // C4
+        x: 0,
+        dx: 1,
+        bounces: 0,
+        finished: false,
+        finishTime: 0,
+        processed: 0,
+        particles: []
+      },
+      {
+        name: 'benthos',
+        label: '🐌 Redpanda Connect (Go)',
+        color: '#e040fb',
+        lightColor: '#ea80fc',
+        elapsed: 19.2360,
+        eps: 25993,
+        drops: 0,
+        ram: '38 MB',
+        freq: 196.00, // G3
+        x: 0,
+        dx: 1,
+        bounces: 0,
+        finished: false,
+        finishTime: 0,
+        processed: 0,
+        particles: []
+      }
+    ];
+
+    let running = false;
+    let startTime = 0;
+    let elapsedTime = 0;
+    let speedMultiplier = 1.0;
+    let audioEnabled = true;
+    let audioCtx = null;
+
+    // Track Geometry
+    const PADDING_LEFT = 240;
+    const PADDING_RIGHT = 180;
+    const TRACK_HEIGHT = 80;
+    const BALL_RADIUS = 15;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playBounceSound(freq, isWarning = false) {
+      if (!audioEnabled || !audioCtx) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = isWarning ? 'sawtooth' : 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.12);
+      } catch (e) {}
+    }
+
+    function spawnParticles(x, y, color, count = 12, isDrop = false) {
+      const list = [];
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
+        const speed = 1.5 + Math.random() * 3.5;
+        list.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          color: isDrop ? '#ef4444' : color,
+          size: isDrop ? 3 : 2 + Math.random() * 2
+        });
+      }
+      return list;
+    }
+
+    function resetRace() {
+      running = false;
+      startTime = 0;
+      elapsedTime = 0;
+      document.getElementById('playBtn').innerHTML = '▶ Start Race';
+      document.getElementById('timer').innerText = '00:00.000';
+
+      const trackWidth = canvas.width - PADDING_LEFT - PADDING_RIGHT;
+      lanes.forEach(lane => {
+        lane.x = 0;
+        lane.dx = 1;
+        lane.bounces = 0;
+        lane.finished = false;
+        lane.finishTime = 0;
+        lane.processed = 0;
+        lane.particles = [];
+      });
+      draw(0);
+    }
+
+    function update(dt) {
+      if (!running) return;
+
+      elapsedTime += dt * speedMultiplier;
+      const trackWidth = canvas.width - PADDING_LEFT - PADDING_RIGHT;
+
+      // Base bounce speed for fastest engine (rekuiper) is ~4 bounces per real-time second
+      const BASE_PIXELS_PER_SEC = (trackWidth * 2) / 0.55;
+
+      let allDone = true;
+
+      lanes.forEach((lane, idx) => {
+        if (lane.finished) return;
+        allDone = false;
+
+        // Current progress based on actual benchmark elapsed time
+        const progress = Math.min(1.0, elapsedTime / lane.elapsed);
+        lane.processed = Math.floor(progress * TOTAL_RECORDS);
+
+        if (progress >= 1.0) {
+          lane.finished = true;
+          lane.finishTime = lane.elapsed;
+          lane.particles.push(...spawnParticles(PADDING_LEFT + lane.x, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 30));
+          return;
+        }
+
+        // Speed relative to rekuiper
+        const relativeSpeed = lanes[0].elapsed / lane.elapsed;
+        const moveDist = BASE_PIXELS_PER_SEC * relativeSpeed * dt * speedMultiplier;
+
+        lane.x += lane.dx * moveDist;
+
+        if (lane.x >= trackWidth) {
+          lane.x = trackWidth;
+          lane.dx = -1;
+          lane.bounces++;
+          playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
+          lane.particles.push(...spawnParticles(PADDING_LEFT + trackWidth, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 12, lane.name === 'ekuiper'));
+        } else if (lane.x <= 0) {
+          lane.x = 0;
+          lane.dx = 1;
+          lane.bounces++;
+          playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
+          lane.particles.push(...spawnParticles(PADDING_LEFT, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 12, lane.name === 'ekuiper'));
+        }
+
+        // Update particles
+        lane.particles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life -= dt * 2.0;
+        });
+        lane.particles = lane.particles.filter(p => p.life > 0);
+      });
+
+      // Update timer UI
+      const mins = Math.floor(elapsedTime / 60);
+      const secs = Math.floor(elapsedTime % 60);
+      const ms = Math.floor((elapsedTime % 1) * 1000);
+      document.getElementById('timer').innerText = 
+        `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+
+      if (allDone) {
+        running = false;
+        document.getElementById('playBtn').innerHTML = '▶ Replay Race';
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const trackWidth = canvas.width - PADDING_LEFT - PADDING_RIGHT;
+
+      lanes.forEach((lane, idx) => {
+        const yCenter = idx * TRACK_HEIGHT + 45;
+        const trackY = yCenter - 2;
+
+        // 1. Lane background & dividers
+        ctx.fillStyle = idx % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'rgba(0, 0, 0, 0.15)';
+        ctx.fillRect(0, idx * TRACK_HEIGHT + 10, canvas.width, TRACK_HEIGHT);
+
+        // Track rail
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 4;
+        ctx.moveTo(PADDING_LEFT, trackY);
+        ctx.lineTo(PADDING_LEFT + trackWidth, trackY);
+        ctx.stroke();
+
+        // Track bounce bumpers
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fillRect(PADDING_LEFT - 6, yCenter - 18, 6, 36);
+        ctx.fillRect(PADDING_LEFT + trackWidth, yCenter - 18, 6, 36);
+
+        // 2. Left Lane Header & Info
+        ctx.font = 'bold 14px Outfit, sans-serif';
+        ctx.fillStyle = lane.color;
+        ctx.fillText(lane.label, 20, yCenter - 8);
+
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(`RAM: ${lane.ram} · ${lane.eps.toLocaleString()} eps`, 20, yCenter + 10);
+
+        // 3. Ball with trail & glow
+        const ballX = PADDING_LEFT + lane.x;
+        const ballY = yCenter;
+
+        // Motion trail
+        const trailLength = Math.min(30, Math.abs(lane.dx * 20));
+        const gradient = ctx.createLinearGradient(ballX - lane.dx * trailLength, ballY, ballX, ballY);
+        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+        gradient.addColorStop(1, lane.color);
+        ctx.beginPath();
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = BALL_RADIUS * 1.5;
+        ctx.lineCap = 'round';
+        ctx.moveTo(ballX - lane.dx * trailLength, ballY);
+        ctx.lineTo(ballX, ballY);
+        ctx.stroke();
+
+        // Ball glow
+        ctx.save();
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = lane.color;
+        ctx.fillStyle = lane.lightColor;
+        ctx.beginPath();
+        ctx.arc(ballX, ballY, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner ball core
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(ballX - lane.dx * 2, ballY - 2, BALL_RADIUS * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 4. Render particles
+        lane.particles.forEach(p => {
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = p.life;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+        });
+
+        // 5. Right Stats Counter
+        const statsX = PADDING_LEFT + trackWidth + 24;
+        ctx.font = 'bold 13px JetBrains Mono, monospace';
+        ctx.fillStyle = lane.finished ? '#38bdf8' : '#f8fafc';
+        ctx.fillText(`${(lane.processed).toLocaleString()} evt`, statsX, yCenter - 6);
+
+        ctx.font = '11px JetBrains Mono, monospace';
+        if (lane.finished) {
+          ctx.fillStyle = '#22c55e';
+          const place = idx === 0 ? '🏆 1st (1.17s)' : idx === 1 ? '🥈 2nd (2.14s)' : `${lane.finishTime.toFixed(2)}s`;
+          ctx.fillText(`DONE ${place}`, statsX, yCenter + 12);
+        } else if (lane.drops > 0) {
+          ctx.fillStyle = '#ef4444';
+          ctx.fillText(`⚠️ 72k DROPS`, statsX, yCenter + 12);
+        } else {
+          ctx.fillStyle = '#64748b';
+          ctx.fillText(`${lane.bounces} bounces`, statsX, yCenter + 12);
+        }
+      });
+    }
+
+    let lastFrame = 0;
+    function loop(now) {
+      if (!lastFrame) lastFrame = now;
+      const dt = Math.min(0.1, (now - lastFrame) / 1000.0);
+      lastFrame = now;
+
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Event Listeners
+    document.getElementById('playBtn').addEventListener('click', () => {
+      initAudio();
+      if (!running) {
+        running = true;
+        document.getElementById('playBtn').innerHTML = '⏸ Pause';
+      } else {
+        running = false;
+        document.getElementById('playBtn').innerHTML = '▶ Resume';
+      }
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', resetRace);
+
+    document.getElementById('audioBtn').addEventListener('click', (e) => {
+      initAudio();
+      audioEnabled = !audioEnabled;
+      e.target.innerText = audioEnabled ? '🔊 Audio: ON' : '🔇 Audio: OFF';
+    });
+
+    document.querySelectorAll('.speed-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        speedMultiplier = parseFloat(e.target.dataset.speed);
+      });
+    });
+
+    // Initial render
+    resetRace();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

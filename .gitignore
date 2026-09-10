@@ -41,6 +41,7 @@ corss_build_for_rpm.tar
 __pycache__/
 *.pyc
 telemetry_*.jsonl
+*.mp4
 
 */**/*.db
 
