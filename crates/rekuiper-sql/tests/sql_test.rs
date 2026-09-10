@@ -1,4 +1,4 @@
-use rekuiper_sql::{Evaluator, Parser};
+use rekuiper_sql::{Evaluator, Parser, StreamColumn};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -1218,4 +1218,116 @@ fn test_unnest_stateful_multi() {
     let rows = Evaluator::eval_select_stateful_multi(&stmt, &record, &state);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("id"), Some(&json!("id1")));
+}
+
+#[test]
+fn test_parse_arrow_field_access() {
+    use rekuiper_sql::Expr;
+
+    // D7: `a->b` is nested field access equivalent to `a.b`.
+    let mut parser = Parser::new("SELECT payload->temperature FROM demo");
+    let stmt = parser.parse_select().expect("arrow should parse");
+    assert_eq!(stmt.fields.len(), 1);
+    match &stmt.fields[0] {
+        Expr::FieldAccess { parent, field } => {
+            assert_eq!(field, "temperature");
+            assert!(matches!(parent.as_ref(), Expr::Identifier(n) if n == "payload"));
+        }
+        other => panic!("expected FieldAccess, got {:?}", other),
+    }
+
+    // Quoted field forms.
+    for sql in ["SELECT a->'b' FROM demo", "SELECT a->\"b\" FROM demo"] {
+        let mut parser = Parser::new(sql);
+        let stmt = parser.parse_select().expect("quoted arrow should parse");
+        match &stmt.fields[0] {
+            Expr::FieldAccess { field, .. } => assert_eq!(field, "b", "sql: {}", sql),
+            other => panic!("expected FieldAccess, got {:?} ({})", other, sql),
+        }
+    }
+
+    // Chained arrows nest left to right: (a->b)->c.
+    let mut parser = Parser::new("SELECT a->b->c FROM demo");
+    let stmt = parser.parse_select().expect("chained arrow should parse");
+    match &stmt.fields[0] {
+        Expr::FieldAccess { parent, field } => {
+            assert_eq!(field, "c");
+            match parent.as_ref() {
+                Expr::FieldAccess { parent, field } => {
+                    assert_eq!(field, "b");
+                    assert!(matches!(parent.as_ref(), Expr::Identifier(n) if n == "a"));
+                }
+                other => panic!("expected inner FieldAccess, got {:?}", other),
+            }
+        }
+        other => panic!("expected outer FieldAccess, got {:?}", other),
+    }
+
+    // Arrow and dot forms produce identical ASTs and identical evaluation.
+    let mut dot = Parser::new("SELECT payload.temperature AS t FROM demo");
+    let dot_stmt = dot.parse_select().unwrap();
+    let mut arrow = Parser::new("SELECT payload->temperature AS t FROM demo");
+    let arrow_stmt = arrow.parse_select().unwrap();
+    assert_eq!(dot_stmt.fields, arrow_stmt.fields);
+    let mut record = HashMap::new();
+    record.insert("payload".to_string(), json!({"temperature": 22.5}));
+    let dot_out = Evaluator::eval_select(&dot_stmt, &record).expect("dot eval");
+    let arrow_out = Evaluator::eval_select(&arrow_stmt, &record).expect("arrow eval");
+    assert_eq!(dot_out, arrow_out);
+    assert_eq!(arrow_out.get("t"), Some(&json!(22.5)));
+
+    // Plain subtraction still parses as arithmetic, not navigation.
+    let mut parser = Parser::new("SELECT a - b FROM demo");
+    let stmt = parser.parse_select().expect("subtraction should parse");
+    assert!(
+        matches!(
+            stmt.fields[0],
+            Expr::BinaryOp {
+                op: rekuiper_sql::BinaryOperator::Sub,
+                ..
+            }
+        ),
+        "got {:?}",
+        stmt.fields[0]
+    );
+}
+
+#[test]
+fn test_parse_create_stream_columns() {
+    // D6: column names and types are retained from the definition.
+    let mut parser =
+        Parser::new("CREATE STREAM s (id BIGINT, temp FLOAT, name STRING) WITH (FORMAT=\"json\")");
+    let stmt = parser.parse_create_stream().expect("columns should parse");
+    assert_eq!(stmt.name, "s");
+    assert_eq!(
+        stmt.fields,
+        vec![
+            StreamColumn {
+                name: "id".to_string(),
+                data_type: "bigint".to_string()
+            },
+            StreamColumn {
+                name: "temp".to_string(),
+                data_type: "float".to_string()
+            },
+            StreamColumn {
+                name: "name".to_string(),
+                data_type: "string".to_string()
+            },
+        ]
+    );
+
+    // Empty parens declare no columns; options still parse.
+    let mut parser = Parser::new("CREATE STREAM e () WITH (FORMAT=\"json\")");
+    let stmt = parser.parse_create_stream().expect("empty cols parse");
+    assert!(stmt.fields.is_empty());
+    assert_eq!(stmt.options.get("FORMAT"), Some(&"json".to_string()));
+
+    // Parameterized types survive the comma scan; tables parse likewise.
+    let mut parser =
+        Parser::new("CREATE TABLE t (id BIGINT, price DECIMAL(10,2)) WITH (TYPE=\"sql\")");
+    let stmt = parser.parse_create_table().expect("table cols parse");
+    assert_eq!(stmt.fields.len(), 2);
+    assert_eq!(stmt.fields[0].name, "id");
+    assert_eq!(stmt.fields[1].data_type, "decimal(10,2)");
 }

@@ -132,15 +132,122 @@ impl PathConfig {
                 "Configuration file {:?} not found, using defaults",
                 conf_file
             );
-            return Ok(KuiperConfig::default());
+            let mut config = KuiperConfig::default();
+            apply_env_overrides(&mut config);
+            return Ok(config);
         }
 
         let content = std::fs::read_to_string(&conf_file)
             .with_context(|| format!("Failed to read configuration file: {:?}", conf_file))?;
 
-        let config: KuiperConfig = serde_yaml::from_str(&content)
+        let mut config: KuiperConfig = serde_yaml::from_str(&content)
             .with_context(|| format!("Failed to parse YAML from {:?}", conf_file))?;
 
+        apply_env_overrides(&mut config);
         Ok(config)
+    }
+}
+
+fn parse_env_bool(val: &str) -> Option<bool> {
+    match val.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
+    match key {
+        "IP" => basic.ip = val.to_string(),
+        "PORT" => {
+            if let Ok(v) = val.trim().parse() {
+                basic.port = v;
+            }
+        }
+        "RESTIP" => basic.rest_ip = val.to_string(),
+        "RESTPORT" => {
+            if let Ok(v) = val.trim().parse() {
+                basic.rest_port = v;
+            }
+        }
+        "LOGLEVEL" => basic.log_level = val.to_string(),
+        "DEBUG" => {
+            if let Some(v) = parse_env_bool(val) {
+                basic.debug = v;
+            }
+        }
+        "CONSOLELOG" => {
+            if let Some(v) = parse_env_bool(val) {
+                basic.console_log = v;
+            }
+        }
+        "AUTHENTICATION" => {
+            if let Some(v) = parse_env_bool(val) {
+                basic.authentication = v;
+            }
+        }
+        "TIMEZONE" => basic.timezone = val.to_string(),
+        "PROMETHEUS" => {
+            if let Some(v) = parse_env_bool(val) {
+                basic.prometheus = v;
+            }
+        }
+        "PROMETHEUSPORT" => {
+            if let Ok(v) = val.trim().parse() {
+                basic.prometheus_port = v;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Override configuration from `KUIPER__<SECTION>__<KEY>` environment
+/// variables (container deployments), accepting both `RESTIP`-style and
+/// `REST_IP`-style spellings. Unknown sections and keys are ignored, and
+/// unparseable numbers/bools leave the current value untouched.
+pub fn apply_env_overrides(config: &mut KuiperConfig) {
+    for (key, val) in std::env::vars() {
+        let Some(rest) = key.strip_prefix("KUIPER__") else {
+            continue;
+        };
+        let mut parts = rest.split("__");
+        let (Some(section), Some(name)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if parts.next().is_some() {
+            continue;
+        }
+        let flat: String = name.chars().filter(|c| *c != '_').collect();
+        match (
+            section.to_ascii_uppercase().as_str(),
+            flat.to_ascii_uppercase().as_str(),
+        ) {
+            ("BASIC", key) => apply_basic_override(&mut config.basic, key, &val),
+            ("STORE", "TYPE") => config.store.r#type = val,
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_overrides_basic_network_settings() {
+        std::env::set_var("KUIPER__BASIC__RESTIP", "0.0.0.0");
+        std::env::set_var("KUIPER__BASIC__REST_PORT", "19081");
+        std::env::set_var("KUIPER__BASIC__PORT", "12001");
+        std::env::set_var("KUIPER__BASIC__DEBUG", "true");
+        let mut config = KuiperConfig::default();
+        apply_env_overrides(&mut config);
+        assert_eq!(config.basic.rest_ip, "0.0.0.0");
+        assert_eq!(config.basic.rest_port, 19081);
+        assert_eq!(config.basic.port, 12001);
+        assert!(config.basic.debug);
+        std::env::remove_var("KUIPER__BASIC__RESTIP");
+        std::env::remove_var("KUIPER__BASIC__REST_PORT");
+        std::env::remove_var("KUIPER__BASIC__PORT");
+        std::env::remove_var("KUIPER__BASIC__DEBUG");
     }
 }

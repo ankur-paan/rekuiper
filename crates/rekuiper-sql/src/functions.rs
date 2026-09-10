@@ -1449,6 +1449,14 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
     CATALOG
 }
 
+/// Whether `name` is a built-in function (matched case-insensitively,
+// like SQL resolution).
+pub fn is_builtin_function(name: &str) -> bool {
+    builtin_function_metadata()
+        .iter()
+        .any(|meta| meta.name.eq_ignore_ascii_case(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

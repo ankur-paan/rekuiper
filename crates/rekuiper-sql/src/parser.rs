@@ -1,6 +1,6 @@
 use crate::ast::{
     BinaryOperator, CreateStreamStmt, CreateTableStmt, Expr, JoinClause, JoinType, OrderByItem,
-    SelectStmt, SetOp, SortOrder, TimeUnit, UnaryOperator, WindowDef,
+    SelectStmt, SetOp, SortOrder, StreamColumn, TimeUnit, UnaryOperator, WindowDef,
 };
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -96,13 +96,8 @@ impl<'a> Parser<'a> {
         let name = word;
 
         self.skip_whitespace();
-        // Optional schema definition in parens: ()
-        if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
-            let close = self.input[self.pos..]
-                .find(')')
-                .ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
-            self.pos += close + 1;
-        }
+        // Optional schema definition in parens: (col TYPE, ...)
+        let fields = self.parse_column_defs()?;
 
         let mut options = HashMap::new();
         if self.match_keyword("WITH") {
@@ -127,7 +122,75 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(CreateStreamStmt { name, options })
+        Ok(CreateStreamStmt {
+            name,
+            fields,
+            options,
+        })
+    }
+
+    /// Parse an optional `(name TYPE, ...)` column list, returning no columns
+    /// when the next token is not `(`. Types are lowercased; a bare name
+    /// with no type defaults to `string`. The scan is depth-aware so
+    /// parameterized types like `DECIMAL(10,2)` do not terminate it early.
+    fn parse_column_defs(&mut self) -> Result<Vec<StreamColumn>> {
+        if !(self.pos < self.input.len() && self.input[self.pos..].starts_with('(')) {
+            return Ok(Vec::new());
+        }
+        let mut depth = 0usize;
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut close_pos = None;
+        for (off, ch) in self.input[self.pos..].char_indices() {
+            if in_single {
+                if ch == '\'' {
+                    in_single = false;
+                }
+            } else if in_double {
+                if ch == '"' {
+                    in_double = false;
+                }
+            } else {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close_pos = Some(self.pos + off);
+                            break;
+                        }
+                    }
+                    '\'' => in_single = true,
+                    '"' => in_double = true,
+                    _ => {}
+                }
+            }
+        }
+        let close = close_pos.ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
+        let inner = &self.input[self.pos + 1..close];
+        self.pos = close + 1;
+
+        let mut fields = Vec::new();
+        for part in split_top_level_commas(inner) {
+            let tokens: Vec<&str> = part.split_whitespace().collect();
+            if tokens.is_empty() {
+                continue;
+            }
+            let name = tokens[0].trim_matches(['"', '\'', '`']).to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let data_type = tokens
+                .get(1)
+                .map(|t| {
+                    t.trim_matches(['"', '\'', '`', ',', ';'])
+                        .to_ascii_lowercase()
+                })
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "string".to_string());
+            fields.push(StreamColumn { name, data_type });
+        }
+        Ok(fields)
     }
 
     pub fn parse_create_table(&mut self) -> Result<CreateTableStmt> {
@@ -143,13 +206,8 @@ impl<'a> Parser<'a> {
         let name = word;
 
         self.skip_whitespace();
-        // Optional schema definition in parens: ()
-        if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
-            let close = self.input[self.pos..]
-                .find(')')
-                .ok_or_else(|| anyhow::anyhow!("Unclosed parenthesis"))?;
-            self.pos += close + 1;
-        }
+        // Optional schema definition in parens: (col TYPE, ...)
+        let fields = self.parse_column_defs()?;
 
         let mut options = HashMap::new();
         if self.match_keyword("WITH") {
@@ -174,7 +232,11 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(CreateTableStmt { name, options })
+        Ok(CreateTableStmt {
+            name,
+            fields,
+            options,
+        })
     }
 
     pub fn parse_select(&mut self) -> Result<SelectStmt> {
@@ -1069,7 +1131,9 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(call_expr);
             }
-            // Identifier with dot navigation: a.b.c
+            // Identifier with dot/arrow navigation: a.b.c, a->b, a->'b'.
+            // The arrow form mirrors eKuiper, where `a->b` is nested field
+            // access equivalent to `a.b`.
             let mut expr = Expr::Identifier(word);
             loop {
                 self.skip_whitespace();
@@ -1081,6 +1145,35 @@ impl<'a> Parser<'a> {
                         .ok_or_else(|| anyhow::anyhow!("Expected field name after '.'"))?;
                     self.skip_whitespace();
                     self.pos += field.len();
+                    expr = Expr::FieldAccess {
+                        parent: Box::new(expr),
+                        field,
+                    };
+                } else if self.pos + 1 < self.input.len()
+                    && self.input[self.pos..].starts_with("->")
+                {
+                    self.pos += 2;
+                    self.skip_whitespace();
+                    // Support either an unquoted field or a quoted field.
+                    let field = if self.pos < self.input.len()
+                        && (self.input[self.pos..].starts_with('\'')
+                            || self.input[self.pos..].starts_with('"'))
+                    {
+                        let quote = self.input[self.pos..].chars().next().unwrap();
+                        let rest = &self.input[self.pos + quote.len_utf8()..];
+                        let end = rest
+                            .find(quote)
+                            .ok_or_else(|| anyhow::anyhow!("Unterminated field name after '->'"))?;
+                        let field = rest[..end].to_string();
+                        self.pos += quote.len_utf8() + end + quote.len_utf8();
+                        field
+                    } else {
+                        let w = self
+                            .peek_word()
+                            .ok_or_else(|| anyhow::anyhow!("Expected field name after '->'"))?;
+                        self.pos += w.len();
+                        w
+                    };
                     expr = Expr::FieldAccess {
                         parent: Box::new(expr),
                         field,
@@ -1202,4 +1295,39 @@ impl<'a> Parser<'a> {
         }
         bail!("Invalid number literal '{}'", text)
     }
+}
+
+/// Split on top-level commas, ignoring commas nested inside parentheses or
+/// quotes (e.g. the `10,2` in `DECIMAL(10,2)`).
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut start = 0usize;
+    for (off, ch) in s.char_indices() {
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            }
+        } else if in_double {
+            if ch == '"' {
+                in_double = false;
+            }
+        } else {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    parts.push(&s[start..off]);
+                    start = off + 1;
+                }
+                '\'' => in_single = true,
+                '"' => in_double = true,
+                _ => {}
+            }
+        }
+    }
+    parts.push(&s[start..]);
+    parts
 }

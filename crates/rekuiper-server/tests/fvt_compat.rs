@@ -424,8 +424,8 @@ async fn test_tables_and_details_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let schema: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(schema["name"], "my_table");
-    assert!(schema["options"].is_object());
+    // Fieldless definitions report an empty field map.
+    assert_eq!(schema, json!({}));
 
     // Stream schema endpoint works too.
     let resp = client
@@ -457,7 +457,17 @@ async fn test_tables_and_details_lifecycle() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let missing: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(missing["error"], json!(3000));
+    assert!(
+        missing["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("my_table is not found"),
+        "missing table envelope: {}",
+        missing
+    );
 }
 
 #[tokio::test]
@@ -477,10 +487,9 @@ async fn test_rule_validation_topo_and_migration() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    assert_eq!(
-        resp.text().await.unwrap(),
-        "The rule has been validated successfully\n"
-    );
+    let valid: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(valid["valid"], json!(true));
+    assert_eq!(valid["sources"], json!(["test_stream"]));
 
     // 2. Validate an invalid rule (bad SQL) -> 400 Bad Request.
     let resp = client
@@ -743,8 +752,30 @@ async fn test_all_openapi_paths_responding() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
+    // Strict plugin endpoints need existing registrations (pyfunc and the
+    // edgex/func1 fixtures are pre-seeded; the rest are created here, ahead
+    // of the POST loop that registers function symbols). Names are distinct
+    // because the registry keys definitions by bare name.
+    for (path, body) in [
+        ("/plugins/sources", json!({"name": "mqtt_src_plug"})),
+        ("/plugins/sinks", json!({"name": "mqtt_sink_plug"})),
+        (
+            "/plugins/functions",
+            json!({"name": "echo_fn_plug", "functions": ["echo"]}),
+        ),
+    ] {
+        let resp = client
+            .post(format!("{}{}", base_url, path))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::CREATED, "POST {}", path);
+    }
+
+    // NOTE: POST /ruletest is intentionally absent here: without a SQL
+    // body it is a 400 (covered by the dedicated validation test below).
     for path in [
-        "/ruletest",
         "/ruletest/rule_openapi/start",
         "/rules/rule_openapi/trace/start",
         "/rules/rule_openapi/trace/stop",
@@ -752,7 +783,7 @@ async fn test_all_openapi_paths_responding() {
         "/async/data/import",
         "/async/task/task_1/cancel",
         "/batch/req",
-        "/plugins/functions/echo/register",
+        "/plugins/functions/echo_fn_plug/register",
         "/metadata/sources/connection/mqtt",
         "/metadata/sinks/connection/mqtt",
         "/metadata/lookups/connection/mqtt",
@@ -769,9 +800,9 @@ async fn test_all_openapi_paths_responding() {
         "/rules/rule_openapi/tags",
         "/schemas/stream/myschema",
         "/schemas/stream/myschema/upload",
-        "/plugins/sources/mqtt",
-        "/plugins/sinks/mqtt",
-        "/plugins/functions/echo",
+        "/plugins/sources/mqtt_src_plug",
+        "/plugins/sinks/mqtt_sink_plug",
+        "/plugins/functions/echo_fn_plug",
         "/plugins/portables/pyfunc",
         "/services/edgex",
         "/udf/javascript/func1",
@@ -800,9 +831,9 @@ async fn test_all_openapi_paths_responding() {
         "/ruletest/rule_openapi",
         "/config/uploads/cfg.json",
         "/schemas/stream/myschema",
-        "/plugins/sources/mqtt",
-        "/plugins/sinks/mqtt",
-        "/plugins/functions/echo",
+        "/plugins/sources/mqtt_src_plug",
+        "/plugins/sinks/mqtt_sink_plug",
+        "/plugins/functions/echo_fn_plug",
         "/plugins/portables/pyfunc",
         "/services/edgex",
         "/udf/javascript/func1",
@@ -1256,13 +1287,15 @@ async fn test_name_validation() {
         );
     }
 
-    // Sane names still resolve (404 here, proving validation passed).
+    // Sane names still resolve (400 JSON envelope here, proving validation passed).
     let resp = client
         .get(format!("{}/streams/no_such_stream", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let missing: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(missing["error"], json!(3000));
 }
 
 #[tokio::test]
@@ -4494,8 +4527,8 @@ async fn test_batch_request_pipeline() {
         .unwrap()
         .contains("rule_batch_1"));
 
-    // Not found stream
-    assert_eq!(items[2]["code"], 404);
+    // Not found stream (400 JSON describe envelope)
+    assert_eq!(items[2]["code"], 400);
     assert!(items[2]["error"].as_str().unwrap().contains("not found"));
 
     // Nested batch request rejected
@@ -4569,12 +4602,11 @@ async fn test_source_and_sink_plugin_registries() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
-    // 3. Source plugin CRUD lifecycle
+    // 3. Source plugin CRUD lifecycle (no file URI: local files must exist).
     let resp = client
         .post(format!("{}/plugins/sources", base_url))
         .json(&serde_json::json!({
             "name": "custom_src",
-            "file": "file:///tmp/custom_src.zip",
             "description": "Initial Custom Source"
         }))
         .send()
@@ -4636,12 +4668,11 @@ async fn test_source_and_sink_plugin_registries() {
     let sources_after: Vec<serde_json::Value> = resp.json().await.unwrap();
     assert!(sources_after.is_empty());
 
-    // 4. Sink plugin CRUD lifecycle
+    // 4. Sink plugin CRUD lifecycle (no file URI: local files must exist).
     let resp = client
         .post(format!("{}/plugins/sinks", base_url))
         .json(&serde_json::json!({
             "name": "custom_snk",
-            "file": "file:///tmp/custom_snk.zip",
             "description": "Custom Sink"
         }))
         .send()
@@ -5199,4 +5230,1246 @@ async fn test_forensic_parity_endpoints() {
         .await
         .unwrap();
     assert_eq!(trace_resp.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_put_update_endpoints_and_config_patch() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // PUT /streams/:name: create, update via JSON envelope, read back.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "CREATE STREAM put_demo () WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .put(format!("{}/streams/put_demo", base_url))
+        .json(&json!({"sql": "CREATE STREAM put_demo (id BIGINT) WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let updated: serde_json::Value = client
+        .get(format!("{}/streams/put_demo", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["Name"], json!("put_demo"));
+    assert_eq!(
+        updated["StreamFields"],
+        json!([{"Name": "id", "FieldType": "bigint"}]),
+        "stream update readback: {}",
+        updated
+    );
+    // Raw DDL body also updates.
+    let resp = client
+        .put(format!("{}/streams/put_demo", base_url))
+        .body("CREATE STREAM put_demo (id BIGINT, ts BIGINT) WITH (FORMAT=\"json\")")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    // Missing streams 404.
+    let resp = client
+        .put(format!("{}/streams/no_such_stream", base_url))
+        .json(&json!({"sql": "CREATE STREAM no_such_stream () WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // PUT /tables/:name: create, update, read back.
+    let resp = client
+        .post(format!("{}/tables", base_url))
+        .json(&json!({"sql": "CREATE TABLE put_tbl () WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .put(format!("{}/tables/put_tbl", base_url))
+        .json(&json!({"sql": "CREATE TABLE put_tbl (k STRING) WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let updated: serde_json::Value = client
+        .get(format!("{}/tables/put_tbl", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["Name"], json!("put_tbl"));
+    assert_eq!(
+        updated["StreamFields"],
+        json!([{"Name": "k", "FieldType": "string"}]),
+        "table update readback: {}",
+        updated
+    );
+
+    // PUT /rules/:name: create, update SQL, verify the new projection.
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "put_rule",
+            "sql": "SELECT a FROM put_demo",
+            "actions": [{"memory": {"topic": "put_sink"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .put(format!("{}/rules/put_rule", base_url))
+        .json(&json!({
+            "id": "put_rule",
+            "sql": "SELECT a, a AS b FROM put_demo",
+            "actions": [{"memory": {"topic": "put_sink"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let schema: serde_json::Value = client
+        .get(format!("{}/rules/put_rule/schema", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        schema,
+        json!({"a": "any", "b": "any"}),
+        "rule update: {}",
+        schema
+    );
+    // Missing rules 404.
+    let resp = client
+        .put(format!("{}/rules/no_such_rule", base_url))
+        .json(&json!({
+            "id": "no_such_rule",
+            "sql": "SELECT a FROM put_demo",
+            "actions": []
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // PUT /connections/:id: upsert then read back.
+    let resp = client
+        .put(format!("{}/connections/put_conn", base_url))
+        .json(&json!({"server": "tcp://broker:1883"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conn: serde_json::Value = client
+        .get(format!("{}/connections/put_conn", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(conn["server"], json!("tcp://broker:1883"), "conn: {}", conn);
+    let resp = client
+        .put(format!("{}/connections/put_conn", base_url))
+        .json(&json!({"server": "tcp://broker2:1883", "username": "u"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let conn: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        conn["server"],
+        json!("tcp://broker2:1883"),
+        "conn: {}",
+        conn
+    );
+    assert_eq!(conn["username"], json!("u"), "conn: {}", conn);
+
+    // PATCH /configs returns 204 and merges into the live config.
+    let before: serde_json::Value = client
+        .get(format!("{}/configs", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let resp = client
+        .patch(format!("{}/configs", base_url))
+        .json(&json!({"basic": {"timezone": "UTC"}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
+    let after: serde_json::Value = client
+        .get(format!("{}/configs", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        after["basic"]["timezone"],
+        json!("UTC"),
+        "configs: {}",
+        after
+    );
+    assert_eq!(
+        after["basic"]["port"], before["basic"]["port"],
+        "unrelated keys preserved: {}",
+        after
+    );
+
+    // Cleanup.
+    for rule in ["put_rule"] {
+        let resp = client
+            .delete(format!("{}/rules/{}", base_url, rule))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    for stream in ["put_demo"] {
+        let resp = client
+            .delete(format!("{}/streams/{}", base_url, stream))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    let resp = client
+        .delete(format!("{}/tables/put_tbl", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .delete(format!("{}/connections/put_conn", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_sql_source_polling_and_lookup_join() {
+    // D8: file-backed SQLite database shared by per-operation pools.
+    let mut db_path = std::env::temp_dir();
+    db_path.push(format!(
+        "rekuiper-sql-src-test-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let db_url = format!("sqlite://{}", db_path.to_string_lossy().replace('\\', "/"));
+    let pool = sqlx::sqlite::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE readings (id INTEGER, val INTEGER)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO readings (id, val) VALUES (1, 10), (2, 20)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE devinfo (id TEXT, loc TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO devinfo (id, loc) VALUES ('d1', 'room1')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(pool);
+
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // T10d-equivalent: a TYPE="sql" stream polls the table into the bus.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": format!(
+                "CREATE STREAM sql_src_stream () WITH (TYPE=\"sql\", DATASOURCE=\"{}\", TABLE=\"readings\", INTERVAL=\"50\")",
+                db_url
+            )
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let mut src_rx = state.stream_bus.subscribe("sql_src_out");
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_sql_src",
+            "sql": "SELECT * FROM sql_src_stream",
+            "actions": [{"memory": {"topic": "sql_src_out"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // The poller emits every table row with typed values.
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), src_rx.recv())
+        .await
+        .expect("timed out waiting for polled SQL row")
+        .expect("sql_src_out topic closed");
+    assert_eq!(first.data.get("id"), Some(&json!(1)));
+    assert_eq!(first.data.get("val"), Some(&json!(10)));
+
+    // T10c-equivalent: a lookup join against a TYPE="sql" table enriches rows.
+    let resp = client
+        .post(format!("{}/tables", base_url))
+        .json(&json!({
+            "sql": format!(
+                "CREATE TABLE devinfo () WITH (TYPE=\"sql\", URL=\"{}\")",
+                db_url
+            )
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM sensor_sql () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_sql_join",
+            "sql": "SELECT id, loc FROM sensor_sql LEFT JOIN devinfo ON sensor_sql.id = devinfo.id",
+            "actions": [{"memory": {"topic": "sql_join_out"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let mut join_rx = state.stream_bus.subscribe("sql_join_out");
+    let resp = client
+        .post(format!("{}/streams/sensor_sql/data", base_url))
+        .json(&json!({"id": "d1"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let joined = tokio::time::timeout(std::time::Duration::from_secs(5), join_rx.recv())
+        .await
+        .expect("timed out waiting for SQL lookup join output")
+        .expect("sql_join_out topic closed");
+    assert_eq!(joined.data.get("id"), Some(&json!("d1")));
+    assert_eq!(joined.data.get("loc"), Some(&json!("room1")));
+
+    // Cleanup.
+    for rule in ["rule_sql_src", "rule_sql_join"] {
+        let resp = client
+            .delete(format!("{}/rules/{}", base_url, rule))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    for stream in ["sql_src_stream", "sensor_sql"] {
+        let resp = client
+            .delete(format!("{}/streams/{}", base_url, stream))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    let resp = client
+        .delete(format!("{}/tables/devinfo", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[tokio::test]
+async fn test_stream_table_describe_and_schema_fields() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // Streams and tables retain declared columns.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM typed_stream (id BIGINT, temp FLOAT, name STRING) WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .post(format!("{}/tables", base_url))
+        .json(&json!({
+            "sql": "CREATE TABLE typed_tbl (id BIGINT, active BOOLEAN) WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // T02: describe carries explicit names and types.
+    let resp = client
+        .get(format!("{}/streams/typed_stream", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let described: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(described["Name"], json!("typed_stream"));
+    assert_eq!(described["StreamType"], json!("stream"));
+    assert_eq!(
+        described["StreamFields"],
+        json!([
+            {"Name": "id", "FieldType": "bigint"},
+            {"Name": "temp", "FieldType": "float"},
+            {"Name": "name", "FieldType": "string"}
+        ]),
+        "describe: {}",
+        described
+    );
+
+    // T02-schema: the schema endpoint maps names to type/index pairs.
+    let resp = client
+        .get(format!("{}/streams/typed_stream/schema", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let schema: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        schema,
+        json!({
+            "id": {"type": "bigint", "index": 0},
+            "temp": {"type": "float", "index": 1},
+            "name": {"type": "string", "index": 2}
+        }),
+        "schema: {}",
+        schema
+    );
+
+    // T03: tables describe identically.
+    let resp = client
+        .get(format!("{}/tables/typed_tbl", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let described: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(described["StreamType"], json!("table"));
+    assert_eq!(
+        described["StreamFields"],
+        json!([
+            {"Name": "id", "FieldType": "bigint"},
+            {"Name": "active", "FieldType": "boolean"}
+        ]),
+        "table describe: {}",
+        described
+    );
+    let resp = client
+        .get(format!("{}/tables/typed_tbl/schema", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let schema: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(schema["active"], json!({"type": "boolean", "index": 1}));
+
+    // Missing subjects answer the JSON error envelope.
+    let resp = client
+        .get(format!("{}/streams/nonexistent", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let missing: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(missing["error"], json!(3000));
+    assert!(
+        missing["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("nonexistent is not found"),
+        "envelope: {}",
+        missing
+    );
+
+    // Cleanup.
+    let resp = client
+        .delete(format!("{}/streams/typed_stream", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .delete(format!("{}/tables/typed_tbl", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_rule_input_validation() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM vstream (a BIGINT) WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // T07: rules on missing streams are rejected.
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_ghost",
+            "sql": "SELECT * FROM ghost",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let rejected: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(rejected["error"], json!(1000));
+    assert!(
+        rejected["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("fail to get stream ghost"),
+        "rejection: {}",
+        rejected
+    );
+
+    // Unknown functions are rejected at creation.
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_badfn",
+            "sql": "SELECT nosuchfn(a) FROM vstream",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let rejected: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        rejected["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("function nosuchfn not found"),
+        "rejection: {}",
+        rejected
+    );
+
+    // ... and at update time.
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_upd",
+            "sql": "SELECT a FROM vstream",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .put(format!("{}/rules/rule_upd", base_url))
+        .json(&json!({
+            "id": "rule_upd",
+            "sql": "SELECT nosuchfn(a) FROM vstream",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    // Validation reports unknown functions as 422.
+    let resp = client
+        .post(format!("{}/rules/validate", base_url))
+        .json(&json!({
+            "id": "rule_val_bad",
+            "sql": "SELECT nosuchfn(a) FROM vstream",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(resp
+        .text()
+        .await
+        .unwrap()
+        .contains("function nosuchfn not found"));
+
+    // Validation of a clean rule returns the sources envelope.
+    let resp = client
+        .post(format!("{}/rules/validate", base_url))
+        .json(&json!({
+            "id": "rule_val_ok",
+            "sql": "SELECT count(*) AS cnt FROM vstream",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let valid: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(valid, json!({"sources": ["vstream"], "valid": true}));
+
+    // T20: simulations without (parseable) SELECT SQL are rejected.
+    for body in [
+        json!({"id": "rt_empty"}),
+        json!({"id": "rt_garbage", "sql": "SELECT FROM WHERE"}),
+    ] {
+        let resp = client
+            .post(format!("{}/ruletest", base_url))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+        let rejected: serde_json::Value = resp.json().await.unwrap();
+        assert!(
+            rejected["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("SQL is not a select statement"),
+            "rejection: {}",
+            rejected
+        );
+    }
+
+    // Stream management statements run through POST /streams.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "SHOW STREAMS"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let names: Vec<String> = resp.json().await.unwrap();
+    assert!(names.contains(&"vstream".to_string()), "names: {:?}", names);
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "DESCRIBE STREAM vstream"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let described: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(described["Name"], json!("vstream"));
+    assert_eq!(
+        described["StreamFields"],
+        json!([{"Name": "a", "FieldType": "bigint"}])
+    );
+
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "DESCRIBE STREAM ghost"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    // Cleanup.
+    let resp = client
+        .delete(format!("{}/rules/rule_upd", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let resp = client
+        .delete(format!("{}/streams/vstream", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_data_import_export_parity() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // Seed two streams, a table and a rule per stream.
+    for sql in [
+        "CREATE STREAM ex_s1 (id BIGINT) WITH (FORMAT=\"json\")",
+        "CREATE STREAM ex_s2 (id BIGINT) WITH (FORMAT=\"json\")",
+    ] {
+        let resp = client
+            .post(format!("{}/streams", base_url))
+            .json(&json!({"sql": sql}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    }
+    let resp = client
+        .post(format!("{}/tables", base_url))
+        .json(&json!({"sql": "CREATE TABLE ex_t (id BIGINT) WITH (FORMAT=\"json\")"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    for (id, from) in [("rule_ex1", "ex_s1"), ("rule_ex2", "ex_s2")] {
+        let resp = client
+            .post(format!("{}/rules", base_url))
+            .json(&json!({
+                "id": id,
+                "sql": format!("SELECT * FROM {}", from),
+                "actions": [{"log": {}}]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    }
+
+    // T15: selective export returns only the requested rule plus its
+    // dependencies (ex_s1, and no tables for this rule).
+    let resp = client
+        .post(format!("{}/data/export", base_url))
+        .json(&json!({"rules": ["rule_ex1"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let exported: serde_json::Value = resp.json().await.unwrap();
+    let rule_ids: Vec<&str> = exported["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(rule_ids, vec!["rule_ex1"], "exported: {}", exported);
+    let stream_names: Vec<&str> = exported["streams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert_eq!(stream_names, vec!["ex_s1"], "exported: {}", exported);
+    assert!(exported["tables"].as_array().unwrap().is_empty());
+
+    // Empty selection exports everything (also via the v2 route).
+    let resp = client
+        .post(format!("{}/v2/data/export", base_url))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let exported: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(exported["rules"].as_array().unwrap().len(), 2);
+
+    // T15-import: the structured envelope, with map-form rules (ids filled
+    // from the map keys) actually imported.
+    let resp = client
+        .post(format!("{}/data/import", base_url))
+        .json(&json!({
+            "streams": [
+                {"name": "ex_im", "sql": "CREATE STREAM ex_im (id BIGINT) WITH (FORMAT=\"json\")"}
+            ],
+            "rules": {
+                "rule_im1": {"sql": "SELECT * FROM ex_im", "actions": [{"log": {}}]}
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let envelope: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(envelope["ErrorMsg"], json!(""));
+    for key in [
+        "streams",
+        "tables",
+        "rules",
+        "nativePlugins",
+        "portablePlugins",
+        "sourceConfig",
+        "sinkConfig",
+        "connectionConfig",
+    ] {
+        assert!(
+            envelope["ConfigResponse"][key].is_object(),
+            "envelope: {}",
+            envelope
+        );
+    }
+    let resp = client
+        .get(format!("{}/rules/rule_im1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // T16: ruleset import reports counts; re-importing reports zeros.
+    let payload = json!({
+        "streams": [
+            {"name": "ex_rs", "sql": "CREATE STREAM ex_rs (id BIGINT) WITH (FORMAT=\"json\")"}
+        ],
+        "rules": [
+            {"id": "rule_rs1", "sql": "SELECT * FROM ex_rs", "actions": [{"log": {}}]}
+        ]
+    });
+    let resp = client
+        .post(format!("{}/ruleset/import", base_url))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        resp.text().await.unwrap(),
+        "imported 1 streams, 0 tables and 1 rules\n"
+    );
+    let resp = client
+        .post(format!("{}/ruleset/import", base_url))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        resp.text().await.unwrap(),
+        "imported 0 streams, 0 tables and 0 rules\n"
+    );
+
+    // Cleanup.
+    for rule in ["rule_ex1", "rule_ex2", "rule_im1", "rule_rs1"] {
+        let resp = client
+            .delete(format!("{}/rules/{}", base_url, rule))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    for stream in ["ex_s1", "ex_s2", "ex_im", "ex_rs"] {
+        let resp = client
+            .delete(format!("{}/streams/{}", base_url, stream))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    let resp = client
+        .delete(format!("{}/tables/ex_t", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_plugin_service_validation() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // T10: installing from a nonexistent file is a 400, not a 201.
+    let resp = client
+        .post(format!("{}/plugins/sources", base_url))
+        .json(&json!({"name": "badplug", "file": "file:///nonexistent/rk_eval.zip"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let rejected: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        rejected["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("no such file or directory"),
+        "rejection: {}",
+        rejected
+    );
+
+    // An existing local file installs fine (and cleans up afterwards).
+    let mut plugin_file = std::env::temp_dir();
+    plugin_file.push(format!("rekuiper-plug-{}.zip", std::process::id()));
+    std::fs::write(&plugin_file, b"fake-plugin-bytes").unwrap();
+    let file_uri = format!(
+        "file:///{}",
+        plugin_file.to_string_lossy().replace('\\', "/")
+    );
+    let resp = client
+        .post(format!("{}/plugins/sources", base_url))
+        .json(&json!({"name": "goodplug", "file": file_uri}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .delete(format!("{}/plugins/sources/goodplug", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let _ = std::fs::remove_file(&plugin_file);
+
+    // PUT on unknown sink/source/function/portable plugins is a 404
+    // (udfs expose no PUT route at all, so Axum answers 405 there).
+    for kind in ["sources", "sinks", "functions"] {
+        let resp = client
+            .put(format!("{}/plugins/{}/noplug_xyz", base_url, kind))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "PUT {}/noplug_xyz",
+            kind
+        );
+    }
+
+    // DELETE on unknown plugins of every typed kind is a 404.
+    for kind in ["sources", "sinks", "functions", "udfs"] {
+        let resp = client
+            .delete(format!("{}/plugins/{}/noplug_xyz", base_url, kind))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "DELETE {}/noplug_xyz",
+            kind
+        );
+        let missing: serde_json::Value = resp.json().await.unwrap();
+        assert!(
+            missing["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("is not found"),
+            "envelope: {}",
+            missing
+        );
+    }
+
+    // Symbol registration and portable status/PUT/DELETE miss the same way.
+    let resp = client
+        .post(format!(
+            "{}/plugins/functions/noplug_xyz/register",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    let resp = client
+        .get(format!("{}/plugins/portables/noplug_xyz/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    let resp = client
+        .put(format!("{}/plugins/portables/noplug_xyz", base_url))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    let resp = client
+        .delete(format!("{}/plugins/portables/noplug_xyz", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // T11: services with unreadable files are rejected; valid ones register.
+    let resp = client
+        .post(format!("{}/services", base_url))
+        .json(&json!({"name": "badsvc", "file": "file:///nonexistent/svc.json"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let resp = client
+        .post(format!("{}/services", base_url))
+        .json(&json!({"name": "goodsvc"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .delete(format!("{}/services/goodsvc", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_schema_multipart_upload() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    let proto = "syntax = \"proto3\";\nmessage Reading {\n  int64 id = 1;\n}\n";
+
+    // Raw-bytes upload stores the content verbatim.
+    let resp = client
+        .put(format!("{}/schemas/protobuf/rawproto/upload", base_url))
+        .header("Content-Type", "application/octet-stream")
+        .body(proto.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let uploaded: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(uploaded, json!({"type": "protobuf", "name": "rawproto"}));
+
+    // Multipart upload extracts the file part.
+    let boundary = "REKTESTBOUNDARY";
+    let body = format!(
+        "--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.proto\"\r\nContent-Type: application/octet-stream\r\n\r\n{proto}\r\n--{b}--\r\n",
+        b = boundary,
+        proto = proto
+    );
+    let resp = client
+        .put(format!("{}/schemas/protobuf/multiproto/upload", base_url))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Both round-trip through the schema reader.
+    for name in ["rawproto", "multiproto"] {
+        let resp = client
+            .get(format!("{}/schemas/protobuf/{}", base_url, name))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        let def: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(def["content"], json!(proto), "schema {}: {}", name, def);
+    }
+}
+
+// D9: RS256 JWT vectors shared with the routes unit tests (key and tokens
+// generated offline; the valid token expires in 2027, the expired one sat
+// one hour in the past at generation).
+const TEST_AUTH_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmdub6pqDN/MPofsOTQlf\npCF6O4vsisxaDPzKZM8pqiUIOGjDwfqRQkzikSPu/oK8jPouof9JkeesUjbKg+0w\nQ7aZXgRPr8PJkHeY27/4bFz1riFPDZ+rKAe8DvXIlcjb70H68AtGnRzUkVjVlzhn\n6qfJE4LMmLtdQodW4Hnd2Oo8qujRprtn8AMcX5H1phIVUHYdIZpt44SNetOgCPxZ\n/S/0VLi2qD7bh/bBj6VRvea/LyCKnC75r+wnJGIHYpeVXskMrDBH+lfV1GsoU9Ig\nm+5MYAkc0SrgYBVCUXXvQNrip3IQcaWlW4YhkJC2rVBCA2ibc1MMWOyA0xYfJfy1\nvQIDAQAB\n-----END PUBLIC KEY-----\n";
+const TEST_AUTH_VALID: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE4MjA2MDE3MDB9.U3NGxZxNiHStyGFGZOKsz4PPM3aX2papMEOsKUqWnYC7NmgGxESTKWKtPM6M5McKUQwD3cfnnFH9p3XGdkTfPofxcnmJcrN8PMWdaVAcetYn_c5ScMWgQapjuHiO7jBQKljTU4AwuGrNQAMtxgBgSdEX-MG1AYZrNYcdgqXtfUPk8y_V2icNU8kVQRzRonHs4yaioIqy1IpBuxpb6A5AHRy07T_En_TlebfH7Tb-lf3tFDT8UUcjnfFJ-TPxFTGqLsPnLbdqXcrKi-PVqpbuFj2WSFlGinbZDGEsjhopdHPD1_PkC0Am3c4XmiCM3QswVqcUujwED71lcZXBdCFxPA";
+const TEST_AUTH_EXPIRED: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE3ODkwNjIxMDB9.GNrAExENuYVgbt8bZebTYTmCf2o0DcAkWzhpfkBCtAvPflzzr9xSNaEOrtf2HJU5gqOm-ZDIztXsatd765CtZA-uLcqjbCa4TURbMv0OFHDhMVlVfn2xr17jr39IG1ck7Ymioz_ZSd3wXu0egABsCUrKigEvtRwcGJSWlAp1GdRiWLpT2-U6Xb15bgUdbCNgYxyXiWM4zBLHVILLLH-zPyPIbvHo82l3qOpu7c2SRw5aNPrY2KXPCxKm47NEOkf74LJk14MZODeRTOYczyi8Q4vtD6xEcp8-u_vVUv5Gv04mrO1gMCALOQAWfKq2PFA0QatGX_cw8f36m_EOLLfuWA";
+const TEST_AUTH_WRONGKEY: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE4MjA2MDE3MDB9.Uu3vn8teCnUBsT-8updR4it_yyMoYdtqFGOvLgozxmsOmM8hb-FfqpeuqelBemgsbpwi2pbRVuOUxv0621ORempEpwfhCUnI80Rj9hPcOV0j8wYuX-xdsnvsNOPI1K6XlW9i1IOjToKxhptaPEPdYXf_jEq5v3P0zCITwevT2t6bpOdYzgSHjxq6CJiXIJHcP0idiQ1I3PqNhKmjJn3qi14GQ_xRk8Sf30VQDqsT76qXw0S92K-QKdcbc35oJW5x6oTdbgELv9YV-su1ooXTrLQ5zzY0g8qXhbkeLotXQEddaGMFeBOWchDax_km1g1gRbCS8f7TNEtO2xVkVHx-AQ";
+
+#[tokio::test]
+async fn test_jwt_authentication_vectors() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // Deploy the test public key and switch this server to auth mode. Other
+    // test servers keep authentication disabled, so the process-global env
+    // var cannot disturb them (the guard short-circuits first).
+    let mut pem_path = std::env::temp_dir();
+    pem_path.push(format!("rekuiper-auth-test-{}.pem", std::process::id()));
+    std::fs::write(&pem_path, TEST_AUTH_PEM).unwrap();
+    std::env::set_var("KUIPER_AUTH_PUBLIC_KEY_FILE", &pem_path);
+    state.config.write().basic.authentication = true;
+
+    async fn get_guarded(
+        client: &reqwest::Client,
+        base_url: &str,
+        auth: Option<&str>,
+    ) -> (reqwest::StatusCode, String) {
+        let mut req = client.get(format!("{}/streams", base_url));
+        if let Some(token) = auth {
+            req = req.header("Authorization", token);
+        }
+        let resp = req.send().await.unwrap();
+        let status = resp.status();
+        let body = resp.text().await.unwrap();
+        (status, body)
+    }
+
+    // 1. Missing header.
+    let (status, body) = get_guarded(&client, &base_url, None).await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(body, "Missing authorization header\n");
+    // 2. Bearer prefix is prohibited.
+    let bearer = format!("Bearer {}", TEST_AUTH_VALID);
+    let (status, body) = get_guarded(&client, &base_url, Some(&bearer)).await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        body,
+        "Bearer token is not supported, please use raw JWT token\n"
+    );
+    // 3. Malformed token.
+    let (status, body) = get_guarded(&client, &base_url, Some("not-a-token")).await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(body, "Invalid JWT format\n");
+    // 4. Expired token.
+    let (status, body) = get_guarded(&client, &base_url, Some(TEST_AUTH_EXPIRED)).await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(body, "Token has expired\n");
+    // 5. Wrong signing key.
+    let (status, body) = get_guarded(&client, &base_url, Some(TEST_AUTH_WRONGKEY)).await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(body, "Invalid token signature\n");
+    // 6. Valid raw token passes.
+    let (status, _) = get_guarded(&client, &base_url, Some(TEST_AUTH_VALID)).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+
+    // Public endpoints stay open without credentials.
+    for path in ["/ping", "/"] {
+        let resp = client
+            .get(format!("{}{}", base_url, path))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {}", path);
+    }
+
+    // Restore defaults so nothing leaks into other tests.
+    state.config.write().basic.authentication = false;
+    std::env::remove_var("KUIPER_AUTH_PUBLIC_KEY_FILE");
+    let _ = std::fs::remove_file(&pem_path);
+}
+
+#[tokio::test]
+async fn test_ruletest_live_sse_port() {
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // Create a session replaying two mock rows.
+    let resp = client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rt_live",
+            "sql": "SELECT b FROM ssesrc",
+            "mockSource": {
+                "ssesrc": {"data": [{"b": 4}, {"b": 6}]}
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let created: serde_json::Value = resp.json().await.unwrap();
+    let port = created["port"].as_u64().expect("live port") as u16;
+    assert!(port > 0, "session must report a live port");
+
+    // Open one persistent SSE connection, then (re)start the replay until
+    // a full two-frame burst arrives. A restart is needed only when the
+    // first replay wins the race against the SSE subscription (broadcast
+    // channels do not backfill); once subscribed, every replay lands in
+    // full, so this terminates deterministically.
+    let sse_url = format!("http://127.0.0.1:{}/", port);
+    let mut resp = client
+        .get(&sse_url)
+        .send()
+        .await
+        .expect("SSE listener must accept connections");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("text/event-stream")
+    );
+    let mut buf: Vec<u8> = Vec::new();
+    let mut frames: Vec<String> = Vec::new();
+    for _ in 0..4 {
+        let started = client
+            .post(format!("{}/ruletest/rt_live/start", base_url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(started.status(), reqwest::StatusCode::OK);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while frames.len() < 2 && std::time::Instant::now() < deadline {
+            match tokio::time::timeout(std::time::Duration::from_millis(500), resp.chunk()).await {
+                Ok(Ok(Some(chunk))) => {
+                    buf.extend_from_slice(&chunk);
+                    while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                        let frame: Vec<u8> = buf.drain(..pos + 2).collect();
+                        for line in String::from_utf8_lossy(&frame).lines() {
+                            if let Some(data) = line.strip_prefix("data:") {
+                                frames.push(data.trim().to_string());
+                            }
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        if frames.len() == 2 {
+            break;
+        }
+        frames.clear();
+    }
+    assert_eq!(
+        frames,
+        vec!["{\"b\":4}".to_string(), "{\"b\":6}".to_string()]
+    );
+
+    // Deleting the session shuts the listener down: reconnects refuse.
+    let resp = client
+        .delete(format!("{}/ruletest/rt_live", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mut refused = false;
+    for _ in 0..30 {
+        match reqwest::Client::new().get(&sse_url).send().await {
+            Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+            Err(_) => {
+                refused = true;
+                break;
+            }
+        }
+    }
+    assert!(refused, "SSE listener must stop after session delete");
 }

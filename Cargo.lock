@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "kuiperd"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -2224,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-cli"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-conf"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "serde",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-connectors"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2270,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-core"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2288,10 +2288,11 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-server"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "boa_engine",
  "chrono",
  "futures",
@@ -2301,6 +2302,7 @@ dependencies = [
  "rekuiper-core",
  "rekuiper-sql",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2316,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-sql"
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

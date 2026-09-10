@@ -17,11 +17,22 @@ impl StreamRecord {
     }
 }
 
+/// One declared stream/table column, serialized eKuiper-style as
+/// `{"Name": ..., "FieldType": ...}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct StreamField {
+    pub name: String,
+    pub field_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamDefinition {
     pub name: String,
     #[serde(default)]
     pub sql: String,
+    #[serde(default)]
+    pub stream_fields: Vec<StreamField>,
     #[serde(default)]
     pub options: HashMap<String, String>,
 }
@@ -41,6 +52,8 @@ pub struct TableDefinition {
     pub name: String,
     #[serde(default)]
     pub sql: String,
+    #[serde(default)]
+    pub stream_fields: Vec<StreamField>,
     #[serde(default)]
     pub options: HashMap<String, String>,
 }

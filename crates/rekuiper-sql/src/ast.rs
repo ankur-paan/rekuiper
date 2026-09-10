@@ -154,14 +154,24 @@ pub struct SelectStmt {
     pub set_op: Option<(SetOp, Box<SelectStmt>)>,
 }
 
+/// One parsed `CREATE STREAM/TABLE` column: the column name plus its
+/// declared data type, lowercased (`bigint`, `string`, ...).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamColumn {
+    pub name: String,
+    pub data_type: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateStreamStmt {
     pub name: String,
+    pub fields: Vec<StreamColumn>,
     pub options: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableStmt {
     pub name: String,
+    pub fields: Vec<StreamColumn>,
     pub options: HashMap<String, String>,
 }

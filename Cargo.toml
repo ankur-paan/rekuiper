@@ -11,7 +11,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.421.0-beta"
+version = "0.422.0-beta"
 edition = "2021"
 authors = ["I-Dacs Labs <measure@i-dacs.com>", "LF Edge eKuiper Contributors"]
 license = "MIT OR Apache-2.0"
@@ -49,6 +49,7 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp", 
 rskafka = "0.6"
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres"] }
 base64 = "0.22"
+ring = "0.17"
 crc32fast = "1.5"
 sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }

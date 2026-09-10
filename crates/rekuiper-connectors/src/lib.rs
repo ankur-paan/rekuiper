@@ -316,12 +316,18 @@ fn parse_ldjson(content: &str) -> Result<Vec<StreamRecord>> {
 // ---------------------------------------------------------------------------
 
 /// MQTT connection settings (eKuiper MQTT source/sink action format).
+///
+/// `server` and `topic` both default: source `CONF_KEY` entries typically
+/// carry only connection parameters (no topic), and must still deserialize
+/// so the stored broker URL is honored instead of silently falling back.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MqttConfig {
     /// Broker URL, e.g. `tcp://127.0.0.1:1883`.
+    #[serde(default = "default_mqtt_server")]
     pub server: String,
     /// Topic to publish to / subscribe to.
+    #[serde(default)]
     pub topic: String,
     /// Client id (`clientId` in eKuiper JSON). Generated when absent.
     #[serde(default)]
@@ -335,6 +341,10 @@ pub struct MqttConfig {
     /// Optional password.
     #[serde(default)]
     pub password: Option<String>,
+}
+
+fn default_mqtt_server() -> String {
+    "tcp://127.0.0.1:1883".to_string()
 }
 
 impl MqttConfig {
@@ -517,6 +527,12 @@ impl MqttSource {
         mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            tracing::info!(
+                "[MQTT SOURCE] Connecting to broker '{}', topic '{}', qos {}",
+                self.config.server,
+                self.config.topic,
+                self.config.qos
+            );
             let opts = match mqtt_options(&self.config) {
                 Ok(opts) => opts,
                 Err(e) => {
@@ -1716,38 +1732,47 @@ fn default_sql_interval() -> u64 {
     1000
 }
 
-/// SQL sink: executes parameterized row inserts into the database.
-/// Currently SQLite URLs are executed; other schemes return `Ok(())`.
+/// SQL sink: executes parameterized row inserts into the database (SQLite
+/// `?` placeholders, PostgreSQL `$n` placeholders). Unknown URL schemes
+/// remain a no-op for forward compatibility.
 pub struct SqlSink {
     pub config: SqlConnectorConfig,
 }
 
 impl SqlSink {
     pub async fn insert_record(&self, record: &StreamRecord) -> Result<()> {
-        if self.config.url.starts_with("sqlite") {
-            let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
-            let fields = if self.config.fields.is_empty() {
-                record.data.keys().cloned().collect::<Vec<_>>()
-            } else {
-                self.config.fields.clone()
-            };
-            let cols = fields.join(", ");
-            let placeholders = vec!["?"; fields.len()].join(", ");
-            let sql = format!(
-                "INSERT INTO {} ({}) VALUES ({})",
-                self.config.table, cols, placeholders
-            );
-            let mut query = sqlx::query(&sql);
-            for f in &fields {
-                let val = record
+        let fields = if self.config.fields.is_empty() {
+            record.data.keys().cloned().collect::<Vec<_>>()
+        } else {
+            self.config.fields.clone()
+        };
+        let values: Vec<String> = fields
+            .iter()
+            .map(|f| {
+                record
                     .data
                     .get(f)
                     .map(|v| match v {
                         serde_json::Value::String(s) => s.clone(),
                         other => other.to_string(),
                     })
-                    .unwrap_or_default();
-                query = query.bind(val);
+                    .unwrap_or_default()
+            })
+            .collect();
+        if self.config.url.starts_with("sqlite") {
+            let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
+            let sql = sqlite_insert_sql(&self.config.table, &fields);
+            let mut query = sqlx::query(&sql);
+            for v in &values {
+                query = query.bind(v);
+            }
+            query.execute(&pool).await?;
+        } else if self.config.url.starts_with("postgres") {
+            let pool = pg_pool(&self.config.url).await?;
+            let sql = pg_insert_sql(&self.config.table, &fields);
+            let mut query = sqlx::query(&sql);
+            for v in &values {
+                query = query.bind(v);
             }
             query.execute(&pool).await?;
         }
@@ -1755,9 +1780,121 @@ impl SqlSink {
     }
 }
 
-/// Point lookup against a SQL database: `SELECT * ... WHERE key_col = ?
-/// LIMIT 1`, mapping the row columns to string values. Returns `None` when
-/// no row matches (or for non-SQLite URLs).
+/// `INSERT INTO {table} ({cols}) VALUES (?, ...)` for SQLite.
+pub fn sqlite_insert_sql(table: &str, fields: &[String]) -> String {
+    let cols = fields.join(", ");
+    let placeholders = vec!["?"; fields.len()].join(", ");
+    format!("INSERT INTO {} ({}) VALUES ({})", table, cols, placeholders)
+}
+
+/// `INSERT INTO {table} ({cols}) VALUES ($1, ...)` for PostgreSQL, whose
+/// wire protocol numbers placeholders instead of accepting `?`.
+pub fn pg_insert_sql(table: &str, fields: &[String]) -> String {
+    let cols = fields.join(", ");
+    let placeholders = (1..=fields.len())
+        .map(|i| format!("${}", i))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO {} ({}) VALUES ({})", table, cols, placeholders)
+}
+
+/// Connect a PostgreSQL pool with a bounded handshake timeout so dead
+/// brokers fail fast (instead of stalling rule pipelines on the 30s sqlx
+/// default) while refused/blackholed hosts still surface real errors.
+async fn pg_pool(url: &str) -> Result<sqlx::postgres::PgPool> {
+    use std::str::FromStr;
+    let opts = sqlx::postgres::PgConnectOptions::from_str(url)?;
+    Ok(sqlx::postgres::PgPoolOptions::new()
+        .acquire_timeout(std::time::Duration::from_secs(3))
+        .connect_with(opts)
+        .await?)
+}
+
+/// `SELECT * ... WHERE {key_col} = $1 LIMIT 1` for PostgreSQL. The
+/// stream-side key arrives stringified, so the comparison runs on the text
+/// image: `integer = text` has no operator in PostgreSQL, while the
+/// `CAST(... AS TEXT)` form works for every column type.
+pub fn pg_lookup_sql(table: &str, key_col: &str) -> String {
+    format!(
+        "SELECT * FROM {} WHERE CAST({} AS TEXT) = $1 LIMIT 1",
+        table, key_col
+    )
+}
+
+/// Decode one SQLite column, preserving JSON types from the column's
+/// declared affinity (INTEGER → number, REAL → number, TEXT → string),
+/// following https://sqlite.org/datatype3.html affinity rules. Untyped
+/// columns fall back to an integer-first cascade; NULL becomes Null.
+fn sqlite_column_value(row: &sqlx::sqlite::SqliteRow, col: &str) -> serde_json::Value {
+    use sqlx::{Column, Row, TypeInfo};
+    let affinity = row
+        .columns()
+        .iter()
+        .find(|c| c.name() == col)
+        .map(|c| c.type_info().name().to_string())
+        .unwrap_or_default();
+    let upper = affinity.to_ascii_uppercase();
+    if upper.contains("INT") {
+        if let Ok(v) = row.try_get::<i64, _>(col) {
+            return serde_json::Value::from(v);
+        }
+    } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
+        if let Ok(v) = row.try_get::<String, _>(col) {
+            return serde_json::Value::String(v);
+        }
+    } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
+        if let Ok(v) = row.try_get::<f64, _>(col) {
+            return serde_json::json!(v);
+        }
+    } else if upper.contains("BOOL") {
+        if let Ok(v) = row.try_get::<bool, _>(col) {
+            return serde_json::Value::Bool(v);
+        }
+        if let Ok(v) = row.try_get::<i64, _>(col) {
+            return serde_json::Value::from(v);
+        }
+    }
+    if let Ok(v) = row.try_get::<i64, _>(col) {
+        return serde_json::Value::from(v);
+    }
+    if let Ok(v) = row.try_get::<f64, _>(col) {
+        return serde_json::json!(v);
+    }
+    if let Ok(v) = row.try_get::<String, _>(col) {
+        return serde_json::Value::String(v);
+    }
+    serde_json::Value::Null
+}
+
+/// Decode one PostgreSQL column, preserving JSON types (numbers stay
+/// numbers) so downstream typed comparisons keep working. Falls back to
+/// `Null` for exotic types the cascade cannot represent.
+fn pg_column_value(row: &sqlx::postgres::PgRow, col: &str) -> serde_json::Value {
+    use sqlx::Row;
+    if let Ok(v) = row.try_get::<String, _>(col) {
+        return serde_json::Value::String(v);
+    }
+    if let Ok(v) = row.try_get::<i32, _>(col) {
+        return serde_json::Value::from(v);
+    }
+    if let Ok(v) = row.try_get::<i64, _>(col) {
+        return serde_json::Value::from(v);
+    }
+    if let Ok(v) = row.try_get::<f64, _>(col) {
+        return serde_json::json!(v);
+    }
+    if let Ok(v) = row.try_get::<f32, _>(col) {
+        return serde_json::json!(f64::from(v));
+    }
+    if let Ok(v) = row.try_get::<bool, _>(col) {
+        return serde_json::Value::Bool(v);
+    }
+    serde_json::Value::Null
+}
+
+/// Point lookup against a SQL database, mapping the row columns to values.
+/// SQLite decodes every column as text (historical behavior); PostgreSQL
+/// preserves JSON types. Returns `None` when no row matches.
 pub async fn sql_lookup_key(
     url: &str,
     table: &str,
@@ -1781,8 +1918,121 @@ pub async fn sql_lookup_key(
             }
             return Ok(Some(serde_json::Value::Object(map)));
         }
+    } else if url.starts_with("postgres") {
+        let pool = pg_pool(url).await?;
+        let sql = pg_lookup_sql(table, key_col);
+        let row = sqlx::query(&sql)
+            .bind(key_val)
+            .fetch_optional(&pool)
+            .await?;
+        if let Some(r) = row {
+            use sqlx::{Column, Row};
+            let mut map = serde_json::Map::new();
+            for col in r.columns() {
+                let name = col.name();
+                map.insert(name.to_string(), pg_column_value(&r, name));
+            }
+            return Ok(Some(serde_json::Value::Object(map)));
+        }
     }
     Ok(None)
+}
+
+/// Polling SQL source: every `interval` ms runs `SELECT * FROM {table}` and
+/// broadcasts each row as a [`StreamRecord`]. Mirrors the `HttpPullSource`
+/// ticker/cancellation discipline.
+pub struct SqlSource {
+    pub config: SqlConnectorConfig,
+    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+}
+
+impl SqlSource {
+    pub fn new(
+        config: SqlConnectorConfig,
+        tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    ) -> Self {
+        Self { config, tx }
+    }
+
+    pub fn spawn(
+        self,
+        mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(
+                self.config.interval.max(1),
+            ));
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        match self.poll_once().await {
+                            Ok(records) => {
+                                for record in records {
+                                    // All subscribers dropped: shut down cleanly.
+                                    if self.tx.send(record).is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "SQL source poll of {} failed: {}",
+                                    self.config.table,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    changed = cancel_rx.changed() => {
+                        match changed {
+                            Ok(_) => {
+                                if *cancel_rx.borrow() {
+                                    return;
+                                }
+                            }
+                            // Cancellation sender dropped: shut down.
+                            Err(_) => return,
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    async fn poll_once(&self) -> Result<Vec<StreamRecord>> {
+        let sql = format!("SELECT * FROM {}", self.config.table);
+        if self.config.url.starts_with("sqlite") {
+            let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
+            let rows = sqlx::query(&sql).fetch_all(&pool).await?;
+            use sqlx::{Column, Row};
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                let mut map = serde_json::Map::new();
+                for col in r.columns() {
+                    let name = col.name();
+                    map.insert(name.to_string(), sqlite_column_value(r, name));
+                }
+                out.push(StreamRecord::new(map.into_iter().collect()));
+            }
+            return Ok(out);
+        }
+        if self.config.url.starts_with("postgres") {
+            let pool = pg_pool(&self.config.url).await?;
+            let rows = sqlx::query(&sql).fetch_all(&pool).await?;
+            use sqlx::{Column, Row};
+            let mut out = Vec::with_capacity(rows.len());
+            for r in &rows {
+                let mut map = serde_json::Map::new();
+                for col in r.columns() {
+                    let name = col.name();
+                    map.insert(name.to_string(), pg_column_value(r, name));
+                }
+                out.push(StreamRecord::new(map.into_iter().collect()));
+            }
+            return Ok(out);
+        }
+        bail!("Unsupported SQL source URL scheme: {}", self.config.url)
+    }
 }
 
 #[cfg(test)]
@@ -2076,6 +2326,67 @@ mod tests {
         // Round-trip back into the same config.
         let back: super::MqttConfig = serde_json::from_value(ser).unwrap();
         assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn test_mqtt_config_confkey_without_topic() {
+        // D1: source CONF_KEY entries carry only connection parameters (no
+        // topic). They must decode with the stored broker URL instead of
+        // failing and silently falling back to the loopback broker.
+        let conf = serde_json::json!({"server": "tcp://broker:1883"});
+        let cfg: super::MqttConfig = serde_json::from_value(conf).unwrap();
+        assert_eq!(cfg.server, "tcp://broker:1883");
+        assert_eq!(cfg.topic, "");
+        // An empty object still yields the loopback default server.
+        let cfg: super::MqttConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.server, "tcp://127.0.0.1:1883");
+        assert_eq!(cfg.topic, "");
+    }
+
+    #[test]
+    fn test_sql_statement_builders() {
+        // D8: SQLite keeps `?` placeholders; PostgreSQL numbers them, since
+        // its wire protocol rejects `?`.
+        let fields = vec!["id".to_string(), "val".to_string()];
+        assert_eq!(
+            super::sqlite_insert_sql("readings", &fields),
+            "INSERT INTO readings (id, val) VALUES (?, ?)"
+        );
+        assert_eq!(
+            super::pg_insert_sql("readings", &fields),
+            "INSERT INTO readings (id, val) VALUES ($1, $2)"
+        );
+        assert!(
+            !super::pg_insert_sql("readings", &fields).contains('?'),
+            "postgres statements must not contain `?`"
+        );
+        assert_eq!(
+            super::pg_lookup_sql("readings", "id"),
+            "SELECT * FROM readings WHERE CAST(id AS TEXT) = $1 LIMIT 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pg_paths_fail_loudly_without_broker() {
+        // D8: postgres URLs must attempt a real connection and surface the
+        // error, never silently report Ok with zero rows written or read.
+        // Port 1 on loopback refuses immediately, so this cannot hang.
+        let url = "postgres://127.0.0.1:1/nonexistent";
+        let cfg = super::SqlConnectorConfig {
+            url: url.to_string(),
+            table: "t".to_string(),
+            fields: vec!["id".to_string()],
+            interval: 1000,
+        };
+        let sink = super::SqlSink {
+            config: cfg.clone(),
+        };
+        let mut data = HashMap::new();
+        data.insert("id".to_string(), json!(1));
+        assert!(sink.insert_record(&StreamRecord::new(data)).await.is_err());
+        assert!(super::sql_lookup_key(url, "t", "id", "1").await.is_err());
+        let src = super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
+        assert!(src.poll_once().await.is_err());
     }
 
     #[tokio::test]

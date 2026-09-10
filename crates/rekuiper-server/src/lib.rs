@@ -41,7 +41,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
     let state = AppState {
         start_time: Instant::now(),
         version,
-        config: config.clone(),
+        config: Arc::new(RwLock::new(config.clone())),
         stream_manager,
         table_manager,
         rule_manager,

@@ -15,16 +15,16 @@ use rekuiper_connectors::{
     apply_data_template, FileSink, FileSource, FileSourceConfig, HttpPullConfig, HttpPullSource,
     KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink, MqttSource, RedisSink,
     RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig,
-    SqlSink, WebSocketConfig, WebSocketSink, WebSocketSource,
+    SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
-    model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamRecord},
+    model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamField, StreamRecord},
     PluginDefinition, PluginManager, RuleDefinition, RuleManager, SchemaManager, StreamBus,
     StreamDefinition, StreamManager, TableDefinition, TableManager,
 };
 use rekuiper_sql::{
-    builtin_function_metadata, Evaluator, Expr, JoinClause, JoinType, Parser, RuleState,
-    SelectStmt, TimeUnit, WindowDef,
+    builtin_function_metadata, is_builtin_function, Evaluator, Expr, JoinClause, JoinType, Parser,
+    RuleState, SelectStmt, StreamColumn, TimeUnit, WindowDef,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -398,7 +398,7 @@ pub fn create_default_portables(
 pub struct AppState {
     pub start_time: Instant,
     pub version: String,
-    pub config: KuiperConfig,
+    pub config: Arc<RwLock<KuiperConfig>>,
     pub stream_manager: StreamManager,
     pub table_manager: TableManager,
     pub rule_manager: RuleManager,
@@ -444,6 +444,8 @@ pub struct RuletestSession {
     pub sql: String,
     pub mock_source: HashMap<String, SimulatorConfig>,
     pub output_tx: tokio::sync::broadcast::Sender<String>,
+    pub port: u16,
+    pub shutdown: Arc<tokio::sync::Notify>,
 }
 
 impl AppState {
@@ -458,7 +460,7 @@ impl AppState {
         Self {
             start_time: Instant::now(),
             version,
-            config,
+            config: Arc::new(RwLock::new(config)),
             stream_manager,
             table_manager,
             rule_manager,
@@ -484,16 +486,193 @@ impl AppState {
     }
 }
 
+/// JWT authorization guard for deployments with `basic.authentication:
+/// true`. eKuiper accepts only a raw RS256 JWT (no `Bearer ` prefix); `/`
+/// and `/ping` stay public.
+async fn auth_guard(
+    State(state): State<AppState>,
+    request: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Response {
+    if !state.config.read().basic.authentication {
+        return next.run(request).await;
+    }
+    let path = request.uri().path();
+    if path == "/" || path == "/ping" {
+        return next.run(request).await;
+    }
+    let Some(header) = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return (StatusCode::UNAUTHORIZED, "Missing authorization header\n").into_response();
+    };
+    if header.starts_with("Bearer ") || header.starts_with("bearer ") {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Bearer token is not supported, please use raw JWT token\n",
+        )
+            .into_response();
+    }
+    let Some(key_der) = load_auth_public_key() else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Authentication misconfigured: public key not found\n",
+        )
+            .into_response();
+    };
+    match verify_jwt_raw(header.trim(), &key_der) {
+        Ok(()) => next.run(request).await,
+        Err(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
+    }
+}
+
+/// Verify a raw RS256 JWT against a PKCS#1 DER public key: exactly three
+/// dot-separated segments, a JSON payload whose optional `exp` (seconds)
+/// must lie in the future, and a PKCS#1 v1.5 SHA-256 signature over
+/// `header_b64.payload_b64`.
+fn verify_jwt_raw(token: &str, public_key_der: &[u8]) -> Result<(), &'static str> {
+    use base64::Engine;
+    let mut parts = token.split('.');
+    let (Some(header_b64), Some(payload_b64), Some(sig_b64), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err("Invalid JWT format\n");
+    };
+    let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let payload_bytes = engine
+        .decode(payload_b64)
+        .map_err(|_| "Invalid JWT format\n")?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&payload_bytes).map_err(|_| "Invalid JWT format\n")?;
+    if let Some(exp) = payload.get("exp").and_then(|v| v.as_i64()) {
+        if chrono::Utc::now().timestamp() > exp {
+            return Err("Token has expired\n");
+        }
+    }
+    let signature = engine.decode(sig_b64).map_err(|_| "Invalid JWT format\n")?;
+    let message = format!("{}.{}", header_b64, payload_b64);
+    let key = ring::signature::UnparsedPublicKey::new(
+        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+        public_key_der,
+    );
+    key.verify(message.as_bytes(), &signature)
+        .map_err(|_| "Invalid token signature\n")
+}
+
+/// Split one PEM block into its label and DER bytes.
+fn parse_pem_block(pem: &[u8]) -> Option<(String, Vec<u8>)> {
+    use base64::Engine;
+    let text = std::str::from_utf8(pem).ok()?;
+    let begin = text.find("-----BEGIN ")?;
+    let after_begin = &text[begin + "-----BEGIN ".len()..];
+    let label_end = after_begin.find("-----")?;
+    let label = after_begin[..label_end].trim().to_string();
+    let rest = &after_begin[label_end + "-----".len()..];
+    let end = rest.find("-----END ")?;
+    let body: String = rest[..end].chars().filter(|c| !c.is_whitespace()).collect();
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(&body)
+        .ok()?;
+    Some((label, der))
+}
+
+/// Read one DER tag-length-value triple: returns (tag, content, rest).
+/// Only definite-form lengths are accepted.
+fn der_read_tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    if input.len() < 2 {
+        return None;
+    }
+    let tag = input[0];
+    let (len, header) = if input[1] < 0x80 {
+        (input[1] as usize, 2)
+    } else {
+        let count = (input[1] & 0x7f) as usize;
+        if count == 0 || count > 4 || input.len() < 2 + count {
+            return None;
+        }
+        let mut len = 0usize;
+        for b in &input[2..2 + count] {
+            len = len.checked_mul(256)?.checked_add(*b as usize)?;
+        }
+        (len, 2 + count)
+    };
+    if input.len() < header + len {
+        return None;
+    }
+    Some((tag, &input[header..header + len], &input[header + len..]))
+}
+
+/// Unwrap an X.509 SPKI (`PUBLIC KEY`) DER container down to the bare
+/// PKCS#1 RSAPublicKey DER that `ring`'s RSA verifier expects. The
+/// algorithm must be rsaEncryption (1.2.840.113549.1.1.1).
+fn spki_to_pkcs1(spki: &[u8]) -> Option<Vec<u8>> {
+    const RSA_ENCRYPTION_OID: &[u8] = &[
+        0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
+    ];
+    let (tag, content, rest) = der_read_tlv(spki)?;
+    if tag != 0x30 || !rest.is_empty() {
+        return None;
+    }
+    let (alg_tag, alg_content, key_rest) = der_read_tlv(content)?;
+    if alg_tag != 0x30
+        || !alg_content
+            .windows(RSA_ENCRYPTION_OID.len())
+            .any(|w| w == RSA_ENCRYPTION_OID)
+    {
+        return None;
+    }
+    let (bits_tag, bits_content, key_end) = der_read_tlv(key_rest)?;
+    if bits_tag != 0x03 || !key_end.is_empty() {
+        return None;
+    }
+    // First BIT STRING byte is the unused-bits count, always zero here.
+    let pkcs1 = bits_content.strip_prefix(&[0x00])?;
+    Some(pkcs1.to_vec())
+}
+
+/// Load the RSA public key for JWT verification: an explicit
+/// `KUIPER_AUTH_PUBLIC_KEY_FILE` path first, then the conventional
+/// `etc/mgmt/public.pem` and `etc/public.pem` locations. Both SPKI
+/// (`PUBLIC KEY`) and bare PKCS#1 (`RSA PUBLIC KEY`) PEM blocks are
+/// accepted; either way the PKCS#1 DER that `ring` expects is returned.
+fn load_auth_public_key() -> Option<Vec<u8>> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("KUIPER_AUTH_PUBLIC_KEY_FILE") {
+        if !path.trim().is_empty() {
+            candidates.push(path);
+        }
+    }
+    candidates.push("etc/mgmt/public.pem".to_string());
+    candidates.push("etc/public.pem".to_string());
+    candidates.into_iter().find_map(|path| {
+        let bytes = std::fs::read(&path).ok()?;
+        let (label, der) = parse_pem_block(&bytes)?;
+        match label.as_str() {
+            "PUBLIC KEY" => spki_to_pkcs1(&der),
+            "RSA PUBLIC KEY" => Some(der),
+            _ => None,
+        }
+    })
+}
+
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/", get(root_handler).post(root_handler))
         .route("/streams", get(list_streams).post(create_stream))
-        .route("/streams/:name", get(get_stream).delete(delete_stream))
+        .route(
+            "/streams/:name",
+            get(get_stream).put(update_stream).delete(delete_stream),
+        )
         .route("/streams/:name/data", post(push_stream_data))
         .route("/streams/:name/schema", get(get_stream_schema))
         .route("/tables", get(list_tables).post(create_table))
-        .route("/tables/:name", get(get_table).delete(delete_table))
+        .route(
+            "/tables/:name",
+            get(get_table).put(update_table).delete(delete_table),
+        )
         .route("/tables/:name/data", post(push_table_data))
         .route("/tables/:name/schema", get(get_table_schema))
         .route("/tabledetails", get(get_table_details))
@@ -501,7 +680,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules", get(list_rules).post(create_rule))
         .route("/rules/validate", post(validate_rule))
         .route("/rules/status/all", get(get_all_rule_status))
-        .route("/rules/:name", get(get_rule).delete(delete_rule))
+        .route(
+            "/rules/:name",
+            get(get_rule).put(update_rule).delete(delete_rule),
+        )
         .route("/rules/:name/status", get(get_rule_status))
         .route("/rules/:name/topo", get(get_rule_topo))
         .route("/rules/:name/explain", get(get_rule_explain))
@@ -538,17 +720,23 @@ pub fn create_router(state: AppState) -> Router {
             "/rules/tags/match",
             get(rule_tags_match).post(rule_tags_match),
         )
-        .route("/configs", get(get_configs))
+        .route("/configs", get(get_configs).patch(patch_configs))
         .route(
             "/config/uploads",
             get(get_config_uploads).post(upload_config_file),
         )
         .route("/config/uploads/:name", delete(delete_config_upload))
         .route("/stop", get(stop_server).post(stop_server))
-        .route("/data/import", post(import_ruleset))
-        .route("/data/export", get(export_ruleset))
-        .route("/v2/data/import", post(import_ruleset))
-        .route("/v2/data/export", get(export_ruleset))
+        .route("/data/import", post(import_data))
+        .route(
+            "/data/export",
+            get(export_ruleset).post(export_data_selected),
+        )
+        .route("/v2/data/import", post(import_data))
+        .route(
+            "/v2/data/export",
+            get(export_ruleset).post(export_data_selected),
+        )
         .route("/ruleset/import", post(import_ruleset))
         .route("/ruleset/export", get(export_ruleset).post(export_ruleset))
         .route("/metadata/sources", get(list_source_metadata))
@@ -566,7 +754,9 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/connections/:id",
-            get(get_connection).delete(delete_connection),
+            get(get_connection)
+                .put(update_connection)
+                .delete(delete_connection),
         )
         .route(
             "/plugins/sources",
@@ -649,7 +839,7 @@ pub fn create_router(state: AppState) -> Router {
             "/schemas/:kind/:name",
             get(get_schema).put(update_schema).delete(delete_schema),
         )
-        .route("/schemas/:kind/:name/upload", put(update_schema))
+        .route("/schemas/:kind/:name/upload", put(upload_schema))
         .route("/metadata/connections/:name", get(get_connection_metadata))
         .route("/metadata/sources/yaml/:name", get(get_source_yaml))
         .route(
@@ -691,6 +881,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metrics/dump", get(metrics_dump))
         .route("/metrics/dump/check", get(metrics_dump))
         .route("/metrics", get(prometheus_metrics_handler))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_guard,
+        ))
         .with_state(state)
 }
 
@@ -732,6 +926,36 @@ struct CreateStreamPayload {
     name: Option<String>,
 }
 
+/// Map parsed `CREATE` columns onto stored stream/table fields.
+fn to_stream_fields(cols: Vec<StreamColumn>) -> Vec<StreamField> {
+    cols.into_iter()
+        .map(|c| StreamField {
+            name: c.name,
+            field_type: c.data_type,
+        })
+        .collect()
+}
+
+/// eKuiper-style describe envelope shared by `GET` and `DESCRIBE` paths.
+fn describe_stream(def: &StreamDefinition) -> Value {
+    json!({
+        "Name": def.name,
+        "StreamFields": def.stream_fields,
+        "Options": def.options,
+        "StreamType": "stream",
+    })
+}
+
+/// eKuiper-style describe envelope for lookup tables.
+fn describe_table(def: &TableDefinition) -> Value {
+    json!({
+        "Name": def.name,
+        "StreamFields": def.stream_fields,
+        "Options": def.options,
+        "StreamType": "table",
+    })
+}
+
 async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
     let streams = state.stream_manager.list_streams();
     Json(streams)
@@ -742,12 +966,54 @@ async fn create_stream(
     Json(payload): Json<CreateStreamPayload>,
 ) -> Response {
     if let Some(sql) = payload.sql {
+        // Stream management statements run inline: SHOW STREAMS lists names,
+        // DESCRIBE STREAM reports one definition (both answer 201).
+        let mut words = sql.split_whitespace();
+        let head = (
+            words.next().map(|w| w.to_ascii_uppercase()),
+            words.next().map(|w| w.to_ascii_uppercase()),
+        );
+        if head == (Some("SHOW".to_string()), Some("STREAMS".to_string())) {
+            return (
+                StatusCode::CREATED,
+                Json(state.stream_manager.list_streams()),
+            )
+                .into_response();
+        }
+        if head == (Some("DESCRIBE".to_string()), Some("STREAM".to_string())) {
+            let target = words
+                .next()
+                .unwrap_or("")
+                .trim_matches(['"', '\'', '`', ';']);
+            if target.is_empty() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Missing stream name in DESCRIBE STREAM",
+                )
+                    .into_response();
+            }
+            if let Some(def) = state.stream_manager.get_stream(target) {
+                return (StatusCode::CREATED, Json(describe_stream(&def))).into_response();
+            }
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": 3000,
+                    "message": format!(
+                        "describe stream error: Describe stream fails, {} is not found.",
+                        target
+                    )
+                })),
+            )
+                .into_response();
+        }
         let mut parser = Parser::new(&sql);
         match parser.parse_create_stream() {
             Ok(stmt) => {
                 let stream_def = StreamDefinition {
                     name: stmt.name.clone(),
                     sql: sql.clone(),
+                    stream_fields: to_stream_fields(stmt.fields),
                     options: stmt.options,
                 };
                 if let Err(e) = state.stream_manager.create_stream(stream_def).await {
@@ -766,6 +1032,7 @@ async fn create_stream(
         let stream_def = StreamDefinition {
             name: name.clone(),
             sql: "".to_string(),
+            stream_fields: Vec::new(),
             options: HashMap::new(),
         };
         if let Err(e) = state.stream_manager.create_stream(stream_def).await {
@@ -787,9 +1054,19 @@ async fn get_stream(State(state): State<AppState>, Path(name): Path<String>) -> 
         return resp;
     }
     if let Some(def) = state.stream_manager.get_stream(&name) {
-        Json(def).into_response()
+        Json(describe_stream(&def)).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response()
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 3000,
+                "message": format!(
+                    "describe stream error: Describe stream fails, {} is not found.",
+                    name
+                )
+            })),
+        )
+            .into_response()
     }
 }
 
@@ -801,6 +1078,55 @@ async fn delete_stream(State(state): State<AppState>, Path(name): Path<String>) 
         Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.\n", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
+}
+
+/// Replace a stream definition (eKuiper `PUT /streams/:name`). Accepts raw
+/// `CREATE STREAM ...` DDL or a JSON envelope carrying `sql`; the path name
+/// is canonical. Missing streams 404 instead of being silently created.
+async fn update_stream(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if state.stream_manager.get_stream(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response();
+    }
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing stream definition").into_response();
+    }
+    let sql = match serde_json::from_slice::<Value>(&body) {
+        Ok(Value::Object(map)) => match map.get("sql").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return (StatusCode::BAD_REQUEST, "Missing sql in request").into_response(),
+        },
+        Ok(_) => return (StatusCode::BAD_REQUEST, "Missing sql in request").into_response(),
+        Err(_) => match String::from_utf8(body.to_vec()) {
+            Ok(s) => s,
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "Invalid stream definition").into_response();
+            }
+        },
+    };
+    let mut parser = Parser::new(&sql);
+    let stmt = match parser.parse_create_stream() {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
+    };
+    let _ = state.stream_manager.delete_stream(&name).await;
+    let stream_def = StreamDefinition {
+        name: name.clone(),
+        sql: sql.clone(),
+        stream_fields: to_stream_fields(stmt.fields),
+        options: stmt.options,
+    };
+    if let Err(e) = state.stream_manager.create_stream(stream_def).await {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    state.stream_bus.get_or_create(&name);
+    (StatusCode::OK, format!("Stream {} is updated.\n", name)).into_response()
 }
 
 /// HTTP push source following the eKuiper REST API.
@@ -897,6 +1223,7 @@ async fn create_table(
             let table_def = TableDefinition {
                 name: stmt.name.clone(),
                 sql: sql.clone(),
+                stream_fields: to_stream_fields(stmt.fields),
                 options: stmt.options,
             };
             if let Err(e) = state.table_manager.create_table(table_def).await {
@@ -917,9 +1244,19 @@ async fn get_table(State(state): State<AppState>, Path(name): Path<String>) -> R
         return resp;
     }
     if let Some(def) = state.table_manager.get_table(&name) {
-        Json(def).into_response()
+        Json(describe_table(&def)).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Table {} not found", name)).into_response()
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 3000,
+                "message": format!(
+                    "describe table error: Describe table fails, {} is not found.",
+                    name
+                )
+            })),
+        )
+            .into_response()
     }
 }
 
@@ -931,6 +1268,54 @@ async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -
         Ok(_) => (StatusCode::OK, format!("Table {} is dropped.\n", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
+}
+
+/// Replace a table definition (eKuiper `PUT /tables/:name`). Accepts raw
+/// `CREATE TABLE ...` DDL or a JSON envelope carrying `sql`; the path name
+/// is canonical. Missing tables 404 instead of being silently created.
+async fn update_table(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if state.table_manager.get_table(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Table {} not found", name)).into_response();
+    }
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing table definition").into_response();
+    }
+    let sql = match serde_json::from_slice::<Value>(&body) {
+        Ok(Value::Object(map)) => match map.get("sql").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return (StatusCode::BAD_REQUEST, "Missing sql in request").into_response(),
+        },
+        Ok(_) => return (StatusCode::BAD_REQUEST, "Missing sql in request").into_response(),
+        Err(_) => match String::from_utf8(body.to_vec()) {
+            Ok(s) => s,
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "Invalid table definition").into_response();
+            }
+        },
+    };
+    let mut parser = Parser::new(&sql);
+    let stmt = match parser.parse_create_table() {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
+    };
+    let _ = state.table_manager.delete_table(&name).await;
+    let table_def = TableDefinition {
+        name: name.clone(),
+        sql: sql.clone(),
+        stream_fields: to_stream_fields(stmt.fields),
+        options: stmt.options,
+    };
+    if let Err(e) = state.table_manager.create_table(table_def).await {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    (StatusCode::OK, format!("Table {} is updated.\n", name)).into_response()
 }
 
 async fn get_table_details(State(state): State<AppState>) -> impl IntoResponse {
@@ -948,19 +1333,54 @@ async fn get_stream_details(State(state): State<AppState>) -> impl IntoResponse 
     Json(defs)
 }
 
+/// Field-type map for a describe subject: `{name: {type, index}}`.
+fn field_schema_map(fields: &[StreamField]) -> Value {
+    let mut schema_map = serde_json::Map::new();
+    for (idx, field) in fields.iter().enumerate() {
+        schema_map.insert(
+            field.name.clone(),
+            json!({
+                "type": field.field_type.to_ascii_lowercase(),
+                "index": idx
+            }),
+        );
+    }
+    Value::Object(schema_map)
+}
+
 async fn get_stream_schema(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Some(def) = state.stream_manager.get_stream(&name) {
-        Json(json!({ "name": def.name, "options": def.options })).into_response()
+        Json(field_schema_map(&def.stream_fields)).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Stream {} not found", name)).into_response()
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 3000,
+                "message": format!(
+                    "describe stream error: Describe stream fails, {} is not found.",
+                    name
+                )
+            })),
+        )
+            .into_response()
     }
 }
 
 async fn get_table_schema(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Some(def) = state.table_manager.get_table(&name) {
-        Json(json!({ "name": def.name, "options": def.options })).into_response()
+        Json(field_schema_map(&def.stream_fields)).into_response()
     } else {
-        (StatusCode::NOT_FOUND, format!("Table {} not found", name)).into_response()
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 3000,
+                "message": format!(
+                    "describe table error: Describe table fails, {} is not found.",
+                    name
+                )
+            })),
+        )
+            .into_response()
     }
 }
 
@@ -1010,6 +1430,9 @@ async fn create_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+        return resp;
+    }
 
     let rule_id = rule.id.clone();
 
@@ -1071,32 +1494,67 @@ fn resolve_mqtt_source(
         username: None,
         password: None,
     };
-    if let Some(key) = def.options.get("CONF_KEY") {
-        if !key.trim().is_empty() {
-            let lookup = format!("mqtt/{}", key);
-            if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
-                match serde_json::from_value::<MqttConfig>(conf_val) {
-                    Ok(stored) => config = stored,
-                    Err(e) => {
-                        tracing::warn!(
-                            "[RULE {}] invalid mqtt config '{}': {}",
-                            rule_id,
-                            lookup,
-                            e
-                        );
+    // CONF_KEY lookup is case-insensitive (`CONF_KEY`, `conf_key`,
+    // `confKey`): SQL definitions and imported/JSON definitions disagree on
+    // case. Stored configs typically carry only connection parameters, so a
+    // failed full decode still salvages server/credentials field by field.
+    let conf_key = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("CONF_KEY") || k.eq_ignore_ascii_case("confKey"))
+        .map(|(_, v)| v.trim());
+    if let Some(key) = conf_key {
+        if !key.is_empty() {
+            let lookup1 = format!("mqtt/{}", key);
+            let configs_guard = source_configs.read();
+            let conf_val = configs_guard
+                .get(&lookup1)
+                .or_else(|| configs_guard.get(key))
+                .cloned();
+            drop(configs_guard);
+            if let Some(val) = conf_val {
+                if let Ok(stored) = serde_json::from_value::<MqttConfig>(val.clone()) {
+                    config = stored;
+                } else if let Some(srv) = val.get("server").and_then(|v| v.as_str()) {
+                    if !srv.trim().is_empty() {
+                        config.server = srv.to_string();
                     }
+                    if let Some(u) = val.get("username").and_then(|v| v.as_str()) {
+                        config.username = Some(u.to_string());
+                    }
+                    if let Some(p) = val.get("password").and_then(|v| v.as_str()) {
+                        config.password = Some(p.to_string());
+                    }
+                } else {
+                    tracing::warn!(
+                        "[RULE {}] invalid mqtt config '{}': no server field",
+                        rule_id,
+                        lookup1,
+                    );
                 }
             }
         }
     }
-    if let Some(server) = def.options.get("SERVER") {
-        if !server.trim().is_empty() {
-            config.server = server.clone();
+    // Direct SERVER option overrides the configuration key (case-insensitive).
+    let server_opt = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("SERVER"))
+        .map(|(_, v)| v.trim());
+    if let Some(srv) = server_opt {
+        if !srv.is_empty() {
+            config.server = srv.to_string();
         }
     }
-    if let Some(topic) = def.options.get("DATASOURCE") {
-        if !topic.trim().is_empty() {
-            config.topic = topic.clone();
+    // DATASOURCE / topic (case-insensitive).
+    let topic_opt = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("topic"))
+        .map(|(_, v)| v.trim());
+    if let Some(top) = topic_opt {
+        if !top.is_empty() {
+            config.topic = top.to_string();
         }
     }
     if config.topic.trim().is_empty() {
@@ -1246,6 +1704,22 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
             tx: stream_tx,
         }
         .spawn(cancel_rx);
+    }
+
+    // SQL source streams poll a database table into the stream bus.
+    if let Some(config) = resolve_sql_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &select_stmt.from,
+        rule_id,
+    ) {
+        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .insert(rule_id.to_string(), cancel_tx);
+        SqlSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
     // Simulator source streams replay configured data into the stream bus.
@@ -2223,6 +2697,86 @@ fn lookup_value_to_row(value: Value) -> HashMap<String, Value> {
     }
 }
 
+/// Resolve the polling config for a `TYPE="sql"` source stream: a matching
+/// `sql/{conf_key}` source config wins, otherwise the stream options (`URL`,
+/// falling back to `DATASOURCE`, plus `TABLE` or the stream name and an
+/// optional `INTERVAL` poll period). Option names match case-insensitively.
+fn resolve_sql_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<SqlConnectorConfig> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    if !kind.eq_ignore_ascii_case("sql") {
+        return None;
+    }
+    let conf_key = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("CONF_KEY") || k.eq_ignore_ascii_case("confKey"))
+        .map(|(_, v)| v.trim().to_string());
+    if let Some(key) = conf_key {
+        if !key.is_empty() {
+            let lookup = format!("sql/{}", key);
+            let configs_guard = source_configs.read();
+            let conf_val = configs_guard
+                .get(&lookup)
+                .or_else(|| configs_guard.get(&key))
+                .cloned();
+            drop(configs_guard);
+            if let Some(val) = conf_val {
+                match serde_json::from_value::<SqlConnectorConfig>(val) {
+                    Ok(conf) => return Some(conf),
+                    Err(e) => {
+                        tracing::warn!(
+                            "[RULE {}] invalid sql source config '{}': {}",
+                            rule_id,
+                            lookup,
+                            e
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    let url = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("URL") || k.eq_ignore_ascii_case("DATASOURCE"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    if url.trim().is_empty() {
+        return None;
+    }
+    let table = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TABLE"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| stream_name.to_string());
+    let interval = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("INTERVAL"))
+        .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+        .unwrap_or(1000)
+        .max(1);
+    Some(SqlConnectorConfig {
+        url,
+        table,
+        fields: Vec::new(),
+        interval,
+    })
+}
+
 /// Resolve the `(url, table)` pair for a `TYPE="sql"` lookup table: a
 /// matching `sql/{conf_key}` source config wins, otherwise the table options
 /// (`URL`, falling back to `DATASOURCE`, plus `TABLE` or the target name).
@@ -2791,15 +3345,187 @@ async fn get_all_rule_status(State(state): State<AppState>) -> impl IntoResponse
     Json(all)
 }
 
-async fn validate_rule(Json(rule): Json<RuleDefinition>) -> Response {
+/// Collect every called function name in an expression (including CASE
+/// branches and analytic OVER calls).
+fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::Call { name, args } => {
+            out.push(name.clone());
+            for arg in args {
+                collect_called_functions(arg, out);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_called_functions(left, out);
+            collect_called_functions(right, out);
+        }
+        Expr::UnaryOp { expr, .. } => collect_called_functions(expr, out),
+        Expr::Between {
+            expr, low, high, ..
+        } => {
+            collect_called_functions(expr, out);
+            collect_called_functions(low, out);
+            collect_called_functions(high, out);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_called_functions(expr, out);
+            for item in list {
+                collect_called_functions(item, out);
+            }
+        }
+        Expr::IsNull { expr, .. } => collect_called_functions(expr, out),
+        Expr::FieldAccess { parent, .. } => collect_called_functions(parent, out),
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        } => {
+            if let Some(op) = operand {
+                collect_called_functions(op, out);
+            }
+            for (w, t) in when_clauses {
+                collect_called_functions(w, out);
+                collect_called_functions(t, out);
+            }
+            if let Some(e) = else_clause {
+                collect_called_functions(e, out);
+            }
+        }
+        Expr::Over { call, partition_by } => {
+            collect_called_functions(call, out);
+            if let Some(p) = partition_by {
+                collect_called_functions(p, out);
+            }
+        }
+        Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => {}
+    }
+}
+
+/// Every function called anywhere in a SELECT statement (projections,
+/// filters, grouping, joins, set-operation branches).
+fn stmt_called_functions(stmt: &SelectStmt) -> Vec<String> {
+    let mut out = Vec::new();
+    for field in &stmt.fields {
+        collect_called_functions(field, &mut out);
+    }
+    if let Some(w) = &stmt.where_clause {
+        collect_called_functions(w, &mut out);
+    }
+    for g in &stmt.group_by {
+        collect_called_functions(g, &mut out);
+    }
+    if let Some(h) = &stmt.having {
+        collect_called_functions(h, &mut out);
+    }
+    for item in &stmt.order_by {
+        collect_called_functions(&item.expr, &mut out);
+    }
+    for join in &stmt.joins {
+        if let Some(on) = &join.on {
+            collect_called_functions(on, &mut out);
+        }
+    }
+    if let Some((_, rhs)) = &stmt.set_op {
+        out.extend(stmt_called_functions(rhs));
+    }
+    out
+}
+
+/// First called function unknown to the built-in library, the global UDF
+/// registry and registered function/UDF plugin definitions, if any.
+fn find_unknown_function(stmt: &SelectStmt, plugins: &PluginManager) -> Option<String> {
+    let global = rekuiper_core::plugin::get_global_udf_registry();
+    let plugin_defs: Vec<PluginDefinition> = plugins
+        .list_plugins("function")
+        .into_iter()
+        .chain(plugins.list_plugins("udf"))
+        .collect();
+    for name in stmt_called_functions(stmt) {
+        if is_builtin_function(&name) || global.has_udf(&name) || plugins.has_udf(&name) {
+            continue;
+        }
+        if plugin_defs
+            .iter()
+            .flat_map(|d| d.functions.iter())
+            .any(|f| f.eq_ignore_ascii_case(&name))
+        {
+            continue;
+        }
+        return Some(name);
+    }
+    None
+}
+
+/// 422 rejection when a rule calls an unknown function; `None` when clean.
+fn check_rule_functions(state: &AppState, stmt: &SelectStmt) -> Option<Response> {
+    find_unknown_function(stmt, &state.plugin_manager).map(|bad_fn| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "invalid rule json: Parse SQL ... error: function {} not found.",
+                bad_fn
+            ),
+        )
+            .into_response()
+    })
+}
+
+/// Shared create/update gate: the source stream or table must exist and
+/// every called function must be known. Returns the rejection response
+/// when the rule is invalid.
+fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> {
+    let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
+        || state.table_manager.get_table(&stmt.from).is_some();
+    if !stream_exists {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": 1000,
+                    "message": format!(
+                        "fail to get stream {}, please check if stream is created",
+                        stmt.from
+                    )
+                })),
+            )
+                .into_response(),
+        );
+    }
+    if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": 1000,
+                    "message": format!(
+                        "invalid rule json: Parse SQL ... error: function {} not found.",
+                        bad_fn
+                    )
+                })),
+            )
+                .into_response(),
+        );
+    }
+    None
+}
+
+async fn validate_rule(
+    State(state): State<AppState>,
+    Json(rule): Json<RuleDefinition>,
+) -> Response {
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
             return match compile_graph_to_sql_and_actions(graph) {
                 Ok((sql, _)) => {
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
-                        Ok(_) => (StatusCode::OK, "The rule has been validated successfully\n")
-                            .into_response(),
+                        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+                            Json(json!({
+                                "sources": graph.topo.sources,
+                                "valid": true
+                            }))
+                            .into_response()
+                        }),
                         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
                             .into_response(),
                     }
@@ -2814,7 +3540,13 @@ async fn validate_rule(Json(rule): Json<RuleDefinition>) -> Response {
     }
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
-        Ok(_) => (StatusCode::OK, "The rule has been validated successfully\n").into_response(),
+        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+            Json(json!({
+                "sources": [stmt.from],
+                "valid": true
+            }))
+            .into_response()
+        }),
         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response(),
     }
 }
@@ -3063,8 +3795,126 @@ async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) ->
     }
 }
 
+/// Replace a rule definition (eKuiper `PUT /rules/:name`): the running worker
+/// and its sources are stopped, the definition is swapped, and the pipeline
+/// is restarted with the new SQL, actions and options. The path name is
+/// canonical. Missing rules 404.
+async fn update_rule(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(mut rule): Json<RuleDefinition>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if state.rule_manager.get_rule(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
+    rule.id = name.clone();
+    // Graph rules carry no SQL: compile the DAG first (mirrors creation).
+    if rule.sql.trim().is_empty() {
+        if let Some(ref graph) = rule.graph {
+            match compile_graph_to_sql_and_actions(graph) {
+                Ok((sql, actions)) => {
+                    rule.sql = sql;
+                    if rule.actions.is_empty() {
+                        rule.actions = actions;
+                    }
+                }
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("Invalid rule graph: {}", e),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+    let mut parser = Parser::new(&rule.sql);
+    let select_stmt = match parser.parse_select() {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
+        }
+    };
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+        return resp;
+    }
+    // Stop the running worker and its sources before replacing the definition.
+    let _ = state.rule_manager.stop_rule(&name).await;
+    cancel_rule_source(&state, &name);
+    state.trace_manager.stop_trace(&name);
+    if let Err(e) = state.rule_manager.delete_rule(&name).await {
+        return (StatusCode::NOT_FOUND, e.to_string()).into_response();
+    }
+    if let Err(e) = state.rule_manager.create_rule(rule.clone()).await {
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    spawn_rule_task(
+        &state.rule_manager,
+        &state.stream_bus,
+        &state.stream_manager,
+        &state.table_manager,
+        &state.source_configs,
+        &state.http_client,
+        &state.trace_manager,
+        name.clone(),
+        select_stmt.clone(),
+        rule.actions.clone(),
+        rule.options.clone(),
+    );
+    bootstrap_rule_sources(&state, &name, &select_stmt);
+    (
+        StatusCode::OK,
+        format!("Rule {} was updated successfully.\n", name),
+    )
+        .into_response()
+}
+
 async fn get_configs(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.config.clone())
+    Json(state.config.read().clone())
+}
+
+/// Partial runtime configuration update (eKuiper `PATCH /configs`): deep
+/// merges the JSON object into the live config and answers 204 No Content.
+async fn patch_configs(State(state): State<AppState>, Json(patch): Json<Value>) -> Response {
+    let Value::Object(overlay) = patch else {
+        return (StatusCode::BAD_REQUEST, "Expected a JSON object").into_response();
+    };
+    let mut current = serde_json::to_value(state.config.read().clone()).unwrap_or(json!({}));
+    merge_json_object(&mut current, &Value::Object(overlay));
+    match serde_json::from_value::<KuiperConfig>(current) {
+        Ok(updated) => {
+            *state.config.write() = updated;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid config patch: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// Recursively merges `overlay` objects into `base`; scalars and arrays are
+/// replaced, nested objects merge key by key.
+fn merge_json_object(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base_map), Value::Object(overlay_map)) => {
+            for (k, v) in overlay_map {
+                match base_map.get_mut(k) {
+                    Some(existing) => merge_json_object(existing, v),
+                    None => {
+                        base_map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (base_slot, v) => {
+            *base_slot = v.clone();
+        }
+    }
 }
 
 /// Unified ruleset export: all streams, tables and rules with full definitions.
@@ -3091,9 +3941,69 @@ async fn export_ruleset(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// Selective ruleset export (baseline `POST /data/export`): exports the
+/// requested rules plus their dependent streams and tables. An absent or
+/// empty selection exports everything.
+async fn export_data_selected(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let wanted: Option<HashSet<String>> =
+        payload.get("rules").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+    let mut rules = state.rule_manager.list_rules();
+    if let Some(ids) = &wanted {
+        if !ids.is_empty() {
+            rules.retain(|r| ids.contains(&r.id));
+        }
+    }
+    // Dependent stream/table names from FROM + JOIN clauses (best effort:
+    // rules whose SQL will not parse export without dependencies).
+    let mut dep_names = HashSet::new();
+    for rule in &rules {
+        let mut parser = Parser::new(&rule.sql);
+        if let Ok(stmt) = parser.parse_select() {
+            dep_names.insert(stmt.from.clone());
+            for join in &stmt.joins {
+                dep_names.insert(join.target.clone());
+            }
+        }
+    }
+    let mut dep_names: Vec<String> = dep_names.into_iter().collect();
+    dep_names.sort();
+    let mut streams = Vec::new();
+    let mut tables = Vec::new();
+    for name in dep_names {
+        if let Some(def) = state.stream_manager.get_stream(&name) {
+            streams.push(def);
+        } else if let Some(def) = state.table_manager.get_table(&name) {
+            tables.push(def);
+        }
+    }
+    Json(json!({
+        "streams": streams,
+        "tables": tables,
+        "rules": rules,
+    }))
+    .into_response()
+}
+
+/// Counts of entities a data import actually created.
+#[derive(Default)]
+struct ImportCounts {
+    streams: usize,
+    tables: usize,
+    rules: usize,
+}
+
 /// Core data import logic shared by synchronous and asynchronous endpoints.
-async fn process_import_payload(state: &AppState, payload: &Value) {
+/// Returns how many streams, tables and rules were actually created.
+async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCounts {
     let mut status = default_import_status();
+    let mut counts = ImportCounts::default();
 
     if let Some(streams) = payload.get("streams") {
         if let Some(defs) = streams.as_array() {
@@ -3105,6 +4015,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                             status["streams"][&name] = json!(e.to_string());
                         } else {
                             state.stream_bus.get_or_create(&name);
+                            counts.streams += 1;
                         }
                     }
                     Err(e) => {
@@ -3124,6 +4035,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         .create_stream(StreamDefinition {
                             name: stream_name.clone(),
                             sql: sql_str.to_string(),
+                            stream_fields: to_stream_fields(stmt.fields),
                             options: stmt.options,
                         })
                         .await
@@ -3131,6 +4043,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         status["streams"][&stream_name] = json!(e.to_string());
                     } else {
                         state.stream_bus.get_or_create(&stream_name);
+                        counts.streams += 1;
                     }
                 } else if !name.is_empty() {
                     if let Err(e) = state
@@ -3138,6 +4051,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         .create_stream(StreamDefinition {
                             name: name.clone(),
                             sql: sql_str.to_string(),
+                            stream_fields: Vec::new(),
                             options: HashMap::new(),
                         })
                         .await
@@ -3145,6 +4059,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         status["streams"][name] = json!(e.to_string());
                     } else {
                         state.stream_bus.get_or_create(name);
+                        counts.streams += 1;
                     }
                 }
             }
@@ -3159,6 +4074,8 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         let name = def.name.clone();
                         if let Err(e) = state.table_manager.create_table(def).await {
                             status["tables"][&name] = json!(e.to_string());
+                        } else {
+                            counts.tables += 1;
                         }
                     }
                     Err(e) => {
@@ -3178,11 +4095,14 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         .create_table(TableDefinition {
                             name: table_name.clone(),
                             sql: sql_str.to_string(),
+                            stream_fields: to_stream_fields(stmt.fields),
                             options: stmt.options,
                         })
                         .await
                     {
                         status["tables"][&table_name] = json!(e.to_string());
+                    } else {
+                        counts.tables += 1;
                     }
                 } else if !name.is_empty() {
                     if let Err(e) = state
@@ -3190,11 +4110,14 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
                         .create_table(TableDefinition {
                             name: name.clone(),
                             sql: sql_str.to_string(),
+                            stream_fields: Vec::new(),
                             options: HashMap::new(),
                         })
                         .await
                     {
                         status["tables"][name] = json!(e.to_string());
+                    } else {
+                        counts.tables += 1;
                     }
                 }
             }
@@ -3202,39 +4125,82 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
     }
 
     if let Some(rules) = payload.get("rules") {
-        if let Some(defs) = rules.as_array() {
-            for item in defs {
-                let Ok(def) = serde_json::from_value::<RuleDefinition>(item.clone()) else {
-                    status["rules"]["unknown"] = json!("invalid rule definition");
-                    continue;
-                };
-                let mut parser = Parser::new(&def.sql);
-                let Ok(select_stmt) = parser.parse_select() else {
-                    status["rules"][&def.id] = json!("failed to parse SQL");
-                    continue;
-                };
-                if let Err(e) = state.rule_manager.create_rule(def.clone()).await {
-                    status["rules"][&def.id] = json!(e.to_string());
-                    continue;
-                }
-                spawn_rule_task(
-                    &state.rule_manager,
-                    &state.stream_bus,
-                    &state.stream_manager,
-                    &state.table_manager,
-                    &state.source_configs,
-                    &state.http_client,
-                    &state.trace_manager,
-                    def.id.clone(),
-                    select_stmt,
-                    def.actions.clone(),
-                    def.options.clone(),
-                );
+        // Rules arrive either as an array of definitions or as a map of
+        // id -> definition (missing ids are filled from the map keys).
+        let defs: Vec<Value> = if let Some(arr) = rules.as_array() {
+            arr.clone()
+        } else if let Some(map) = rules.as_object() {
+            map.iter()
+                .map(|(k, v)| {
+                    let mut obj = v.clone();
+                    if let Some(m) = obj.as_object_mut() {
+                        if !m.contains_key("id") {
+                            m.insert("id".to_string(), Value::String(k.clone()));
+                        }
+                    }
+                    obj
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for item in defs {
+            let Ok(def) = serde_json::from_value::<RuleDefinition>(item.clone()) else {
+                status["rules"]["unknown"] = json!("invalid rule definition");
+                continue;
+            };
+            let mut parser = Parser::new(&def.sql);
+            let Ok(select_stmt) = parser.parse_select() else {
+                status["rules"][&def.id] = json!("failed to parse SQL");
+                continue;
+            };
+            if let Err(e) = state.rule_manager.create_rule(def.clone()).await {
+                status["rules"][&def.id] = json!(e.to_string());
+                continue;
             }
+            counts.rules += 1;
+            spawn_rule_task(
+                &state.rule_manager,
+                &state.stream_bus,
+                &state.stream_manager,
+                &state.table_manager,
+                &state.source_configs,
+                &state.http_client,
+                &state.trace_manager,
+                def.id.clone(),
+                select_stmt,
+                def.actions.clone(),
+                def.options.clone(),
+            );
         }
     }
 
     *state.latest_import_status.write() = status;
+    counts
+}
+
+/// Baseline `POST /data/import`: runs the import and answers the structured
+/// configuration envelope.
+async fn import_data(State(state): State<AppState>, body: Bytes) -> Response {
+    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    process_import_payload(&state, &payload).await;
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ErrorMsg": "",
+            "ConfigResponse": {
+                "streams": {},
+                "tables": {},
+                "rules": {},
+                "nativePlugins": {},
+                "portablePlugins": {},
+                "sourceConfig": {},
+                "sinkConfig": {},
+                "connectionConfig": {}
+            }
+        })),
+    )
+        .into_response()
 }
 
 /// Unified ruleset import: creates streams, tables and rules from an export
@@ -3242,8 +4208,15 @@ async fn process_import_payload(state: &AppState, payload: &Value) {
 /// tables. Existing entities are left untouched.
 async fn import_ruleset(State(state): State<AppState>, body: Bytes) -> Response {
     let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    process_import_payload(&state, &payload).await;
-    (StatusCode::OK, "imported successfully\n").into_response()
+    let counts = process_import_payload(&state, &payload).await;
+    (
+        StatusCode::OK,
+        format!(
+            "imported {} streams, {} tables and {} rules\n",
+            counts.streams, counts.tables, counts.rules
+        ),
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -3573,6 +4546,10 @@ async fn create_service(State(state): State<AppState>, Json(body): Json<Value>) 
         .trim()
         .to_string();
     if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+
+    if let Some(resp) = reject_missing_plugin_file(&body) {
         return resp;
     }
 
@@ -3979,6 +4956,86 @@ async fn update_schema(
         .into_response()
 }
 
+/// Extract one file part from a `multipart/form-data` body without extra
+/// dependencies: splits on the boundary and returns the bytes after the
+/// first part's blank header line. Returns `None` when the shape is not a
+/// recognizable single-file upload.
+fn extract_multipart_file(body: &[u8], boundary: &str) -> Option<Vec<u8>> {
+    if boundary.is_empty() {
+        return None;
+    }
+    let sep = format!("--{}", boundary);
+    let text = std::str::from_utf8(body).ok()?;
+    for raw in text.split(&sep) {
+        // Skip the preamble and the closing `--` epilogue, which carry no
+        // headers and must not abort the scan.
+        let mut splitter = raw.splitn(2, "\r\n\r\n");
+        let headers = splitter.next().unwrap_or("");
+        let Some(content) = splitter.next() else {
+            continue;
+        };
+        if headers.to_ascii_lowercase().contains("filename=") {
+            let content = content.strip_suffix("\r\n").unwrap_or(content);
+            return Some(content.as_bytes().to_vec());
+        }
+    }
+    None
+}
+
+/// Schema file upload (baseline `PUT /schemas/:type/:name/upload`): accepts
+/// `multipart/form-data` file parts as well as raw body bytes, stores the
+/// content, and answers `{"type","name"}`. An empty body registers an empty
+/// shell so metadata-only flows keep working.
+async fn upload_schema(
+    State(state): State<AppState>,
+    Path((kind, name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(resp) = check_valid_name(&kind) {
+        return resp;
+    }
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let content = if body.is_empty() {
+        String::new()
+    } else if let Some(content_type) = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if content_type.starts_with("multipart/form-data") {
+            let boundary = content_type
+                .split("boundary=")
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+            match extract_multipart_file(&body, &boundary) {
+                Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                None => {
+                    return (StatusCode::BAD_REQUEST, "Invalid multipart upload").into_response();
+                }
+            }
+        } else {
+            String::from_utf8_lossy(&body).into_owned()
+        }
+    } else {
+        String::from_utf8_lossy(&body).into_owned()
+    };
+    let _ = state
+        .schema_manager
+        .register_schema(SchemaDefinition {
+            name: name.clone(),
+            kind: kind.clone(),
+            content: Some(content),
+            file: None,
+        })
+        .await;
+    (StatusCode::OK, Json(json!({ "type": kind, "name": name }))).into_response()
+}
+
 async fn delete_schema(
     State(state): State<AppState>,
     Path((kind, name)): Path<(String, String)>,
@@ -4133,7 +5190,16 @@ async fn register_function_plugin(
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    let _ = state.plugin_manager.get_plugin(&name);
+    if state.plugin_manager.get_plugin(&name).is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": 1000,
+                "message": format!("plugin {} is not found", name)
+            })),
+        )
+            .into_response();
+    }
     (StatusCode::OK, format!("Plugin {} is registered.\n", name)).into_response()
 }
 
@@ -4243,6 +5309,18 @@ async fn update_portable_plugin(
     if let Err(resp) = check_valid_name(name.as_str()) {
         return resp;
     }
+    if !state.portable_plugins.read().contains_key(&name)
+        && state.plugin_manager.get_plugin(&name).is_none()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": 1000,
+                "message": format!("plugin {} is not found", name)
+            })),
+        )
+            .into_response();
+    }
     let mut plugins = state.portable_plugins.write();
     if let Some((info, _)) = plugins.get_mut(&name) {
         if !body.is_empty() {
@@ -4291,6 +5369,21 @@ async fn delete_portable_plugin(
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    if !state.portable_plugins.read().contains_key(&name)
+        && state.plugin_manager.get_plugin(&name).is_none()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": 1000,
+                "message": format!(
+                    "fail to delete plugin {}: plugin {} is not found",
+                    name, name
+                )
+            })),
+        )
+            .into_response();
+    }
     let _ = state.plugin_manager.delete_plugin(&name).await;
     state.portable_plugins.write().remove(&name);
     (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
@@ -4321,6 +5414,51 @@ fn typed_plugin_payload(plugin_type: &str, mut payload: Value) -> Result<PluginD
         .map_err(|e| format!("Invalid plugin definition: {}", e))
 }
 
+/// Reject plugin/service payloads pointing at unreadable local files
+/// (baseline: `fail to download file ...: no such file or directory`).
+/// Only `file://` URIs and plain local paths are verifiable here; remote
+/// URLs pass through untouched.
+fn reject_missing_plugin_file(payload: &Value) -> Option<Response> {
+    let file_uri = payload.get("file").and_then(|v| v.as_str()).unwrap_or("");
+    if file_uri.is_empty() {
+        return None;
+    }
+    let is_local = file_uri.starts_with("file://") || !file_uri.contains("://");
+    if !is_local {
+        return None;
+    }
+    let raw = file_uri.strip_prefix("file://").unwrap_or(file_uri);
+    // Windows drive URIs arrive as file:///C:/... — drop the leading slash
+    // so the path resolves; POSIX absolutes (/tmp/...) pass through.
+    let raw_bytes = raw.as_bytes();
+    let path = if raw_bytes.len() >= 3
+        && raw_bytes[0] == b'/'
+        && raw_bytes[1].is_ascii_alphabetic()
+        && raw_bytes[2] == b':'
+    {
+        &raw[1..]
+    } else {
+        raw
+    };
+    if !std::path::Path::new(path).exists() {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": 1000,
+                    "message": format!(
+                        "fail to download file {}: stat {}: no such file or directory",
+                        file_uri,
+                        path
+                    )
+                })),
+            )
+                .into_response(),
+        );
+    }
+    None
+}
+
 async fn create_plugin_of_type(state: &AppState, plugin_type: &str, payload: Value) -> Response {
     let name = payload
         .get("name")
@@ -4328,6 +5466,9 @@ async fn create_plugin_of_type(state: &AppState, plugin_type: &str, payload: Val
         .unwrap_or("")
         .to_string();
     if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    if let Some(resp) = reject_missing_plugin_file(&payload) {
         return resp;
     }
     match typed_plugin_payload(plugin_type, payload) {
@@ -4355,16 +5496,16 @@ async fn update_typed_plugin(
     if let Err(resp) = check_valid_name(name) {
         return resp;
     }
-    let mut def = state
-        .plugin_manager
-        .get_plugin(name)
-        .unwrap_or_else(|| PluginDefinition {
-            name: name.to_string(),
-            plugin_type: plugin_type.to_string(),
-            file: None,
-            description: None,
-            functions: Vec::new(),
-        });
+    let Some(mut def) = state.plugin_manager.get_plugin(name) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": 1000,
+                "message": format!("plugin {} is not found", name)
+            })),
+        )
+            .into_response();
+    };
     def.plugin_type = plugin_type.to_string();
     if !body.is_empty() {
         if let Ok(val) = serde_json::from_slice::<Value>(&body) {
@@ -4422,7 +5563,19 @@ async fn delete_typed_plugin(state: &AppState, name: &str) -> Response {
     if let Err(resp) = check_valid_name(name) {
         return resp;
     }
-    // Idempotent like the other drop endpoints: missing plugins still 200.
+    if state.plugin_manager.get_plugin(name).is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": 1000,
+                "message": format!(
+                    "fail to delete plugin {}: plugin {} is not found",
+                    name, name
+                )
+            })),
+        )
+            .into_response();
+    }
     let _ = state.plugin_manager.delete_plugin(name).await;
     (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
 }
@@ -5302,6 +6455,27 @@ async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>
     }
 }
 
+/// Update-or-insert connection properties (eKuiper `PUT /connections/:id`):
+/// merges the JSON body into the stored entry and returns it for readback.
+async fn update_connection(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let mut stored = state
+        .connections
+        .read()
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| json!({"id": id}));
+    merge_json_object(&mut stored, &payload);
+    if let Some(obj) = stored.as_object_mut() {
+        obj.insert("id".to_string(), Value::String(id.clone()));
+    }
+    state.connections.write().insert(id, stored.clone());
+    Json(stored).into_response()
+}
+
 async fn bulk_start_rules(State(state): State<AppState>, body: Bytes) -> impl IntoResponse {
     let target_tags = if !body.is_empty() {
         if let Ok(val) = serde_json::from_slice::<Value>(&body) {
@@ -5729,6 +6903,12 @@ async fn delete_config_upload(Path(name): Path<String>) -> Response {
 }
 
 async fn stop_server() -> impl IntoResponse {
+    // Exit after a short grace delay so the HTTP 200 flushes to the client
+    // before the process terminates (baseline eKuiper exits with code 0).
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        std::process::exit(0);
+    });
     (StatusCode::OK, "Server is shutting down\n")
 }
 
@@ -5909,21 +7089,87 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
             }
         }
     };
+    // A simulation without a parseable SELECT statement is rejected, like
+    // baseline eKuiper.
+    let sql = payload.sql.clone().unwrap_or_default();
+    if sql.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 1000,
+                "message": "fail to run rule: SQL is not a select statement."
+            })),
+        )
+            .into_response();
+    }
+    if Parser::new(&sql).parse_select().is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": 1000,
+                "message": "fail to run rule: SQL is not a select statement."
+            })),
+        )
+            .into_response();
+    }
+    // Bind the per-session SSE listener first so the reported port is live
+    // from the moment the session is created (baseline serves the event
+    // stream on this port).
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to bind ruletest listener: {}", e),
+            )
+                .into_response();
+        }
+    };
+    let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
     let id = payload.id.unwrap_or_else(generate_ruletest_id);
     let (output_tx, _) = tokio::sync::broadcast::channel::<String>(256);
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    {
+        let feed_tx = output_tx.clone();
+        let shutdown_signal = shutdown.clone();
+        let app = axum::Router::new()
+            .route("/", axum::routing::get(ruletest_sse_feed))
+            .route("/*path", axum::routing::get(ruletest_sse_feed))
+            .with_state(feed_tx);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    shutdown_signal.notified().await;
+                })
+                .await;
+        });
+    }
     state.ruletests.write().insert(
         id.clone(),
         RuletestSession {
             id: id.clone(),
-            sql: payload.sql.unwrap_or_default(),
+            sql,
             mock_source: payload.mock_source,
             output_tx,
+            port,
+            shutdown,
         },
     );
-    (
-        StatusCode::OK,
-        Json(json!({ "id": id, "port": state.config.basic.port })),
-    )
+    (StatusCode::OK, Json(json!({ "id": id, "port": port }))).into_response()
+}
+
+/// Live output feed for one ruletest session: replays the session broadcast
+/// as Server-Sent Events on any path of its dedicated listener.
+async fn ruletest_sse_feed(State(tx): State<tokio::sync::broadcast::Sender<String>>) -> Response {
+    let rx = tx.subscribe();
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            Ok(line) => Some((Ok::<_, axum::Error>(Event::default().data(line)), rx)),
+            Err(_) => None,
+        }
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new())
         .into_response()
 }
 
@@ -5955,7 +7201,10 @@ async fn start_ruletest(State(state): State<AppState>, Path(name): Path<String>)
 }
 
 async fn delete_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
-    state.ruletests.write().remove(&name);
+    // Shutting down the dedicated SSE listener alongside the session.
+    if let Some(session) = state.ruletests.write().remove(&name) {
+        session.shutdown.notify_one();
+    }
     (StatusCode::OK, "dropped\n").into_response()
 }
 
@@ -5977,4 +7226,207 @@ async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String>) -
     Sse::new(stream)
         .keep_alive(KeepAlive::new())
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_stream_manager(options: &[(&str, &str)]) -> StreamManager {
+        let manager = StreamManager::new();
+        let opts = options
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<HashMap<_, _>>();
+        manager
+            .create_stream(StreamDefinition {
+                name: "demo".to_string(),
+                sql: String::new(),
+                stream_fields: Vec::new(),
+                options: opts,
+            })
+            .await
+            .unwrap();
+        manager
+    }
+
+    fn test_source_configs(pairs: &[(&str, Value)]) -> Arc<RwLock<HashMap<String, Value>>> {
+        Arc::new(RwLock::new(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn resolve_mqtt_source_honors_confkey_without_topic() {
+        // D1: a topic-less stored config must still contribute its broker URL.
+        let manager = test_stream_manager(&[("CONF_KEY", "remotekey")]).await;
+        let configs =
+            test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
+        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.server, "tcp://broker:1883");
+        assert_eq!(cfg.topic, "demo");
+    }
+
+    #[tokio::test]
+    async fn resolve_mqtt_source_is_case_insensitive() {
+        // Lowercase SQL/JSON option spellings resolve like the uppercase ones.
+        let manager =
+            test_stream_manager(&[("conf_key", "remotekey"), ("datasource", "sensors/#")]).await;
+        let configs =
+            test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
+        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.server, "tcp://broker:1883");
+        assert_eq!(cfg.topic, "sensors/#");
+    }
+
+    #[tokio::test]
+    async fn resolve_mqtt_source_server_option_overrides_confkey() {
+        let manager =
+            test_stream_manager(&[("CONF_KEY", "remotekey"), ("server", "tcp://override:1883")])
+                .await;
+        let configs =
+            test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
+        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.server, "tcp://override:1883");
+    }
+
+    #[tokio::test]
+    async fn resolve_mqtt_source_falls_back_to_loopback() {
+        let manager = test_stream_manager(&[]).await;
+        let configs = test_source_configs(&[]);
+        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.server, "tcp://127.0.0.1:1883");
+        assert_eq!(cfg.topic, "demo");
+    }
+
+    #[tokio::test]
+    async fn resolve_sql_source_from_confkey() {
+        // D8: a stored `sql/{key}` config provides url/table/interval.
+        let manager = test_stream_manager(&[("TYPE", "sql"), ("CONF_KEY", "pg")]).await;
+        let configs = test_source_configs(&[(
+            "sql/pg",
+            json!({"url": "postgres://db:5432/k", "table": "readings", "interval": 500}),
+        )]);
+        let cfg = resolve_sql_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.url, "postgres://db:5432/k");
+        assert_eq!(cfg.table, "readings");
+        assert_eq!(cfg.interval, 500);
+    }
+
+    #[tokio::test]
+    async fn resolve_sql_source_from_stream_options() {
+        // Lowercase option spellings resolve like the uppercase ones.
+        let manager = test_stream_manager(&[
+            ("type", "SQL"),
+            ("datasource", "sqlite://x.db"),
+            ("table", "sens"),
+        ])
+        .await;
+        let cfg = resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").unwrap();
+        assert_eq!(cfg.url, "sqlite://x.db");
+        assert_eq!(cfg.table, "sens");
+        assert_eq!(cfg.interval, 1000);
+    }
+
+    #[tokio::test]
+    async fn resolve_sql_source_rejects_non_sql_types() {
+        let manager = test_stream_manager(&[("TYPE", "mqtt")]).await;
+        assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
+        let manager = test_stream_manager(&[]).await;
+        assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
+    }
+
+    // D9: RS256 JWT vectors generated offline (2048-bit key, 1-year valid
+    // token, 1-hour-expired token, keyless-claims token, wrong-key token).
+    const TEST_RSA_PUBLIC_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmdub6pqDN/MPofsOTQlf\npCF6O4vsisxaDPzKZM8pqiUIOGjDwfqRQkzikSPu/oK8jPouof9JkeesUjbKg+0w\nQ7aZXgRPr8PJkHeY27/4bFz1riFPDZ+rKAe8DvXIlcjb70H68AtGnRzUkVjVlzhn\n6qfJE4LMmLtdQodW4Hnd2Oo8qujRprtn8AMcX5H1phIVUHYdIZpt44SNetOgCPxZ\n/S/0VLi2qD7bh/bBj6VRvea/LyCKnC75r+wnJGIHYpeVXskMrDBH+lfV1GsoU9Ig\nm+5MYAkc0SrgYBVCUXXvQNrip3IQcaWlW4YhkJC2rVBCA2ibc1MMWOyA0xYfJfy1\nvQIDAQAB\n-----END PUBLIC KEY-----\n";
+    const TEST_JWT_VALID: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE4MjA2MDE3MDB9.U3NGxZxNiHStyGFGZOKsz4PPM3aX2papMEOsKUqWnYC7NmgGxESTKWKtPM6M5McKUQwD3cfnnFH9p3XGdkTfPofxcnmJcrN8PMWdaVAcetYn_c5ScMWgQapjuHiO7jBQKljTU4AwuGrNQAMtxgBgSdEX-MG1AYZrNYcdgqXtfUPk8y_V2icNU8kVQRzRonHs4yaioIqy1IpBuxpb6A5AHRy07T_En_TlebfH7Tb-lf3tFDT8UUcjnfFJ-TPxFTGqLsPnLbdqXcrKi-PVqpbuFj2WSFlGinbZDGEsjhopdHPD1_PkC0Am3c4XmiCM3QswVqcUujwED71lcZXBdCFxPA";
+    const TEST_JWT_EXPIRED: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE3ODkwNjIxMDB9.GNrAExENuYVgbt8bZebTYTmCf2o0DcAkWzhpfkBCtAvPflzzr9xSNaEOrtf2HJU5gqOm-ZDIztXsatd765CtZA-uLcqjbCa4TURbMv0OFHDhMVlVfn2xr17jr39IG1ck7Ymioz_ZSd3wXu0egABsCUrKigEvtRwcGJSWlAp1GdRiWLpT2-U6Xb15bgUdbCNgYxyXiWM4zBLHVILLLH-zPyPIbvHo82l3qOpu7c2SRw5aNPrY2KXPCxKm47NEOkf74LJk14MZODeRTOYczyi8Q4vtD6xEcp8-u_vVUv5Gv04mrO1gMCALOQAWfKq2PFA0QatGX_cw8f36m_EOLLfuWA";
+    const TEST_JWT_NOEXP: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIifQ.dqsuFs9MyRMcgfPGvUAdCOJXKYFSMphpVASqmMH_n4aaAa3F7QeUz8ggX0931Z_TbgxvZ4Dp-Lf05eVSWOBWvpnjwSvn1JLw7axaEFl7BOEzsFzq_1gPMKMY1TXylXgUV2DHUhlayS53UcEvS5MP0vKQG07PsTOjFZACeuohilHX5vEmn9zwy67CbwL7Z3g32Msdb67pplMViAXGgau3UTYi5DOZFsSFlDrOj5w2Gg1EeZBpC1udtUvkIjHiW92LkoLI7HBzmRQwEuxGgOE134T2YGF5FuPjq-XpfiklV6SmrQpuHM_qGPtLHUm-6blwOgffAnr0uiCYVHZT5pe2hw";
+    const TEST_JWT_WRONGKEY: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0ZXIiLCJleHAiOjE4MjA2MDE3MDB9.Uu3vn8teCnUBsT-8updR4it_yyMoYdtqFGOvLgozxmsOmM8hb-FfqpeuqelBemgsbpwi2pbRVuOUxv0621ORempEpwfhCUnI80Rj9hPcOV0j8wYuX-xdsnvsNOPI1K6XlW9i1IOjToKxhptaPEPdYXf_jEq5v3P0zCITwevT2t6bpOdYzgSHjxq6CJiXIJHcP0idiQ1I3PqNhKmjJn3qi14GQ_xRk8Sf30VQDqsT76qXw0S92K-QKdcbc35oJW5x6oTdbgELv9YV-su1ooXTrLQ5zzY0g8qXhbkeLotXQEddaGMFeBOWchDax_km1g1gRbCS8f7TNEtO2xVkVHx-AQ";
+
+    fn test_key_der() -> Vec<u8> {
+        let (label, der) =
+            parse_pem_block(TEST_RSA_PUBLIC_PEM.as_bytes()).expect("test PEM parses");
+        assert_eq!(label, "PUBLIC KEY");
+        spki_to_pkcs1(&der).expect("test SPKI unwraps to PKCS#1")
+    }
+
+    #[test]
+    fn spki_unwrap_keeps_modulus_and_exponent() {
+        // The unwrapped PKCS#1 body is a bare SEQUENCE of two INTEGERs.
+        let pkcs1 = test_key_der();
+        let (tag, content, rest) = der_read_tlv(&pkcs1).expect("PKCS#1 parses as DER");
+        assert_eq!(tag, 0x30);
+        assert!(rest.is_empty());
+        let (n_tag, n_content, e_rest) = der_read_tlv(content).expect("modulus parses");
+        assert_eq!(n_tag, 0x02);
+        assert_eq!(n_content.len(), 257); // 2048-bit modulus + leading zero
+        let (e_tag, e_content, e_end) = der_read_tlv(e_rest).expect("exponent parses");
+        assert_eq!(e_tag, 0x02);
+        assert_eq!(e_content, &[0x01, 0x00, 0x01]); // 65537
+        assert!(e_end.is_empty());
+    }
+
+    #[test]
+    fn jwt_verify_accepts_valid_token() {
+        let key = test_key_der();
+        assert_eq!(verify_jwt_raw(TEST_JWT_VALID, &key), Ok(()));
+        // Tokens without `exp` carry no expiry to enforce.
+        assert_eq!(verify_jwt_raw(TEST_JWT_NOEXP, &key), Ok(()));
+    }
+
+    #[test]
+    fn jwt_verify_rejects_expired_token() {
+        assert_eq!(
+            verify_jwt_raw(TEST_JWT_EXPIRED, &test_key_der()),
+            Err("Token has expired\n")
+        );
+    }
+
+    #[test]
+    fn jwt_verify_rejects_malformed_tokens() {
+        let key = test_key_der();
+        for bad in ["", "abc", "a.b", "a.b.c.d", "a..c", "!!!.@@@.###"] {
+            assert_eq!(
+                verify_jwt_raw(bad, &key),
+                Err("Invalid JWT format\n"),
+                "token: {}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn jwt_verify_rejects_wrong_key_and_tampering() {
+        let key = test_key_der();
+        assert_eq!(
+            verify_jwt_raw(TEST_JWT_WRONGKEY, &key),
+            Err("Invalid token signature\n")
+        );
+        // Swap two adjacent differing signature characters: the decoded
+        // bytes must change, so verification has to fail.
+        let sig_start = TEST_JWT_VALID.rfind('.').unwrap() + 1;
+        let mut tampered = TEST_JWT_VALID.to_string();
+        let bytes = tampered.as_bytes();
+        let mut idx = None;
+        for i in sig_start..bytes.len() - 1 {
+            if bytes[i] != bytes[i + 1] {
+                idx = Some(i);
+                break;
+            }
+        }
+        let i = idx.expect("signature has swappable characters");
+        tampered.replace_range(
+            i..i + 2,
+            &format!("{}{}", bytes[i + 1] as char, bytes[i] as char),
+        );
+        assert_ne!(tampered, TEST_JWT_VALID);
+        assert_eq!(
+            verify_jwt_raw(&tampered, &key),
+            Err("Invalid token signature\n")
+        );
+    }
 }

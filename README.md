@@ -1,9 +1,9 @@
 # rekuiper: The High-Performance Edge Stream Processing Engine
 
-[![Release](https://img.shields.io/badge/release-v0.421--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.422--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.421--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.422--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
 [![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-100%25%20Covered-green.svg)](openapi.json)
 [![Throughput](https://img.shields.io/badge/throughput-320k--540k%2B%20eps-success.svg)](#-performance--competitive-benchmarks)
@@ -19,7 +19,7 @@
 
 The benchmark below evaluates `rekuiper` against upstream Go eKuiper, Apache Flink, Redpanda Connect (Benthos), and Telegraf under an identical high-frequency edge workload: parsing **500,000 wide-schema telemetry events** through JSON decoding, filtering predicates, arithmetic transformations (`temp * 1.8 + 32 AS temp_f`), and sink emission on a single CPU core in Linux (WSL2 / Ubuntu x86_64):
 
-| Feature / Metric | `rekuiper` (0.421-beta) | Apache Flink (v2.3.0) | Upstream Go eKuiper (v2.4.1) | Telegraf (v1.40.0) | Redpanda Connect (Benthos) |
+| Feature / Metric | `rekuiper` (0.422-beta) | Apache Flink (v2.3.0) | Upstream Go eKuiper (v2.4.1) | Telegraf (v1.40.0) | Redpanda Connect (Benthos) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Core Language** | **Pure Rust** | Java / Scala (JVM) | Go (Golang) | Go (Golang) | Go (Golang) |
 | **500k Elapsed Time** | **1.176 seconds** | 2.144 s *(vertex)* / 2.940 s *(job)* | 11.290 seconds | 8.194 seconds | 19.236 seconds |
@@ -87,7 +87,7 @@ docker run -d \
   -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.421-beta
+  ankurkrp/rekuiper:0.422-beta
 ```
 
 Or spin up an instant end-to-end edge stack (rekuiper + Mosquitto MQTT broker + Redis):
@@ -171,9 +171,9 @@ make build
 
 ## 📋 Supported vs. Unsupported Features Matrix
 
-Detailed capability disclosures for the **v0.421-beta** release:
+Detailed capability disclosures for the **v0.422-beta** release:
 
-| Feature Area | Supported in v0.421-beta | Status & Architectural Disclosure |
+| Feature Area | Supported in v0.422-beta | Status & Architectural Disclosure |
 | :--- | :--- | :--- |
 | **REST API** | **100% Forensic Route Parity** | ✅ All 98 paths and 140 operations registered and validated with authentic implementations (zero stubs). |
 | **CLI Tool** | **`kuiper` Drop-in Replacement** | ✅ Full stream, table, rule management subcommands. |
@@ -287,7 +287,8 @@ In production, edge streaming architectures faced a frustrating compromise:
 
 ## 🗺️ Roadmap
 
-- **0.421-beta (Current)**: 320,000+ eps Engine Throughput, 100% Authentic OpenAPI Route Parity (Zero Stubs), Persistent File Uploads, Dynamic YAML Overlays & Secret Masking, Bulk Rule Control.
+- **0.422-beta (Current)**: 100% Evaluation Parity with LF Edge eKuiper across all 12 Root Causes (D1–D12), Remote MQTT Broker Ingestion & CONF_KEY, Real PostgreSQL Sink/Source/Lookup Data Plane, Full HTTP PUT/PATCH Handlers, RSA/JWT Authentication Guard, Live SSE Ruletest Streaming, Stream/Table Field Schemas.
+- **0.421-beta**: 320,000+ eps Engine Throughput, 100% Authentic OpenAPI Route Parity, Persistent File Uploads, Dynamic YAML Overlays & Secret Masking, Bulk Rule Control.
 - **0.420-beta**: High-Speed Rust Core Engine, Decoupled Actor Sink Queue, Full Connector Ecosystem, Visual Graph Rule DAG Engine.
 - **0.69-beta (Next Release)**:
   - WebAssembly (WASM) user-defined function (UDF) runtime using Wasmtime.

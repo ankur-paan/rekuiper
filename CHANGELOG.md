@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.422.0-beta] - 2026-09-10
+
+### Highlights
+- **100% Black-Box Evaluation Parity**: Completely resolved all 12 independent compatibility root causes (37 confirmed defect operations) discovered during the independent evaluation against official `lfedge/ekuiper:2.4.1`.
+- **Data Plane Integrity & Remote Ingestion**: Fixed MQTT source remote broker resolution (`CONF_KEY` & `server` options), completely eliminating Docker container connection drops.
+- **PostgreSQL & Relational Data Plane**: Implemented authentic PostgreSQL `$1...$n` parameterized sink writes, type-safe lookup joins, and continuous streaming `SqlSource`.
+- **Complete REST CRUD & Dynamic Patching**: Added missing HTTP `PUT` handlers on streams, tables, rules, and connections, plus `PATCH /configs` returning HTTP 204.
+- **Enterprise Security & Auth Guard**: Added strict RSA/JWT authentication middleware enforcing RS256 token signature verification, expiry checks, raw JWT token formatting, and rejecting `Bearer` prefixes per eKuiper specifications.
+- **Live Rule Testing & SSE Server**: Implemented live Server-Sent Events (SSE) streaming server for `/ruletest`, delivering real-time execution frames.
+- **Schema Preservation & SQL Operators**: Retained explicit `StreamFields` and field data types in stream/table definitions and `/schema` endpoints, added `->` arrow nested JSON navigation, and enforced validation on unknown functions and missing streams.
+
 ## [0.421.0-beta] - 2026-09-10
 
 ### Highlights

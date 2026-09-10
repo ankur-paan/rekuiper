@@ -118,6 +118,12 @@ impl PluginManager {
             .map(|handler| handler(args))
     }
 
+    /// Whether an in-process scalar handler is registered under `name`
+    /// (matched case-insensitively, like resolution).
+    pub fn has_udf(&self, name: &str) -> bool {
+        self.handlers.read().contains_key(&normalize_udf_name(name))
+    }
+
     /// Repopulates plugin definitions previously stored under the `plugins`
     /// namespace, skipping corrupt entries. Handlers are code and are never
     /// persisted — re-register them after loading.

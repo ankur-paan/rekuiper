@@ -1,6 +1,6 @@
 use rekuiper_core::{
     KvStore, MemKvStore, RuleDefinition, RuleManager, SqliteKvStore, StreamBus, StreamDefinition,
-    StreamManager, TableDefinition, TableManager,
+    StreamField, StreamManager, TableDefinition, TableManager,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,6 +24,10 @@ fn stream_def(name: &str) -> StreamDefinition {
     StreamDefinition {
         name: name.to_string(),
         sql: format!("CREATE STREAM {} () WITH (FORMAT=\"json\")", name),
+        stream_fields: vec![StreamField {
+            name: "id".to_string(),
+            field_type: "bigint".to_string(),
+        }],
         options: HashMap::new(),
     }
 }
@@ -32,6 +36,7 @@ fn table_def(name: &str) -> TableDefinition {
     TableDefinition {
         name: name.to_string(),
         sql: format!("CREATE TABLE {} () WITH (FORMAT=\"json\")", name),
+        stream_fields: Vec::new(),
         options: HashMap::new(),
     }
 }
@@ -118,8 +123,11 @@ async fn test_manager_persistence_and_restart() {
     tables2.load_from_kv(&kv2).await.unwrap();
     rules2.load_from_kv(&kv2).await.unwrap();
 
-    // Definitions survived.
-    assert!(streams2.get_stream("demo").is_some());
+    // Definitions survived, including declared stream fields.
+    let restored = streams2.get_stream("demo").expect("demo survives");
+    assert_eq!(restored.stream_fields.len(), 1);
+    assert_eq!(restored.stream_fields[0].name, "id");
+    assert_eq!(restored.stream_fields[0].field_type, "bigint");
     assert!(tables2.get_table("alerts").is_some());
     assert!(rules2.get_rule("rule_running").is_some());
     assert!(rules2.get_rule("rule_paused").is_some());
