@@ -3,10 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Streaming Engine Benchmark Race - 500,000 Events</title>
+  <title>Streaming Engine Benchmark Race - 1,000,000 Events</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --md-sys-color-surface: #f8f9fc;
+      --md-sys-color-surface-container: #ffffff;
+      --md-sys-color-surface-container-high: #f1f4f9;
+      --md-sys-color-surface-container-highest: #e3e8ef;
+      --md-sys-color-on-surface: #0f172a;
+      --md-sys-color-on-surface-variant: #64748b;
+      --md-sys-color-outline: #cbd5e1;
+      --md-sys-color-outline-variant: #e2e8f0;
+      --md-sys-color-primary: #0b57d0;
+      --md-sys-color-primary-container: #d3e3fd;
+      --md-sys-color-on-primary-container: #041e49;
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -14,142 +28,173 @@
     }
 
     body {
-      background: #080c14;
-      color: #f0f4fc;
-      font-family: 'Outfit', -apple-system, sans-serif;
+      background: var(--md-sys-color-surface);
+      color: var(--md-sys-color-on-surface);
+      font-family: 'Roboto', 'Segoe UI', -apple-system, sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: 24px 16px;
       overflow-x: hidden;
     }
 
     .container {
       width: 100%;
-      max-width: 1120px;
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 20px;
-      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(255, 87, 34, 0.1);
-      backdrop-filter: blur(16px);
-      padding: 28px 36px;
+      max-width: 1140px;
+      background: var(--md-sys-color-surface-container);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: 28px;
+      box-shadow: 0 4px 28px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03);
+      padding: 30px 38px;
     }
 
     header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-end;
-      margin-bottom: 24px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      align-items: center;
+      margin-bottom: 22px;
       padding-bottom: 18px;
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      flex-wrap: wrap;
+      gap: 16px;
     }
 
     .title-group h1 {
-      font-size: 28px;
-      font-weight: 900;
-      letter-spacing: -0.5px;
-      background: linear-gradient(135deg, #ffffff 30%, #ff7043 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      font-family: 'Outfit', 'Roboto', sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .title-group p {
-      color: #94a3b8;
-      font-size: 14px;
+      color: var(--md-sys-color-on-surface-variant);
+      font-size: 13.5px;
       margin-top: 4px;
     }
 
     .timer-badge {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 24px;
-      font-weight: 800;
-      color: #38bdf8;
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      padding: 6px 16px;
-      border-radius: 12px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #0b57d0;
+      background: #edf2fc;
+      border: 1px solid #d3e3fd;
+      padding: 8px 20px;
+      border-radius: 20px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      box-shadow: 0 1px 3px rgba(11, 87, 208, 0.08);
     }
 
     .timer-badge span {
       color: #64748b;
-      font-size: 12px;
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 1px;
+      font-family: 'Roboto', sans-serif;
+      font-weight: 700;
     }
 
     .controls {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       align-items: center;
       margin-bottom: 20px;
       flex-wrap: wrap;
     }
 
     button {
-      background: #1e293b;
-      color: #f8fafc;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: #f1f5f9;
+      color: #1e293b;
+      border: 1px solid #cbd5e1;
       padding: 8px 18px;
       font-size: 13px;
-      font-weight: 700;
-      font-family: 'Outfit', sans-serif;
-      border-radius: 10px;
+      font-weight: 600;
+      font-family: 'Roboto', sans-serif;
+      border-radius: 20px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
 
     button:hover {
-      background: #334155;
+      background: #e2e8f0;
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+    }
+
+    button:active {
+      transform: translateY(0);
     }
 
     button.primary {
-      background: linear-gradient(135deg, #ff5722, #f43f5e);
+      background: #0b57d0;
+      color: #ffffff;
       border: none;
-      box-shadow: 0 4px 15px rgba(244, 63, 94, 0.35);
+      box-shadow: 0 2px 8px rgba(11, 87, 208, 0.25);
     }
 
     button.primary:hover {
-      filter: brightness(1.1);
-      box-shadow: 0 6px 20px rgba(244, 63, 94, 0.5);
+      background: #0842a0;
+      box-shadow: 0 4px 12px rgba(11, 87, 208, 0.35);
     }
 
     .speed-select {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       font-size: 13px;
-      color: #94a3b8;
+      color: var(--md-sys-color-on-surface-variant);
       margin-left: auto;
     }
 
+    .segmented-group {
+      display: flex;
+      background: #f1f5f9;
+      padding: 3px;
+      border-radius: 20px;
+      border: 1px solid #e2e8f0;
+    }
+
     .speed-btn {
-      padding: 4px 10px;
-      font-size: 11px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 16px;
+      border: none;
+      background: transparent;
+      color: #475569;
+      box-shadow: none;
+    }
+
+    .speed-btn:hover {
+      background: rgba(0, 0, 0, 0.05);
+      transform: none;
+      box-shadow: none;
     }
 
     .speed-btn.active {
-      background: #38bdf8;
-      color: #0f172a;
-      border-color: #38bdf8;
+      background: #0b57d0;
+      color: #ffffff;
+      box-shadow: 0 1px 4px rgba(11, 87, 208, 0.25);
     }
 
     canvas {
       width: 100%;
       height: 480px;
-      background: #0b1120;
-      border-radius: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+      background: #ffffff;
+      border-radius: 20px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
       display: block;
     }
 
@@ -157,19 +202,27 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 12px;
-      margin-top: 20px;
+      margin-top: 22px;
     }
 
     .legend-card {
-      background: rgba(30, 41, 59, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
       padding: 12px 14px;
       display: flex;
       flex-direction: column;
       gap: 4px;
       position: relative;
       overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .legend-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      background: #ffffff;
     }
 
     .legend-card::before {
@@ -180,12 +233,13 @@
       bottom: 0;
       width: 4px;
       background: var(--lane-color);
+      border-radius: 4px 0 0 4px;
     }
 
     .legend-card .name {
       font-weight: 700;
-      font-size: 14px;
-      color: #f8fafc;
+      font-size: 13.5px;
+      color: #0f172a;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -194,13 +248,13 @@
     .legend-card .sub {
       font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      color: #94a3b8;
+      color: #64748b;
     }
 
     .legend-card .metric {
       font-family: 'JetBrains Mono', monospace;
       font-weight: 700;
-      font-size: 13px;
+      font-size: 12.5px;
       color: var(--lane-color);
       margin-top: 2px;
     }
@@ -211,8 +265,8 @@
   <div class="container">
     <header>
       <div class="title-group">
-        <h1>⚡ Streaming Engine Bouncing Ball Race</h1>
-        <p>Real-time visual comparison of 500,000 events throughput on a single CPU core</p>
+        <h1>⚡ Streaming Engine Benchmark Race - 1,000,000 Events</h1>
+        <p>1,000,000 Wide-Schema Telemetry Events on Single CPU Core (Empirical Extrapolation)</p>
       </div>
       <div class="timer-badge">
         <span>Elapsed:</span>
@@ -226,40 +280,42 @@
       <button id="audioBtn">🔊 Audio: ON</button>
       <div class="speed-select">
         <span>Playback Speed:</span>
-        <button class="speed-btn active" data-speed="1">1x</button>
-        <button class="speed-btn" data-speed="2">2x</button>
-        <button class="speed-btn" data-speed="5">5x</button>
-        <button class="speed-btn" data-speed="0.5">0.5x</button>
+        <div class="segmented-group">
+          <button class="speed-btn active" data-speed="1">1x</button>
+          <button class="speed-btn" data-speed="2">2x</button>
+          <button class="speed-btn" data-speed="5">5x</button>
+          <button class="speed-btn" data-speed="0.5">0.5x</button>
+        </div>
       </div>
     </div>
 
     <canvas id="raceCanvas" width="1050" height="480"></canvas>
 
     <div class="footer-legend">
-      <div class="legend-card" style="--lane-color: #ff5722;">
+      <div class="legend-card" style="--lane-color: #c2410c;">
         <div class="name">🦀 rekuiper (0.421-beta)</div>
-        <div class="sub">Pure Rust · RAM: 8.2 MB</div>
-        <div class="metric">425,308 eps · 1.176 s (1st 🏆)</div>
+        <div class="sub">Pure Rust · RAM: 8.2 MB · 0 Drops</div>
+        <div class="metric">425,308 eps · 2.351 s (1st 🏆)</div>
       </div>
-      <div class="legend-card" style="--lane-color: #00e5ff;">
+      <div class="legend-card" style="--lane-color: #0284c7;">
         <div class="name">⚡ Apache Flink (2.3.0)</div>
-        <div class="sub">Java / JVM · RAM: 1,022 MB</div>
-        <div class="metric">233,209 eps · 2.144 s (2nd 🥈)</div>
+        <div class="sub">Java / JVM · RAM: 1,022 MB · 0 Drops</div>
+        <div class="metric">233,209 eps · 4.288 s (2nd 🥈)</div>
       </div>
-      <div class="legend-card" style="--lane-color: #00e676;">
+      <div class="legend-card" style="--lane-color: #059669;">
         <div class="name">📊 Telegraf (1.40.0)</div>
-        <div class="sub">Go · RAM: ~50 MB</div>
-        <div class="metric">61,019 eps · 8.194 s (3rd 🥉)</div>
+        <div class="sub">Go · RAM: ~50 MB · 0 Drops</div>
+        <div class="metric">61,019 eps · 16.388 s (3rd 🥉)</div>
       </div>
-      <div class="legend-card" style="--lane-color: #ffb300;">
-        <div class="name">🐢 Upstream eKuiper (2.4.1)</div>
-        <div class="sub">Go · RAM: ~45 MB</div>
-        <div class="metric">44,287 eps · 11.290 s (⚠️ 72k Drops)</div>
+      <div class="legend-card" style="--lane-color: #d97706;">
+        <div class="name">🐢 eKuiper (2.4.1)</div>
+        <div class="sub">Go · RAM: ~45 MB · ⚠️ 145k Drops</div>
+        <div class="metric">44,287 eps · 22.581 s (14.6% Loss)</div>
       </div>
-      <div class="legend-card" style="--lane-color: #e040fb;">
+      <div class="legend-card" style="--lane-color: #7c3aed;">
         <div class="name">🐌 Redpanda Connect (Benthos)</div>
-        <div class="sub">Go · RAM: ~38 MB</div>
-        <div class="metric">25,993 eps · 19.236 s</div>
+        <div class="sub">Go · RAM: ~38 MB · 0 Drops</div>
+        <div class="metric">25,993 eps · 38.472 s</div>
       </div>
     </div>
   </div>
@@ -267,20 +323,20 @@
   <script>
     const canvas = document.getElementById('raceCanvas');
     const ctx = canvas.getContext('2d');
-    const TOTAL_RECORDS = 500000;
+    const TOTAL_RECORDS = 1000000;
 
-    // Lanes definition based on authentic 500k empirical benchmarks
+    // Authentic empirical benchmarks extrapolated to 1,000,000 records
     const lanes = [
       {
         name: 'rekuiper',
         label: '🦀 rekuiper (Pure Rust)',
-        color: '#ff5722',
-        lightColor: '#ff8a65',
-        elapsed: 1.1756,
+        color: '#c2410c',         // Vibrant Terracotta Rust
+        lightColor: '#ff7043',
+        elapsed: 2.3512,
         eps: 425308,
         drops: 0,
         ram: '8.2 MB',
-        freq: 587.33, // D5
+        freq: 587.33,             // D5
         x: 0,
         dx: 1,
         bounces: 0,
@@ -292,13 +348,13 @@
       {
         name: 'flink',
         label: '⚡ Apache Flink (JVM)',
-        color: '#00e5ff',
-        lightColor: '#80d8ff',
-        elapsed: 2.1440,
+        color: '#0284c7',         // Cyan Blue
+        lightColor: '#38bdf8',
+        elapsed: 4.2880,
         eps: 233209,
         drops: 0,
         ram: '1,022 MB',
-        freq: 440.00, // A4
+        freq: 440.00,             // A4
         x: 0,
         dx: 1,
         bounces: 0,
@@ -310,13 +366,13 @@
       {
         name: 'telegraf',
         label: '📊 Telegraf (Go)',
-        color: '#00e676',
-        lightColor: '#b9f6ca',
-        elapsed: 8.1941,
+        color: '#059669',         // Emerald Green
+        lightColor: '#34d399',
+        elapsed: 16.3882,
         eps: 61019,
         drops: 0,
         ram: '50 MB',
-        freq: 329.63, // E4
+        freq: 329.63,             // E4
         x: 0,
         dx: 1,
         bounces: 0,
@@ -327,14 +383,14 @@
       },
       {
         name: 'ekuiper',
-        label: '🐢 Upstream eKuiper (Go)',
-        color: '#ffb300',
-        lightColor: '#ffe082',
-        elapsed: 11.2904,
+        label: '🐢 eKuiper (Go)',
+        color: '#d97706',         // Warm Amber
+        lightColor: '#fbbf24',
+        elapsed: 22.5809,
         eps: 44287,
-        drops: 72921,
+        drops: 145842,
         ram: '45 MB',
-        freq: 261.63, // C4
+        freq: 261.63,             // C4
         x: 0,
         dx: 1,
         bounces: 0,
@@ -346,13 +402,13 @@
       {
         name: 'benthos',
         label: '🐌 Redpanda Connect (Go)',
-        color: '#e040fb',
-        lightColor: '#ea80fc',
-        elapsed: 19.2360,
+        color: '#7c3aed',         // Royal Violet
+        lightColor: '#a78bfa',
+        elapsed: 38.4720,
         eps: 25993,
         drops: 0,
         ram: '38 MB',
-        freq: 196.00, // G3
+        freq: 196.00,             // G3
         x: 0,
         dx: 1,
         bounces: 0,
@@ -392,7 +448,7 @@
         const gain = audioCtx.createGain();
         osc.type = isWarning ? 'sawtooth' : 'sine';
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
         osc.connect(gain);
         gain.connect(audioCtx.destination);
@@ -401,19 +457,39 @@
       } catch (e) {}
     }
 
-    function spawnParticles(x, y, color, count = 12, isDrop = false) {
+    // Directional, natural sparks with ballistic velocity and air drag
+    function spawnParticles(x, y, color, count = 14, isDrop = false, direction = 0) {
       const list = [];
       for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
-        const speed = 1.5 + Math.random() * 3.5;
+        let vx, vy;
+        const speed = 2.0 + Math.random() * 3.5;
+
+        if (direction === -1) {
+          // Bounced off right bumper -> fly leftward with angular spread
+          const angle = Math.PI + (Math.random() - 0.5) * 1.5;
+          vx = Math.cos(angle) * speed;
+          vy = Math.sin(angle) * speed;
+        } else if (direction === 1) {
+          // Bounced off left bumper -> fly rightward with angular spread
+          const angle = (Math.random() - 0.5) * 1.5;
+          vx = Math.cos(angle) * speed;
+          vy = Math.sin(angle) * speed;
+        } else {
+          // Omnidirectional burst (finish line)
+          const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+          vx = Math.cos(angle) * speed;
+          vy = Math.sin(angle) * speed;
+        }
+
         list.push({
           x,
           y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
+          vx,
+          vy,
           life: 1.0,
-          color: isDrop ? '#ef4444' : color,
-          size: isDrop ? 3 : 2 + Math.random() * 2
+          decay: 2.0 + Math.random() * 0.8,
+          color: isDrop ? '#dc2626' : (Math.random() > 0.4 ? color : '#f59e0b'),
+          size: isDrop ? 3.5 : 2.5 + Math.random() * 2
         });
       }
       return list;
@@ -426,7 +502,6 @@
       document.getElementById('playBtn').innerHTML = '▶ Start Race';
       document.getElementById('timer').innerText = '00:00.000';
 
-      const trackWidth = canvas.width - PADDING_LEFT - PADDING_RIGHT;
       lanes.forEach(lane => {
         lane.x = 0;
         lane.dx = 1;
@@ -436,62 +511,72 @@
         lane.processed = 0;
         lane.particles = [];
       });
-      draw(0);
+      draw();
     }
 
     function update(dt) {
+      // 1. ALWAYS update particle physics across ALL lanes regardless of finished state
+      // This ensures that when a ball stops/finishes right after hitting an edge,
+      // its sparks NEVER freeze in mid-air and continue flying & fading out naturally!
+      lanes.forEach(lane => {
+        if (lane.particles.length > 0) {
+          lane.particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vx *= 0.95; // Gentle air drag
+            p.vy *= 0.95;
+            p.life -= dt * p.decay;
+          });
+          lane.particles = lane.particles.filter(p => p.life > 0);
+        }
+      });
+
       if (!running) return;
 
       elapsedTime += dt * speedMultiplier;
       const trackWidth = canvas.width - PADDING_LEFT - PADDING_RIGHT;
-
-      // Base bounce speed for fastest engine (rekuiper) is ~4 bounces per real-time second
       const BASE_PIXELS_PER_SEC = (trackWidth * 2) / 0.55;
 
       let allDone = true;
 
       lanes.forEach((lane, idx) => {
-        if (lane.finished) return;
-        allDone = false;
+        const yCenter = idx * TRACK_HEIGHT + 45;
 
         // Current progress based on actual benchmark elapsed time
         const progress = Math.min(1.0, elapsedTime / lane.elapsed);
         lane.processed = Math.floor(progress * TOTAL_RECORDS);
 
-        if (progress >= 1.0) {
-          lane.finished = true;
-          lane.finishTime = lane.elapsed;
-          lane.particles.push(...spawnParticles(PADDING_LEFT + lane.x, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 30));
-          return;
+        if (!lane.finished) {
+          allDone = false;
+
+          if (progress >= 1.0) {
+            lane.finished = true;
+            lane.finishTime = lane.elapsed;
+            // Spawn victory burst at ball center that fades out gracefully
+            lane.particles.push(...spawnParticles(PADDING_LEFT + lane.x, yCenter, lane.color, 24, false, 0));
+            return;
+          }
+
+          // Move ball based on relative speed
+          const relativeSpeed = lanes[0].elapsed / lane.elapsed;
+          const moveDist = BASE_PIXELS_PER_SEC * relativeSpeed * dt * speedMultiplier;
+          lane.x += lane.dx * moveDist;
+
+          // Bumper collision detection with directional spark ejection
+          if (lane.x >= trackWidth) {
+            lane.x = trackWidth;
+            lane.dx = -1;
+            lane.bounces++;
+            playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
+            lane.particles.push(...spawnParticles(PADDING_LEFT + trackWidth, yCenter, lane.color, 14, lane.name === 'ekuiper', -1));
+          } else if (lane.x <= 0) {
+            lane.x = 0;
+            lane.dx = 1;
+            lane.bounces++;
+            playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
+            lane.particles.push(...spawnParticles(PADDING_LEFT, yCenter, lane.color, 14, lane.name === 'ekuiper', 1));
+          }
         }
-
-        // Speed relative to rekuiper
-        const relativeSpeed = lanes[0].elapsed / lane.elapsed;
-        const moveDist = BASE_PIXELS_PER_SEC * relativeSpeed * dt * speedMultiplier;
-
-        lane.x += lane.dx * moveDist;
-
-        if (lane.x >= trackWidth) {
-          lane.x = trackWidth;
-          lane.dx = -1;
-          lane.bounces++;
-          playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
-          lane.particles.push(...spawnParticles(PADDING_LEFT + trackWidth, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 12, lane.name === 'ekuiper'));
-        } else if (lane.x <= 0) {
-          lane.x = 0;
-          lane.dx = 1;
-          lane.bounces++;
-          playBounceSound(lane.freq, lane.drops > 0 && Math.random() > 0.5);
-          lane.particles.push(...spawnParticles(PADDING_LEFT, (idx + 0.5) * TRACK_HEIGHT + 20, lane.color, 12, lane.name === 'ekuiper'));
-        }
-
-        // Update particles
-        lane.particles.forEach(p => {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.life -= dt * 2.0;
-        });
-        lane.particles = lane.particles.filter(p => p.life > 0);
       });
 
       // Update timer UI
@@ -501,7 +586,9 @@
       document.getElementById('timer').innerText = 
         `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 
-      if (allDone) {
+      // Check if all lanes finished AND all sparks have finished their animation
+      const anyParticlesAlive = lanes.some(l => l.particles.length > 0);
+      if (allDone && !anyParticlesAlive) {
         running = false;
         document.getElementById('playBtn').innerHTML = '▶ Replay Race';
       }
@@ -513,71 +600,92 @@
 
       lanes.forEach((lane, idx) => {
         const yCenter = idx * TRACK_HEIGHT + 45;
-        const trackY = yCenter - 2;
+        const trackY = yCenter;
 
-        // 1. Lane background & dividers
-        ctx.fillStyle = idx % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'rgba(0, 0, 0, 0.15)';
-        ctx.fillRect(0, idx * TRACK_HEIGHT + 10, canvas.width, TRACK_HEIGHT);
+        // 1. Lane background alternating bands (M3 Light)
+        ctx.fillStyle = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(0, idx * TRACK_HEIGHT + 8, canvas.width, TRACK_HEIGHT);
+
+        // Lane subtle separator
+        ctx.strokeStyle = '#f1f5f9';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, idx * TRACK_HEIGHT + 8);
+        ctx.lineTo(canvas.width, idx * TRACK_HEIGHT + 8);
+        ctx.stroke();
 
         // Track rail
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
         ctx.moveTo(PADDING_LEFT, trackY);
         ctx.lineTo(PADDING_LEFT + trackWidth, trackY);
         ctx.stroke();
 
-        // Track bounce bumpers
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.fillRect(PADDING_LEFT - 6, yCenter - 18, 6, 36);
-        ctx.fillRect(PADDING_LEFT + trackWidth, yCenter - 18, 6, 36);
+        // Track bounce bumpers (M3 rounded pills)
+        ctx.fillStyle = '#94a3b8';
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(PADDING_LEFT - 8, yCenter - 18, 8, 36, 4);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.roundRect(PADDING_LEFT + trackWidth, yCenter - 18, 8, 36, 4);
+          ctx.fill();
+        } else {
+          ctx.fillRect(PADDING_LEFT - 8, yCenter - 18, 8, 36);
+          ctx.fillRect(PADDING_LEFT + trackWidth, yCenter - 18, 8, 36);
+        }
 
         // 2. Left Lane Header & Info
-        ctx.font = 'bold 14px Outfit, sans-serif';
+        ctx.font = 'bold 13.5px Roboto, sans-serif';
         ctx.fillStyle = lane.color;
         ctx.fillText(lane.label, 20, yCenter - 8);
 
         ctx.font = '11px JetBrains Mono, monospace';
         ctx.fillStyle = '#64748b';
-        ctx.fillText(`RAM: ${lane.ram} · ${lane.eps.toLocaleString()} eps`, 20, yCenter + 10);
+        ctx.fillText(`RAM: ${lane.ram} · ${lane.eps.toLocaleString()} eps`, 20, yCenter + 11);
 
-        // 3. Ball with trail & glow
+        // 3. Ball with motion trail & 3D marble shading
         const ballX = PADDING_LEFT + lane.x;
         const ballY = yCenter;
 
-        // Motion trail
-        const trailLength = Math.min(30, Math.abs(lane.dx * 20));
-        const gradient = ctx.createLinearGradient(ballX - lane.dx * trailLength, ballY, ballX, ballY);
-        gradient.addColorStop(0, 'rgba(0,0,0,0)');
-        gradient.addColorStop(1, lane.color);
-        ctx.beginPath();
-        ctx.strokeStyle = gradient;
-        ctx.lineWidth = BALL_RADIUS * 1.5;
-        ctx.lineCap = 'round';
-        ctx.moveTo(ballX - lane.dx * trailLength, ballY);
-        ctx.lineTo(ballX, ballY);
-        ctx.stroke();
+        // Motion trail (graceful gradient on light surface)
+        if (!lane.finished) {
+          const trailLength = Math.min(32, Math.abs(lane.dx * 22));
+          const grad = ctx.createLinearGradient(ballX - lane.dx * trailLength, ballY, ballX, ballY);
+          grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+          grad.addColorStop(1, lane.color + '55');
+          ctx.beginPath();
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = BALL_RADIUS * 1.5;
+          ctx.lineCap = 'round';
+          ctx.moveTo(ballX - lane.dx * trailLength, ballY);
+          ctx.lineTo(ballX, ballY);
+          ctx.stroke();
+        }
 
-        // Ball glow
+        // Ball soft M3 elevation shadow
         ctx.save();
-        ctx.shadowBlur = 18;
-        ctx.shadowColor = lane.color;
-        ctx.fillStyle = lane.lightColor;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 3;
+        ctx.fillStyle = lane.color;
         ctx.beginPath();
         ctx.arc(ballX, ballY, BALL_RADIUS, 0, Math.PI * 2);
         ctx.fill();
-
-        // Inner ball core
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(ballX - lane.dx * 2, ballY - 2, BALL_RADIUS * 0.45, 0, Math.PI * 2);
-        ctx.fill();
         ctx.restore();
 
-        // 4. Render particles
+        // Inner glossy highlight (3D sphere depth)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.beginPath();
+        ctx.arc(ballX - (lane.finished ? 0 : lane.dx * 3), ballY - 3, BALL_RADIUS * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 4. Render particles / sparks (Alpha fade out smoothly)
         lane.particles.forEach(p => {
           ctx.fillStyle = p.color;
-          ctx.globalAlpha = p.life;
+          ctx.globalAlpha = Math.max(0, p.life);
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fill();
@@ -587,17 +695,27 @@
         // 5. Right Stats Counter
         const statsX = PADDING_LEFT + trackWidth + 24;
         ctx.font = 'bold 13px JetBrains Mono, monospace';
-        ctx.fillStyle = lane.finished ? '#38bdf8' : '#f8fafc';
+        ctx.fillStyle = lane.finished ? lane.color : '#0f172a';
         ctx.fillText(`${(lane.processed).toLocaleString()} evt`, statsX, yCenter - 6);
 
         ctx.font = '11px JetBrains Mono, monospace';
         if (lane.finished) {
-          ctx.fillStyle = '#22c55e';
-          const place = idx === 0 ? '🏆 1st (1.17s)' : idx === 1 ? '🥈 2nd (2.14s)' : `${lane.finishTime.toFixed(2)}s`;
-          ctx.fillText(`DONE ${place}`, statsX, yCenter + 12);
+          if (idx === 0) {
+            ctx.fillStyle = '#16a34a';
+            ctx.fillText(`🏆 1st (2.35s)`, statsX, yCenter + 12);
+          } else if (idx === 1) {
+            ctx.fillStyle = '#0284c7';
+            ctx.fillText(`🥈 2nd (4.29s)`, statsX, yCenter + 12);
+          } else if (idx === 2) {
+            ctx.fillStyle = '#ca8a04';
+            ctx.fillText(`🥉 3rd (16.39s)`, statsX, yCenter + 12);
+          } else {
+            ctx.fillStyle = '#64748b';
+            ctx.fillText(`DONE (${lane.finishTime.toFixed(2)}s)`, statsX, yCenter + 12);
+          }
         } else if (lane.drops > 0) {
-          ctx.fillStyle = '#ef4444';
-          ctx.fillText(`⚠️ 72k DROPS`, statsX, yCenter + 12);
+          ctx.fillStyle = '#dc2626';
+          ctx.fillText(`⚠️ 145k DROPS`, statsX, yCenter + 12);
         } else {
           ctx.fillStyle = '#64748b';
           ctx.fillText(`${lane.bounces} bounces`, statsX, yCenter + 12);
