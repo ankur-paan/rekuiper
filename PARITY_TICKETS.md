@@ -27,6 +27,43 @@ No item may be marked complete without:
 
 ---
 
+## Upstream Sync (Ongoing Parity Intake)
+
+`rekuiper` may add features beyond eKuiper, but it must never fall behind upstream eKuiper functionality or upstream-requested roadmap items.
+
+### Sync Cadence
+
+- Review upstream eKuiper on a fixed cadence:
+  - New release tags and release notes
+  - Newly merged feature PRs
+  - Newly opened feature requests
+- Run this review at least once per week and once per upstream release.
+
+### Intake Rules
+
+- If eKuiper has already shipped a feature that is not yet in `rekuiper`, open a parity issue in this repository immediately.
+- If eKuiper has a new feature request, open a matching parity-tracking issue in this repository even if implementation is deferred.
+- Include the upstream reference link in every parity issue (release note, PR, or issue URL).
+
+### Required Issue Metadata
+
+Each parity issue must include:
+
+- `Parity type`: `implemented-upstream` or `requested-upstream`
+- `Upstream reference`: URL to eKuiper release/PR/issue
+- `Rekuiper status`: `open`, `in-progress`, `blocked`, or `done`
+- `Label`: `parity-tracking`
+
+### Active Upstream Sync Queue
+
+> Add one row per upstream item discovered during cadence reviews.
+
+| Rekuiper Issue | Parity Type | Upstream Reference | Rekuiper Status | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| _(add when discovered)_ | _(implemented-upstream/requested-upstream)_ | _(URL)_ | _(open/in-progress/blocked/done)_ | |
+
+---
+
 ## Epic 1: Real Streaming Source Lifecycle
 
 - [x] **Ticket 1.1: Automatic MQTT Source Bootstrapping**
@@ -168,5 +205,4 @@ No item may be marked complete without:
 - [x] **Ticket 9.3: External Services & Embedded JavaScript UDF Engine**
   - **Status**: Completed & Verified. Embedded pure Rust ECMAScript runtime via `boa_engine` v0.20 to compile, validate, and execute JavaScript UDF functions in SQL stream processing (`/udf/javascript`, `/udf/javascript/:id`); thread-safe scalar handler wrapping with `rekuiper_core::plugin::get_global_udf_registry()` and `unregister_udf`; implemented external services and function bindings registry (`/services`, `/services/:name`, `/services/functions`, `/services/functions/:name`) with `ServiceDetail` and `ExternalFunction`; pre-seeded default `edgex` service and `func1` JS UDF matching OpenAPI specs; integrated JS UDF and service functions catalog into `/metadata/functions`; completely eliminated all remaining scaffolded dummy stubs (`empty_array`, `validated_empty_object`, `validated_empty_ok`). Covered by `test_external_services_and_javascript_udf_engine` and `test_all_openapi_paths_responding` in `fvt_compat.rs`.
   - **Files**: `Cargo.toml`, `Cargo.lock`, `crates/rekuiper-core/src/plugin.rs`, `crates/rekuiper-server/Cargo.toml`, `crates/rekuiper-server/src/lib.rs`, `crates/rekuiper-server/src/routes.rs`, `crates/rekuiper-server/tests/fvt_compat.rs`.
-
 
