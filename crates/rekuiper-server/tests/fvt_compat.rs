@@ -6725,6 +6725,63 @@ async fn test_ruletest_loop_continues_past_cap() {
 }
 
 #[tokio::test]
+async fn test_ruletest_concurrent_stream_has_no_gaps() {
+    // Cursor-race regression: with a fast looping producer and a live
+    // subscriber, every frame must continue the exact cyclic sequence —
+    // a skipped row (e.g. from a split snapshot/cursor update) breaks it.
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    const CYCLE: usize = 500;
+    const WANT: usize = 3000;
+    let data: Vec<serde_json::Value> = (0..CYCLE as u64).map(|i| json!({"k": i})).collect();
+    let resp = client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rt_gap",
+            "sql": "SELECT k FROM gapsrc",
+            "mockSource": {"gapsrc": {"data": data, "interval": 0, "loop": true}}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let started = client
+        .post(format!("{}/ruletest/rt_gap/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), reqwest::StatusCode::OK);
+    let mut resp = client
+        .get(format!("{}/test/rt_gap", base_url))
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let frames = drain_sse_frames(&mut resp, WANT, 120).await;
+    assert_eq!(frames.len(), WANT, "concurrent feed must keep flowing");
+    let seq: Vec<u64> = frames
+        .iter()
+        .map(|f| serde_json::from_str::<serde_json::Value>(f).unwrap()["k"].as_u64().unwrap())
+        .collect();
+    for w in seq.windows(2) {
+        assert_eq!(
+            w[1],
+            (w[0] + 1) % CYCLE as u64,
+            "gap or reorder after k={}",
+            w[0]
+        );
+    }
+    drop(resp);
+    let del = client
+        .delete(format!("{}/ruletest/rt_gap", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn test_data_and_ruleset_import_content_envelope() {
     let (base_url, _handle) = spawn_test_server().await;
     let client = reqwest::Client::new();

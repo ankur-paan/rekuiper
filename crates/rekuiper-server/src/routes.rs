@@ -3214,12 +3214,16 @@ fn has_agg_expr(expr: &Expr) -> bool {
 /// Evaluate one windowed batch for a rule with JOIN clauses.
 ///
 /// Seeds combined rows from the FROM stream, folds each join (table point
-/// lookups via [`lookup_candidates`], stream targets via nested-loop
-/// matching over the buffered rows with the `ON` condition), then projects:
-/// aggregate SELECTs collapse the batch with `eval_aggregate`, plain
-/// SELECTs emit one row per match with `eval_select` (which also applies
-/// WHERE). Returns the output rows (possibly empty); an empty batch yields
-/// no output, matching empty-window semantics.
+/// lookups take the first row satisfying ON — lookup tables resolve one row
+/// per key; stream targets nest-loop over buffered rows with the `ON`
+/// condition; CROSS pairs all candidates), then projects: aggregate SELECTs
+/// collapse the batch with `eval_aggregate`, plain SELECTs emit one row per
+/// match with `eval_select` (which also applies WHERE). LEFT preserves
+/// unmatched left rows; RIGHT/FULL additionally preserve unmatched right
+/// rows (which never exceeds the fan-out cap), including when the left side
+/// is empty. Fan-out per trigger is bounded by `MAX_JOIN_FANOUT`. Returns
+/// the output rows (possibly empty); an empty batch yields no output,
+/// matching empty-window semantics.
 async fn eval_window_join_batch(
     table_manager: &TableManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
@@ -3352,6 +3356,9 @@ async fn eval_window_join_batch(
             if matches!(join.join_type, JoinType::Right | JoinType::Full) {
                 for (ri, right) in right_rows.iter().enumerate() {
                     if !right_matched[ri] {
+                        if next.len() >= MAX_JOIN_FANOUT {
+                            break;
+                        }
                         let mut preserved = (*right).clone();
                         insert_namespaced(
                             &mut preserved,
@@ -3365,7 +3372,12 @@ async fn eval_window_join_batch(
             }
         }
         combined_rows = next;
-        if combined_rows.is_empty() {
+        // An empty intermediate only ends the pipeline for joins that cannot
+        // produce rows without left input. RIGHT/FULL joins still preserve
+        // their right side (and later joins fold over it), per SQL semantics.
+        if combined_rows.is_empty()
+            && !matches!(join.join_type, JoinType::Right | JoinType::Full)
+        {
             return Vec::new();
         }
     }
@@ -8010,22 +8022,27 @@ pub async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String
                 if let Some(line) = st.pending.pop_front() {
                     return Some((Ok::<_, axum::Error>(Event::default().data(line)), st));
                 }
-                let fresh: Vec<String> = {
+                // Single atomic snapshot: copy every row at/after the cursor
+                // AND derive the next cursor from the last row actually
+                // copied, under the same lock. Rows appended concurrently
+                // after the snapshot stay above the cursor and are picked up
+                // on the next pass — never skipped, never duplicated.
+                // A cursor older than the retained prefix resumes at the
+                // oldest retained row (documented lag gap).
+                let (fresh, next): (Vec<String>, u64) = {
                     let guard = st.replay.read();
-                    guard
-                        .entries
-                        .iter()
-                        .filter(|(seq, _)| *seq >= st.cursor)
-                        .map(|(_, line)| line.clone())
-                        .collect()
+                    let mut fresh = Vec::new();
+                    let mut next = st.cursor;
+                    for (seq, line) in guard.entries.iter() {
+                        if *seq >= st.cursor {
+                            fresh.push(line.clone());
+                            next = seq.saturating_add(1);
+                        }
+                    }
+                    (fresh, next)
                 };
                 if !fresh.is_empty() {
-                    // Advance past everything buffered; a cursor older than
-                    // the retained prefix simply resumes here (lag gap).
-                    let guard = st.replay.read();
-                    if let Some((last, _)) = guard.entries.back() {
-                        st.cursor = last.saturating_add(1);
-                    }
+                    st.cursor = next;
                     st.pending = fresh.into();
                     continue;
                 }
@@ -8186,6 +8203,100 @@ mod tests {
         assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
         let manager = test_stream_manager(&[]).await;
         assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
+    }
+
+    fn tagged(source: &str, pairs: &[(&str, Value)]) -> TaggedRow {
+        TaggedRow {
+            source: source.to_string(),
+            data: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        }
+    }
+
+    fn parse_stmt(sql: &str) -> SelectStmt {
+        Parser::new(sql).parse_select().expect("join SQL parses")
+    }
+
+    #[tokio::test]
+    async fn window_join_right_preserves_unmatched_without_left() {
+        // RIGHT JOIN with an empty left side still emits right rows.
+        let stmt = parse_stmt(
+            "SELECT l.id AS id, r.val AS v FROM l RIGHT JOIN r ON l.id = r.id GROUP BY CountWindow(2)",
+        );
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("r", &[("id", json!(1)), ("val", json!(9))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), 1);
+        // Missing left side projects to Null; the preserved right side is intact.
+        assert_eq!(out[0].get("id"), Some(&serde_json::Value::Null));
+        assert_eq!(out[0].get("v"), Some(&json!(9)));
+    }
+
+    #[tokio::test]
+    async fn window_join_inner_empty_left_yields_nothing() {
+        let stmt = parse_stmt(
+            "SELECT l.id AS id FROM l INNER JOIN r ON l.id = r.id GROUP BY CountWindow(2)",
+        );
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("r", &[("id", json!(1))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn window_join_cross_fanout_is_bounded() {
+        // 201 x 201 pairs would fan out to 40401 rows; the cap holds.
+        let stmt =
+            parse_stmt("SELECT l.id AS id FROM l CROSS JOIN r GROUP BY CountWindow(50000)");
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let mut batch = Vec::new();
+        for i in 0..201 {
+            batch.push(tagged("l", &[("id", json!(i))]));
+            batch.push(tagged("r", &[("id", json!(i))]));
+        }
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), MAX_JOIN_FANOUT);
+    }
+
+    #[tokio::test]
+    async fn window_join_table_takes_first_on_match() {
+        // Lookup tables resolve one row per key: the first ON-matching row
+        // wins (point-lookup semantics, also used by the stateless path).
+        let tables = TableManager::new();
+        tables
+            .create_table(TableDefinition {
+                name: "t".to_string(),
+                sql: String::new(),
+                stream_fields: Vec::new(),
+                options: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        tables.insert_table_row(
+            "t",
+            [("id".to_string(), json!(1)), ("v".to_string(), json!("a"))]
+                .into_iter()
+                .collect(),
+        );
+        tables.insert_table_row(
+            "t",
+            [("id".to_string(), json!(1)), ("v".to_string(), json!("b"))]
+                .into_iter()
+                .collect(),
+        );
+        let stmt = parse_stmt(
+            "SELECT s.id AS id, t.v AS v FROM s INNER JOIN t ON s.id = t.id GROUP BY CountWindow(2)",
+        );
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("s", &[("id", json!(1))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].get("v"), Some(&json!("a")));
     }
 
     #[tokio::test]

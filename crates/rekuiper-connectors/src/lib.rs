@@ -2059,40 +2059,44 @@ impl SqlSink {
         } else {
             self.config.fields.clone()
         };
-        // Null/missing columns are omitted from the INSERT (database
-        // defaults apply) because a typed NULL parameter is rejected by
-        // non-text columns on PostgreSQL.
-        let present: Vec<(&String, SqlBindVal)> = fields
+        // Null/missing columns become an untyped SQL NULL literal (the
+        // server infers the column type, so no mistyped-parameter rejection),
+        // never a typed NULL parameter and never silent omission (which
+        // would wrongly apply column DEFAULTs where baseline stores NULL).
+        // Only a completely column-less row falls back to DEFAULT VALUES.
+        let cells: Vec<(&String, Option<SqlBindVal>)> = fields
             .iter()
-            .filter_map(|f| json_to_bind(record.data.get(f)).map(|v| (f, v)))
+            .map(|f| (f, json_to_bind(record.data.get(f))))
             .collect();
         if self.config.url.starts_with("sqlite") {
             let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
-            if present.is_empty() {
+            if cells.is_empty() {
                 sqlx::query(&format!("INSERT INTO {} DEFAULT VALUES", self.config.table))
                     .execute(&pool)
                     .await?;
                 return Ok(());
             }
-            let cols: Vec<String> = present.iter().map(|(f, _)| (*f).clone()).collect();
-            let sql = sqlite_insert_sql(&self.config.table, &cols);
+            let cols: Vec<String> = cells.iter().map(|(f, _)| (*f).clone()).collect();
+            let nulls: Vec<bool> = cells.iter().map(|(_, v)| v.is_none()).collect();
+            let sql = sqlite_insert_row_sql(&self.config.table, &cols, &nulls);
             let mut query = sqlx::query(&sql);
-            for (_, v) in &present {
+            for v in cells.iter().filter_map(|(_, v)| v.as_ref()) {
                 query = bind_sqlite_arg(query, v);
             }
             query.execute(&pool).await?;
         } else if self.config.url.starts_with("postgres") {
             let pool = pg_pool(&self.config.url).await?;
-            if present.is_empty() {
+            if cells.is_empty() {
                 sqlx::query(&format!("INSERT INTO {} DEFAULT VALUES", self.config.table))
                     .execute(&pool)
                     .await?;
                 return Ok(());
             }
-            let cols: Vec<String> = present.iter().map(|(f, _)| (*f).clone()).collect();
-            let sql = pg_insert_sql(&self.config.table, &cols);
+            let cols: Vec<String> = cells.iter().map(|(f, _)| (*f).clone()).collect();
+            let nulls: Vec<bool> = cells.iter().map(|(_, v)| v.is_none()).collect();
+            let sql = pg_insert_row_sql(&self.config.table, &cols, &nulls);
             let mut query = sqlx::query(&sql);
-            for (_, v) in &present {
+            for v in cells.iter().filter_map(|(_, v)| v.as_ref()) {
                 query = bind_pg_arg(query, v);
             }
             query.execute(&pool).await?;
@@ -2108,6 +2112,25 @@ pub fn sqlite_insert_sql(table: &str, fields: &[String]) -> String {
     format!("INSERT INTO {} ({}) VALUES ({})", table, cols, placeholders)
 }
 
+/// Row-aware variant: null columns render as an untyped SQL `NULL` literal
+/// (never a typed parameter), other columns keep `?` placeholders.
+pub fn sqlite_insert_row_sql(table: &str, cols: &[String], nulls: &[bool]) -> String {
+    let names = cols.join(", ");
+    let placeholders = cols
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if nulls.get(i).copied().unwrap_or(false) {
+                "NULL".to_string()
+            } else {
+                "?".to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO {} ({}) VALUES ({})", table, names, placeholders)
+}
+
 /// `INSERT INTO {table} ({cols}) VALUES ($1, ...)` for PostgreSQL, whose
 /// wire protocol numbers placeholders instead of accepting `?`.
 pub fn pg_insert_sql(table: &str, fields: &[String]) -> String {
@@ -2117,6 +2140,29 @@ pub fn pg_insert_sql(table: &str, fields: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!("INSERT INTO {} ({}) VALUES ({})", table, cols, placeholders)
+}
+
+/// Row-aware variant: null columns render as an untyped SQL `NULL` literal
+/// (the server infers the column type), other columns keep numbered `$n`
+/// placeholders in bind order.
+pub fn pg_insert_row_sql(table: &str, cols: &[String], nulls: &[bool]) -> String {
+    let names = cols.join(", ");
+    let mut next_param = 1u32;
+    let placeholders = cols
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if nulls.get(i).copied().unwrap_or(false) {
+                "NULL".to_string()
+            } else {
+                let token = format!("${}", next_param);
+                next_param += 1;
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO {} ({}) VALUES ({})", table, names, placeholders)
 }
 
 /// Connect a PostgreSQL pool with a bounded handshake timeout so dead
@@ -2922,16 +2968,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sqlite_sink_omits_null_columns() {
-        // Null/missing columns are omitted from the INSERT (database
-        // defaults apply) instead of binding a typed NULL.
+    async fn test_sqlite_sink_null_is_null_not_default() {
+        // Explicit JSON nulls and missing fields must land as SQL NULL —
+        // never column DEFAULTs and never a mistyped NULL parameter.
         let url = sqlite_file_url("sinknulls");
         let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
-        sqlx::query("CREATE TABLE rknull(eid TEXT PRIMARY KEY, temp REAL NULL, flag INTEGER NULL)")
+        sqlx::query("CREATE TABLE rknull(eid TEXT PRIMARY KEY, temp REAL NULL DEFAULT 99.9, flag INTEGER NULL DEFAULT 1)")
             .execute(&pool)
             .await
             .unwrap();
         drop(pool);
+        // Row-SQL builders: NULL literal for nulls, ordered placeholders else.
+        assert_eq!(
+            super::pg_insert_row_sql(
+                "t",
+                &["a".to_string(), "b".to_string(), "c".to_string()],
+                &[false, true, false]
+            ),
+            "INSERT INTO t (a, b, c) VALUES ($1, NULL, $2)"
+        );
+        assert_eq!(
+            super::sqlite_insert_row_sql(
+                "t",
+                &["a".to_string(), "b".to_string()],
+                &[true, false]
+            ),
+            "INSERT INTO t (a, b) VALUES (NULL, ?)"
+        );
         let sink = super::SqlSink {
             config: super::SqlConnectorConfig {
                 url: url.clone(),
@@ -2947,8 +3010,11 @@ mod tests {
         sink.insert_record(&StreamRecord::new(all_null))
             .await
             .unwrap();
+        let mut missing = HashMap::new();
+        missing.insert("eid".to_string(), json!("n2"));
+        sink.insert_record(&StreamRecord::new(missing)).await.unwrap();
         let mut mixed = HashMap::new();
-        mixed.insert("eid".to_string(), json!("n2"));
+        mixed.insert("eid".to_string(), json!("n3"));
         mixed.insert("temp".to_string(), json!(21));
         mixed.insert("flag".to_string(), json!(true));
         sink.insert_record(&StreamRecord::new(mixed)).await.unwrap();
@@ -2962,7 +3028,8 @@ mod tests {
             rows,
             vec![
                 ("n1".to_string(), None, None),
-                ("n2".to_string(), Some(21.0), Some(1)),
+                ("n2".to_string(), None, None),
+                ("n3".to_string(), Some(21.0), Some(1)),
             ]
         );
     }
