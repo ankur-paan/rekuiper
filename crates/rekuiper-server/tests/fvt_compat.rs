@@ -6659,7 +6659,10 @@ async fn test_ruletest_large_replay_ordered_and_delete() {
             _ => continue,
         }
     }
-    assert!(terminated, "open SSE feed must terminate after session delete");
+    assert!(
+        terminated,
+        "open SSE feed must terminate after session delete"
+    );
     let gone = client
         .get(format!("{}/test/rt_big", base_url))
         .send()
@@ -6700,7 +6703,11 @@ async fn test_ruletest_loop_continues_past_cap() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     const WANT: usize = 10_300;
     let frames = drain_sse_frames(&mut resp, WANT, 120).await;
-    assert_eq!(frames.len(), WANT, "looping feed must continue past the cap");
+    assert_eq!(
+        frames.len(),
+        WANT,
+        "looping feed must continue past the cap"
+    );
     for f in &frames {
         assert!(
             f == "{\"n\":0}" || f == "{\"n\":1}" || f == "{\"n\":2}",

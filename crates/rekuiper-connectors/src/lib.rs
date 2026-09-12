@@ -2717,7 +2717,8 @@ mod tests {
         data.insert("id".to_string(), json!(1));
         assert!(sink.insert_record(&StreamRecord::new(data)).await.is_err());
         assert!(super::sql_lookup_key(url, "t", "id", "1").await.is_err());
-        let mut src = super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
+        let mut src =
+            super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
         assert!(src.poll_once().await.is_err());
     }
 
@@ -2788,7 +2789,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(inc.url, "postgres://u:p@h/db?sslmode=disable");
-        let inner = inc.internal_sql_query_cfg.clone().expect("internal cfg parsed");
+        let inner = inc
+            .internal_sql_query_cfg
+            .clone()
+            .expect("internal cfg parsed");
         assert_eq!(inner.table, "rksrc");
         assert_eq!(inner.limit, 10);
         assert_eq!(inner.index_fields.len(), 1);
@@ -2940,7 +2944,9 @@ mod tests {
         all_null.insert("eid".to_string(), json!("n1"));
         all_null.insert("temp".to_string(), serde_json::Value::Null);
         all_null.insert("flag".to_string(), serde_json::Value::Null);
-        sink.insert_record(&StreamRecord::new(all_null)).await.unwrap();
+        sink.insert_record(&StreamRecord::new(all_null))
+            .await
+            .unwrap();
         let mut mixed = HashMap::new();
         mixed.insert("eid".to_string(), json!("n2"));
         mixed.insert("temp".to_string(), json!(21));
