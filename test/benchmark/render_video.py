@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Renders a high-production 60 FPS MP4 video comparing all 5 streaming engines
-in Material Design 3 (M3) Light Theme with bouncing balls, realistic ballistic sparks,
-3D glossy spheres, vector rank badges, synchronized multi-pitch audio, and empirical
-benchmark data extrapolated to 1,000,000 events.
-Outputs: test/benchmark/rekuiper_benchmark_race_1m.mp4
+LEGACY NONCOMPARABLE visualizer (do NOT use for claims).
+Prior file-source/in-process numbers with invented 1M extrapolation and rankings.
+No equivalent fair over-HTTP rerun exists for these engines, so no ranking is claimed.
+See test/BENCHMARKS.md and BENCHMARK-AUDIT.md for the fair audit.
 """
 import subprocess
 import math

@@ -1,76 +1,66 @@
 # rekuiper: The High-Performance Edge Stream Processing Engine
 
-[![Release](https://img.shields.io/badge/release-v0.423--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
+[![Release](https://img.shields.io/badge/release-v0.424--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.423--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.424--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
-[![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-100%25%20Covered-green.svg)](openapi.json)
-[![Throughput](https://img.shields.io/badge/throughput-320k--540k%2B%20eps-success.svg)](#-performance--competitive-benchmarks)
-[![Latency](https://img.shields.io/badge/tail%20latency-15%20µs-brightgreen.svg)](#-performance--competitive-benchmarks)
-[![Memory Footprint](https://img.shields.io/badge/RSS-%3C%2010%20MB-blue.svg)](#-performance--competitive-benchmarks)
-[![Zero GC](https://img.shields.io/badge/GC%20Pauses-ZERO-success.svg)](#-performance--competitive-benchmarks)
+[![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-contract%20audited-blue.svg)](openapi.json)
+[![Benchmark](https://img.shields.io/badge/benchmark-fair%20over--HTTP%20audit-blue.svg)](BENCHMARK-AUDIT.md)
 
-> **🚀 Pure Rust edge stream processing engine — zero GC pauses, 320,000 – 540,000+ eps throughput, 15 µs deterministic latency, < 10 MB RAM footprint, and 100% drop-in eKuiper API compatibility.**
+> **🚀 Pure Rust edge stream processing engine — zero GC pauses by construction, small static binary and low idle RSS, with eKuiper-compatible REST/CLI/YAML surface (scoped parity, see below). Fair over-HTTP source-to-sink results are reported in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md); no latency-histogram p99 is claimed.**
 
 ---
 
-## ⚡ Performance & Competitive Benchmarks
+## ⚡ Fair Over-HTTP Benchmark (rekuiper vs eKuiper)
 
-The benchmark below evaluates `rekuiper` against upstream Go eKuiper, Apache Flink, Redpanda Connect (Benthos), and Telegraf under an identical high-frequency edge workload: parsing **500,000 wide-schema telemetry events** through JSON decoding, filtering predicates, arithmetic transformations (`temp * 1.8 + 32 AS temp_f`), and sink emission on a single CPU core in Linux (WSL2 / Ubuntu x86_64):
+Same Python harness delivers the identical 500,000 synthetic events through documented
+ingestion endpoints into containers with equal `--cpus=1 --memory=1g` constraints,
+sequentially (never concurrent), with equivalent SQL/sink work. Source-to-sink
+(rule-status sink counters) is measured, not HTTP-ack alone. 1 warmup + 3 measured
+runs per config; raw per-run evidence and variance are preserved. No ranking is
+claimed for Flink/Benthos/Telegraf — no equivalent over-HTTP rerun was completed,
+so old noncomparable numbers were removed. Nothing here is called bulletproof.
 
-| Feature / Metric | `rekuiper` (0.423-beta) | Apache Flink (v2.3.0) | Upstream Go eKuiper (v2.4.1) | Telegraf (v1.40.0) | Redpanda Connect (Benthos) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Core Language** | **Pure Rust** | Java / Scala (JVM) | Go (Golang) | Go (Golang) | Go (Golang) |
-| **500k Elapsed Time** | **1.176 seconds** | 2.144 s *(vertex)* / 2.940 s *(job)* | 11.290 seconds | 8.194 seconds | 19.236 seconds |
-| **Throughput (1 Core)** | **425,308 events/sec** | 233,209 eps *(vertex)* / 170,068 eps | 44,287 events/sec | 61,019 events/sec *(ingest only)* | 25,993 events/sec |
-| **Data Integrity (Drops)**| **0 drops (0.0% loss)** | 0 drops (0.0% loss) | **72,921 drops (14.6% loss)** *(buffer saturation)* | 0 drops (0.0% loss) | 0 drops (0.0% loss) |
-| **Speedup vs Competitor**| **Baseline (Fastest)** | **1.8x – 2.5x faster** | **9.6x faster** | **7.0x faster** | **16.4x faster** |
-| **Tail Latency (p99)** | **~15 µs (0.015 ms)** | ~5.0 ms – 25.0 ms (JVM GC) | ~1.5 ms – 8.0 ms (GC spikes) | ~3.0 ms – 12.0 ms | ~2.0 ms – 10.0 ms |
-| **Garbage Collection** | **ZERO GC (Deterministic)**| Heavy JVM GC Pauses | Stop-The-World Sweeps | Stop-The-World Sweeps | Stop-The-World Sweeps |
-| **Memory Footprint (RSS)**| **~6 MB – 8.2 MB** | **~1,022 MB (1.02 GB across JM+TM)** | ~45 MB – 85 MB | ~50 MB – 80 MB | ~38 MB – 70 MB |
-| **Binary Size / Image** | **9.60 MB** | > 920 MB (with JVM & Flink jars) | ~38 MB – 50 MB | ~75 MB | ~65 MB |
-| **Cold Startup Time** | **~13 ms** (internal) / 123 ms (spawn) | ~15,000 ms – 30,000 ms *(cluster spinup)* | ~1,200 ms | ~450 ms | ~350 ms |
-| **Streaming SQL Engine**| **Yes (Full Windows & Aggs)**| Yes | Yes | No (Config transforms) | Limited / Bloblang |
-| **Stream-Table JOINs** | **Yes (Redis, SQL, Memory)** | Yes (Broadcast state) | Yes | Limited | Limited lookups |
-| **Edge Gateway Friendly**| **Exceptional (64MB+ RAM)** | Unusable on Edge | Moderate (512MB+ RAM) | Moderate | Moderate |
-| **eKuiper Drop-In Parity**| **100% (REST, CLI, YAML)** | Incompatible | Native Baseline | Incompatible | Incompatible |
+- SQL: `SELECT id, temp * 1.8 + 32 AS temp_f FROM bench WHERE temp > 20.0`, sink `[{"nop":{}}]`
+- Payload: `{"id":"dev_N","temp":25.0+(N%10)}` (~30 B, all pass filter), batch 500/POST, 8 HTTP workers
+- rekuiper ingest: `POST /streams/bench/data` (implemented; covered by `test_http_push_data_ingestion`)
+- eKuiper ingest: `POST :10081/bench/data` with `TYPE="httppush" DATASOURCE="/bench/data"`
+  ([HTTP Push source](https://ekuiper.org/docs/en/latest/guide/sources/builtin/http_push.html))
+- eKuiper default vs tuned (`bufferLength`/`concurrency`,
+  [rule fine-tuning](https://ekuiper.org/docs/en/latest/guide/rules/overview.html#fine-tuning));
+  effective options verified via `GET /rules/<id>`
 
-> [!NOTE]
-> All benchmarks were measured directly on the exact same Linux host using an identical 500,000-event telemetry workload. For full reproduction commands, methodology, and individual test scripts, see **[test/BENCHMARKS.md](test/BENCHMARKS.md)**.
+| Config (500k attempted, --cpus=1) | Accepted (HTTP 2xx) | Observed sink-out / loss | End-to-end source-to-sink |
+| :--- | :--- | :--- | :--- |
+| `rekuiper` 0.424-beta candidate | 500,000 (1000×500) | ~21.2k–22.1k delivered (~95.7% loss under burst) | ~2,570–2,992 eps |
+| eKuiper 2.4.1 default (1024/1) | 500,000 | ~219k–366k delivered (~27–56% loss, high variance) | ~4,635–6,808 eps |
+| eKuiper 2.4.1 tuned (32768/4) | 500,000 | ~307k–336k delivered (~33–39% loss) | ~4,514–5,397 eps |
 
-### 🔬 Key Technical Specifications
+Per-run rows, drain timeout (120 s), errors, duration boundaries, image IDs, host/runtime,
+and throughput/loss tradeoff notes are in **[BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md)** and
+**[test/BENCHMARKS.md](test/BENCHMARKS.md)**. Larger eKuiper buffers reduce loss at the same
+burst; undrained output is not called loss — loss is reported only after the drain window
+stabilizes.
 
-- **Throughput**: **425,308 events/sec** on Linux x86_64 sustained on a single commodity CPU core with 0 dropped events under continuous burst ingestion.
-- **Latency**: **15 µs** deterministic p99 execution — zero GC jitter, no pause phases.
-- **Memory Footprint**: **6 – 8.2 MB** idle RSS (Alpine musl static), scaling sub-linearly under load.
-- **Micro Binary**: **9.60 MB** self-contained Alpine musl static binary with zero runtime dependencies.
-- **Cold Boot Time**: **12.5 – 14.5 milliseconds** internal daemon bootstrap from invocation to accepting requests.
-- **API Coverage**: **100% OpenAPI 3.0 route parity** (all 98 REST endpoints and 140 operations validated with authentic implementations).
+### 🔬 Internal microbenchmark (separate, NOT comparable)
 
-### 🧪 Reproducing the Benchmark
-
-The throughput benchmark is included in the test suite:
+`cargo test --release --test perf_throughput -- --nocapture` drives the in-process
+engine bus directly (no HTTP, no containers). It is an internal regression floor
+(assert > 20,000 eps), never compared against end-to-end HTTP numbers.
 
 ```bash
 cargo test --release --test perf_throughput -- --nocapture
+python3 test/benchmark/bench_http_fair.py --all --events 500000 --batch 500 --concurrency 8
 ```
 
-```text
-# Linux (WSL2 / Ubuntu 24.04 x86_64, ext4 release)
-=== Performance Benchmark: Streaming SQL Pipeline ===
-Records Ingested : 500,000
-Elapsed Time     : 1.175619052s
-Throughput       : 425,307.84 events/sec (Assert: > 20,000 eps)
-Result           : PASSED (Zero GC pauses, deterministic execution)
+### Scoped implementation notes
 
-# Windows (x86_64 MSVC)
-=== Performance Benchmark: Streaming SQL Pipeline ===
-Records Ingested : 50,000
-Elapsed Time     : 134.8 ms
-Throughput       : 370,766.7 events/sec (Assert: > 20,000 eps)
-Result           : PASSED (Zero GC pauses, deterministic execution)
-```
+- No latency-histogram p99 is claimed (no histogram at a defined boundary was measured).
+- Idle RSS / binary size / cold-boot figures from prior internal runs are retained only as
+  informational, labeled noncomparable in `test/BENCHMARKS.md`.
+- API coverage is scoped: 98 paths / 140 operations are registered against the audited
+  `openapi.json` baseline with evidence-linked tests; known residual gaps are listed below.
 
 ---
 
@@ -87,7 +77,7 @@ docker run -d \
   -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.423-beta
+  ankurkrp/rekuiper:0.424-beta
 ```
 
 Or spin up an instant end-to-end edge stack (rekuiper + Mosquitto MQTT broker + Redis):
@@ -147,8 +137,7 @@ make build
              |            Streaming SQL Engine Loop             |
              |  - Stream-Table Lookup JOINs (Redis / SQL / Mem) |
              |  - Tumbling, Hopping, Sliding, & Count Windows   |
-             |  - 40+ Math, String, Trig, & Aggregate Functions |
-             |  - Evaluates @ 320,000+ events/sec               |
+|  - 40+ Math, String, Trig, & Aggregate Functions |
              +------------------------+-------------------------+
                                       |
                                (try_send non-blocking)
@@ -171,11 +160,11 @@ make build
 
 ## 📋 Supported vs. Unsupported Features Matrix
 
-Detailed capability disclosures for the **v0.423-beta** release:
+Detailed capability disclosures for the **v0.424-beta** release:
 
-| Feature Area | Supported in v0.423-beta | Status & Architectural Disclosure |
+| Feature Area | Supported in v0.424-beta | Status & Evidence |
 | :--- | :--- | :--- |
-| **REST API** | **100% Forensic Route Parity** | ✅ All 98 paths and 140 operations registered and validated with authentic implementations (zero stubs). |
+| **REST API** | **Scoped route coverage** | 98 paths / 140 operations registered against the audited `openapi.json` baseline; covered by `fvt_compat` black-box tests. Not claimed as exhaustive parity — see known gaps in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md#known-residual-gaps) and `TEST-CONTRACT-AUDIT.md` where applicable. |
 | **CLI Tool** | **`kuiper` Drop-in Replacement** | ✅ Full stream, table, rule management subcommands. |
 | **Streaming Windows** | **Tumbling, Hopping, Sliding, Count** | ✅ Millisecond/second/minute/hour time units and event counts. |
 | **Stream-Table JOINs** | **LEFT JOIN & INNER JOIN** | ✅ Join dynamic streams against static or external Redis / SQL lookup tables. |
@@ -196,8 +185,8 @@ Detailed capability disclosures for the **v0.423-beta** release:
 | **EdgeX Foundry IPC** | ❌ **Not Supported in Core** | ⚠️ *Excluded to prevent bundling heavy C/ZeroMQ dependencies. Integrate via EdgeX MQTT/Redis message bus.* |
 | **EMQ Neuron / NeuronEX**| ❌ **Not Supported in Core** | ⚠️ *Excluded proprietary IPC. Connect directly via standard MQTT broker (NanoMQ / EMQX).* |
 | **Video / CV Pipelines**| ❌ **Not Supported in Core** | ⚠️ *FFmpeg, OpenCV, and RTSP video decoders are excluded to preserve the 9.6 MB micro footprint.* |
-| **Embedded AI / ONNX** | ❌ **Not Supported in Core** | ⚠️ *ONNX Runtime and TensorFlow Lite C-bindings are omitted. Slated as an optional modular feature in 0.69-beta.* |
-| **Dynamic Go Plugins** | ❌ **Not Supported** | ⚠️ *Loading raw Go `.so` shared libraries violates Rust memory safety. Portable supervisor plugins and JS UDF services are fully supported; WebAssembly (WASM) runtime is planned for 0.69-beta.* |
+| **Embedded AI / ONNX** | ❌ **Not Supported in Core** | ⚠️ *ONNX Runtime and TensorFlow Lite C-bindings are omitted. No release scheduled.* |
+| **Dynamic Go Plugins** | ❌ **Not Supported** | ⚠️ *Loading raw Go `.so` shared libraries violates Rust memory safety. Portable supervisor plugins and JS UDF services are fully supported.* |
 | **Industrial Protocols**| ❌ **Not Supported in Core** | ⚠️ *Direct binary Modbus, OPC-UA, and BACnet drivers are not bundled. Bridge via an industrial edge gateway or NanoMQ.* |
 | **Multi-Node Cluster** | ❌ **Not Supported** | ⚠️ *Designed exclusively as a hyper-specialized, single-node deterministic edge streaming daemon.* |
 
@@ -258,7 +247,7 @@ curl -X GET http://localhost:20499/metrics
 
 ## 📊 Observability & Management
 
-- **Web UI Compatible**: Fully compatible with the official [eKuiper Manager Web UI](https://ankur-paan.github.io/ekuiper-manager/) via 100% OpenAPI 3.0 route coverage.
+- **Web UI Compatible**: Works with the official [eKuiper Manager Web UI](https://ankur-paan.github.io/ekuiper-manager/) via the audited OpenAPI contract (scoped coverage; see gaps note above).
 - **Prometheus Scrapes**: Scrape port `20499` (or `http://localhost:9081/metrics`) to monitor:
   - `kuiper_rule_count{status="running|stop"}`
   - `kuiper_rule_status{rule="<id>"}`
@@ -281,20 +270,17 @@ In production, edge streaming architectures faced a frustrating compromise:
 1. **Heavyweight JVM Stream Engines (Apache Flink, Spark Streaming)**: Feature-rich, but require gigabytes of RAM, take seconds to boot, and instantly crash resource-constrained industrial gateways, Raspberry Pis, or embedded edge micro-servers.
 2. **Go / Python Stream Processors (Upstream eKuiper, Benthos, Telegraf)**: Substantially lighter than JVM runtimes, but burdened by continuous garbage collection sweeps. Under sustained high-frequency sensor ingestion (10k–100k events/sec), Stop-The-World GC sweeps introduce severe tail latency spikes, dropped packets, and CPU jitter.
 
-`rekuiper` was created to definitively solve this compromise. In our field deployments, it proved so exceptionally fast (> 320,000 events/sec), memory-efficient (< 10 MB RAM), and jitter-free (zero GC pauses) that we chose to release it to the global community under the **most permissive dual open-source license available (MIT / Apache-2.0)**.
+`rekuiper` was created to address this compromise. As a Rust implementation it has no GC pauses by construction; measured over-HTTP source-to-sink behavior and limits are reported in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md) rather than as absolute throughput claims. It is released under **MIT / Apache-2.0**.
 
 ---
 
 ## 🗺️ Roadmap
 
-- **0.423-beta (Current)**: Dynamic Rule Resume (`POST /rules/:name/start`), Envelope Import Support (`POST /ruleset/import` & `POST /data/import`), 0 Target Defect Evaluation Parity with LF Edge eKuiper.
-- **0.422-beta**: 100% Evaluation Parity with LF Edge eKuiper across all 12 Root Causes (D1–D12), Remote MQTT Broker Ingestion & CONF_KEY, Real PostgreSQL Sink/Source/Lookup Data Plane, Full HTTP PUT/PATCH Handlers, RSA/JWT Authentication Guard, Live SSE Ruletest Streaming, Stream/Table Field Schemas.
-- **0.421-beta**: 320,000+ eps Engine Throughput, 100% Authentic OpenAPI Route Parity, Persistent File Uploads, Dynamic YAML Overlays & Secret Masking, Bulk Rule Control.
-- **0.420-beta**: High-Speed Rust Core Engine, Decoupled Actor Sink Queue, Full Connector Ecosystem, Visual Graph Rule DAG Engine.
-- **0.69-beta (Next Release)**:
-  - WebAssembly (WASM) user-defined function (UDF) runtime using Wasmtime.
-  - MQTT v5 User Properties and Flow Control.
-  - Optional ONNX Runtime dynamic scoring crate for local AI inference.
+- **0.424-beta (Current)**: Documented parity fixes for PG/SQL sources and lookups, windowed joins, array/JSONPath, ruletest SSE on port 10081, restart resume, CLI surface, and Docker `restIp` default. Fair over-HTTP benchmark audit added.
+- **0.423-beta**: Dynamic Rule Resume (`POST /rules/:name/start`), Envelope Import Support (`POST /ruleset/import` & `POST /data/import`).
+- **0.422-beta**: Evaluation fixes across documented root causes (D1–D12), remote MQTT ingestion & CONF_KEY, PostgreSQL data plane, HTTP PUT/PATCH handlers, RSA/JWT guard, SSE ruletest, stream/table schemas.
+- **0.421-beta**: Engine throughput test floor, OpenAPI route registration, persistent uploads, YAML overlays & masking, bulk rule control.
+- **0.420-beta**: Rust core engine, actor sink queue, connector ecosystem, graph rule DAG engine.
 
 ---
 

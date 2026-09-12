@@ -1,133 +1,103 @@
-# ⚡ Streaming Benchmarks & Reproducibility Guide
+# Fair Over-HTTP Benchmarks & Reproducibility Guide
 
-This document presents the **100% empirical, zero-assumption head-to-head performance benchmarks** evaluating `rekuiper` against **Apache Flink**, **Upstream Go eKuiper**, **Redpanda Connect (Benthos)**, and **Telegraf**.
+Same Python harness delivers the identical 500,000 synthetic events through documented
+ingestion endpoints into containers with equal `--cpus=1 --memory=1g` constraints,
+sequentially (never concurrent), with equivalent SQL/sink work. Source-to-sink
+(rule-status sink counters) is measured, not HTTP-ack alone.
 
-All benchmarks are reproducible on any Linux or WSL2 environment using the automated scripts included in [`test/benchmark/`](test/benchmark/).
+- Harness: [`benchmark/bench_http_fair.py`](benchmark/bench_http_fair.py)
+- Full audit with per-run evidence: [`../BENCHMARK-AUDIT.md`](../BENCHMARK-AUDIT.md)
+- Raw results: preserved under workspace `evidence/bench-fair-full.json` (copied from harness output)
 
----
+## Methodology (fair)
 
-## 📊 Benchmark Summary (500,000 Events Head-to-Head)
+- Events: 500,000 deterministic `{"id":"dev_N","temp":25.0+(N%10)}` (~30 B, all pass `WHERE temp>20`); private local fixture, no public broker.
+- SQL (identical): `SELECT id, temp * 1.8 + 32 AS temp_f FROM bench WHERE temp > 20.0`, sink `[{"nop":{}}]`.
+- Batching/HTTP (identical): 500 events/POST × 1000 POSTs, 8 parallel workers via `ThreadPoolExecutor`.
+- Containers (equal, sequential):
+  `docker run -d --cpus=1 --memory=1g ...` (quota only; NOT claimed as strict physical one-core isolation).
+- Ingestion endpoints (documented per engine):
+  - rekuiper: `POST /streams/bench/data` (implemented; covered by `test_http_push_data_ingestion`; not in `openapi.json` — recorded gap).
+  - eKuiper: `POST :10081/bench/data` with `TYPE="httppush" DATASOURCE="/bench/data"` —
+    [HTTP Push source](https://ekuiper.org/docs/en/latest/guide/sources/builtin/http_push.html),
+    stream management via [Streams REST API](https://ekuiper.org/docs/en/latest/api/restapi/streams.html).
+- eKuiper tested BOTH default and tuned:
+  [rule fine-tuning](https://ekuiper.org/docs/en/latest/guide/rules/overview.html#fine-tuning)
+  (`bufferLength` default 1024 / `concurrency` default 1 vs tuned 32768/4);
+  effective options verified via `GET /rules/<id>`.
+  Global defaults reference:
+  [global configurations](https://ekuiper.org/docs/en/latest/configuration/global_configurations.html).
+- Counts per run: attempted, accepted (HTTP 2xx requests/events), processed (source counters),
+  observed sink-output (sink counters), drain timeout 120 s (poll 0.5 s, 5 stable rounds),
+  errors, duration boundaries (ingest start/end, drain end).
+- 1 warmup (10k, discarded) + 3 measured runs per config. Raw + variance preserved. Not called bulletproof.
 
-### Workload & Hardware Environment
-- **Dataset**: 500,000 wide-schema telemetry records (`telemetry_500k.jsonl`, 17.06 MB).
-- **Pipeline**: Ingest 500,000 events $\rightarrow$ Parse JSON $\rightarrow$ Compute arithmetic formula (`temp * 1.8 + 32.0 AS temp_f`) $\rightarrow$ Filter predicate (`temp > 20.0`) $\rightarrow$ Project fields (`id`, `temp_f`) $\rightarrow$ Sink / Blackhole.
-- **Host**: Linux (WSL2 / Ubuntu x86_64, 8 physical cores allocated, native ext4 filesystem).
+## Results (500k, --cpus=1, sequential)
 
-| Engine | Runtime / Language | 500k Elapsed Time | Throughput (1 Core) | Data Drops / Loss | Memory Footprint (Idle) | Cold Boot Time | Speedup vs Competitor |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **`rekuiper` (v0.423-beta)** | **Pure Rust** | **1.176 s** (1,175.6 ms) | **425,308 events/sec** | **0 (0.0% loss)** | **~6 – 8.2 MB** | **~13 ms** (internal) / 123 ms (spawn) | **Baseline (Fastest)** |
-| **Apache Flink (v2.3.0)** | Java / Scala (JVM) | **2.144 s** *(vertex)* / 2.940 s *(job)* | **233,209 eps** *(vertex)* / 170,068 eps | 0 (0.0% loss) | **~1,022 MB (1.02 GB)** | ~15 – 30 seconds *(cluster spinup)* | **`rekuiper` is 1.8x – 2.5x faster** |
-| **Upstream eKuiper (v2.4.1)** | Go (official `lfedge/ekuiper`) | **11.290 s** (11,290 ms) | **44,287 events/sec** | **72,921 drops (14.6% loss)** *(buffer saturation)* | ~45 – 85 MB | ~1,200 ms | **`rekuiper` is 9.6x faster** |
-| **Telegraf (v1.40.0)** | Go (official `telegraf`) | **8.194 s** (8,194 ms) | **61,019 events/sec** *(ingest only)* | 0 (0.0% loss) | ~50 – 80 MB | ~450 ms | **`rekuiper` is 7.0x faster** |
-| **Redpanda Connect (Benthos)** | Go (official `redpandadata/connect`)| **19.236 s** (19,236 ms) | **25,993 events/sec** | 0 (0.0% loss) | ~38 – 70 MB | ~350 ms | **`rekuiper` is 16.4x faster** |
+Host: `Linux-6.6.87.2-microsoft-standard-WSL2-x86_64`, CPU `AMD Ryzen 5 PRO 230`, Docker server `29.1.3`, Python `3.12.3`.
+Images: `rkfix0424/candidate:0.424-beta` (`sha256:96017eb938b6...`, local build, no RepoDigest);
+`lfedge/ekuiper:2.4.1` (`sha256:41205fbf01fc...`, `lfedge/ekuiper@sha256:a346c1e63bd34a...`).
 
----
+| Config | Run | Attempted | Accepted req/events | Sink-out (observed) | Loss after drain | Ingest ack eps | End-to-end eps | Total s |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| rekuiper 0.424 | 1 | 500,000 | 1000 / 500,000 | 22,098 | 95.6% | 89,804 | 2,570 | 8.60 |
+| rekuiper 0.424 | 2 | 500,000 | 1000 / 500,000 | 21,202 | 95.8% | 108,430 | 2,772 | 7.65 |
+| rekuiper 0.424 | 3 | 500,000 | 1000 / 500,000 | 21,574 | 95.7% | 119,776 | 2,992 | 7.21 |
+| eKuiper default | 1 | 500,000 | 1000 / 500,000 | 365,770 | 26.8% | 77,942 | 6,808 | 53.72 |
+| eKuiper default | 2 | 500,000 | 1000 / 500,000 | 248,446 | 50.3% | 87,829 | 5,072 | 48.98 |
+| eKuiper default | 3 | 500,000 | 1000 / 500,000 | 219,640 | 56.1% | 85,583 | 4,635 | 47.39 |
+| eKuiper tuned 32768/4 | 1 | 500,000 | 1000 / 500,000 | 324,661 | 35.1% | 69,974 | 5,397 | 60.16 |
+| eKuiper tuned 32768/4 | 2 | 500,000 | 1000 / 500,000 | 306,739 | 38.7% | 70,559 | 5,238 | 58.56 |
+| eKuiper tuned 32768/4 | 3 | 500,000 | 1000 / 500,000 | 336,254 | 32.7% | 48,518 | 4,514 | 74.50 |
 
-## 🔍 In-Depth Architectural Findings
+Variance (end-to-end eps mean ± pstdev): rekuiper 2,778 ± 172; eKuiper default 5,505 ± 939;
+eKuiper tuned 5,049 ± 384. eKuiper default shows high run-to-run variance. No comparative
+ranking beyond these three fair configs; no speedup multipliers are claimed.
 
-### 1. What Happened with Apache Flink?
-- **Throughput vs Overhead**: Apache Flink is an enterprise-grade distributed streaming engine designed for massive distributed clusters. In our tests with Flink 2.3.0, the core execution graph processed the 500,000 records in **2.144 seconds** (233,209 events/sec).
-- **Resource Footprint**: To achieve this, Flink required spinning up a JobManager and TaskManager running on the Java Virtual Machine. Together they consumed **1,022.4 MiB (~1.02 GB) of RAM** (`flink-jm`: 344 MB, `flink-tm`: 678 MB).
-- **Boot Latency**: Spinning up the Flink JVM cluster, establishing RPC bindings, and deploying the job topology took **15 to 30 seconds**.
-- **Edge Suitability**: While Flink is capable of high throughput in datacenters, its 1 GB+ RAM footprint and 20-second startup latency make it completely unviable for resource-constrained industrial gateways, robots, and edge devices. `rekuiper` achieves **1.8x – 2.5x higher throughput** while using **125x less RAM** (< 8.2 MB) and booting in **13 milliseconds**.
+Throughput/loss tradeoff: larger eKuiper `bufferLength`/`concurrency` reduce loss at the same
+burst versus defaults (documented tuning). Undrained output is not called loss — loss above
+is after the 120 s drain window stabilizes (5 stable polls). All HTTP POSTs were accepted
+(0 failed requests); shortfall is source-to-sink, not ack throughput.
 
-### 2. What Happened with Upstream Go eKuiper?
-- **Throughput**: Upstream Go eKuiper processed the 500,000 dataset in **11.290 seconds** (44,287 events/sec).
-- **Channel Saturation & Data Loss**: Under continuous 500,000 record burst ingestion, Go eKuiper's internal Go channel buffers saturated:
-  ```text
-  "source_stream_500k_0_exceptions_total": 72410,
-  "source_stream_500k_0_last_exception": "buffer full, drop message tt 1789008612983, uid from stream_500k to rule_500k.1_2_decoder"
-  ```
-  Out of 500,000 source records, **72,921 records were dropped** (14.6% data loss). Only 427,079 records reached the sink.
-- In contrast, `rekuiper` processed all 500,000 records with **zero drops (100% data integrity)** in **1.176 seconds** (**9.6x faster**).
+## Internal microbenchmark (separate, NOT comparable)
 
-### 3. What Happened with Redpanda Connect (Benthos)?
-- Redpanda Connect executed the identical Bloblang transformation (`root.temp_f = (this.temp * 1.8) + 32`) and JSON filter (`this.temp > 20.0`) in **19.236 seconds** (**25,993 events/sec**).
-- `rekuiper` outperformed Redpanda Connect by **16.4x**.
+`crates/rekuiper-server/tests/perf_throughput.rs` (`cargo test --release --test perf_throughput`)
+drives the in-process bus directly with chunked catch-up waits — no HTTP, no containers.
+It is an internal regression floor (assert > 20,000 eps) and MUST NOT be compared with
+end-to-end HTTP numbers.
 
-### 4. What Happened with Telegraf?
-- Telegraf parsed line-delimited JSON using `data_format = "json_v2"` and discarded it in **8.194 seconds** (**61,019 events/sec**). Note that Telegraf did not compute the arithmetic conversion formula or evaluate SQL expressions.
-- `rekuiper` is **7.0x faster** than Telegraf even while performing full arithmetic calculation and SQL filtering.
-
----
-
-## 🔬 Cold Boot & Memory Footprint
-
-Measured with [`test/benchmark/measure_cold_boot.py`](test/benchmark/measure_cold_boot.py) across multiple cold invocations:
-
-```text
-=== Cold Boot & Idle Memory Benchmark ===
-Binary: target/release/kuiperd
-Test Port: 9092
-
-Run 1: End-to-End = 124.12 ms | Internal Bootstrap = 13.00 ms | RSS = 6.42 MB
-Run 2: End-to-End = 121.85 ms | Internal Bootstrap = 12.00 ms | RSS = 6.38 MB
-Run 3: End-to-End = 125.40 ms | Internal Bootstrap = 14.00 ms | RSS = 6.45 MB
-Run 4: End-to-End = 122.90 ms | Internal Bootstrap = 13.00 ms | RSS = 6.40 MB
-Run 5: End-to-End = 124.65 ms | Internal Bootstrap = 13.00 ms | RSS = 6.41 MB
-
---- Summary ---
-End-to-End Process Spawn: min=121.85 ms, avg=123.78 ms, max=125.40 ms
-Internal Daemon Init:     min=12.00 ms,  avg=13.00 ms,  max=14.00 ms
-Idle Memory RSS:          avg=6.41 MB
-```
-
----
-
-## 🧪 How to Reproduce All Benchmarks
-
-All test scripts are located in the [`test/benchmark/`](test/benchmark/) folder. Anyone can clone this repository and run the full head-to-head evaluation.
-
-### Prerequisites
-- **Docker** (for running competitive engines: Flink, Go eKuiper, Redpanda Connect, Telegraf).
-- **Python 3.8+** with `requests` (`pip install requests`).
-- **Rust toolchain** (to build `rekuiper`).
-
-### 1. One-Click Full Benchmark Suite
-Run the master script to generate the dataset and benchmark all engines:
-
-```bash
-# On Linux / WSL2:
-chmod +x test/benchmark/run_all.sh
-./test/benchmark/run_all.sh
-
-# Or via Python directly:
-python3 test/benchmark/run_all.py
-```
-
-### 2. Running Individual Benchmarks
-
-#### A. rekuiper (Rust)
 ```bash
 cargo test --release --test perf_throughput -- --nocapture
 ```
 
-#### B. Apache Flink
-```bash
-python3 test/benchmark/bench_flink.py
-```
+## Prior noncomparable numbers (labeled, no ranking)
 
-#### C. Upstream Go eKuiper
-```bash
-# Start upstream container if not already running:
-docker run -d --name ekuiper -p 9081:9081 lfedge/ekuiper:2.4.1-slim
+Old file-source/in-process/JVM-cluster methods for Flink, Benthos, Telegraf and the prior
+`bench_*.py` scripts use different ingestion paths and are NOT equivalent to the fair
+over-HTTP harness above. They are preserved in `benchmark/bench_flink.py`,
+`benchmark/bench_benthos.py`, `benchmark/bench_telegraf.py`, `benchmark/bench_ekuiper.py`
+(file-source variant), and `benchmark/bench_rekuiper.py` (in-process variant) for reference
+only, without speedup claims.
 
-# Run benchmark:
-python3 test/benchmark/bench_ekuiper.py
-```
+Cold-boot/RSS figures from [`benchmark/measure_cold_boot.py`](benchmark/measure_cold_boot.py)
+are informational process-spawn measurements, not streaming throughput comparisons.
 
-#### D. Redpanda Connect (Benthos)
-```bash
-python3 test/benchmark/bench_benthos.py
-```
+## Reproduce
 
-#### E. Telegraf
-```bash
-python3 test/benchmark/bench_telegraf.py
-```
+Prerequisites: Docker, Python 3.8+ with `requests` (`pip install requests`).
 
-#### F. Cold Boot & Idle RSS Measurement
 ```bash
-cargo build --release
-python3 test/benchmark/measure_cold_boot.py
+# Fair over-HTTP (rekuiper + eKuiper default + eKuiper tuned), 500k each:
+python3 benchmark/bench_http_fair.py --all --events 500000 --batch 500 --concurrency 8 --runs 3
+
+# Single config, e.g. eKuiper tuned only:
+python3 benchmark/bench_http_fair.py --engine ekuiper --mode tuned --events 500000
+
+# Internal microbenchmark only (not comparable to above):
+cargo test --release --test perf_throughput -- --nocapture
+
+# Legacy noncomparable scripts (reference only):
+python3 benchmark/bench_flink.py
+python3 benchmark/bench_benthos.py
+python3 benchmark/bench_telegraf.py
 ```
