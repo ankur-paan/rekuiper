@@ -5,6 +5,11 @@ All notable changes to `rekuiper` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Note (2026-09-12 benchmark audit): pre-0.424 throughput/parity lines below are
+> historical internal/file-source numbers, not fair over-HTTP source-to-sink results.
+> See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
+> No latency-histogram p99 is claimed.
+
 ---
 
 ## [0.424.0-beta] - 2026-09-12
@@ -30,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.422.0-beta] - 2026-09-10
 
 ### Highlights
-- **100% Black-Box Evaluation Parity**: Completely resolved all 12 independent compatibility root causes (37 confirmed defect operations) discovered during the independent evaluation against official `lfedge/ekuiper:2.4.1`.
+- **Scoped evaluation fixes**: Resolved documented compatibility items across 12 root causes found in evaluation against official `lfedge/ekuiper:2.4.1` (scoped; see TEST-CONTRACT-AUDIT where applicable).
 - **Data Plane Integrity & Remote Ingestion**: Fixed MQTT source remote broker resolution (`CONF_KEY` & `server` options), completely eliminating Docker container connection drops.
 - **PostgreSQL & Relational Data Plane**: Implemented authentic PostgreSQL `$1...$n` parameterized sink writes, type-safe lookup joins, and continuous streaming `SqlSource`.
 - **Complete REST CRUD & Dynamic Patching**: Added missing HTTP `PUT` handlers on streams, tables, rules, and connections, plus `PATCH /configs` returning HTTP 204.
@@ -42,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 - **Engine Throughput Record**: Sustained **320,000 to 540,000+ events/sec** (up to 546k eps on Linux x86_64, 370k eps on Windows, 91–134 ms for 50,000 events) on single CPU core with zero GC pauses and deterministic sub-millisecond execution.
-- **100% Authentic Forensic Route Parity**: Complete eradication of scaffolded stubs with authentic persistence, disk I/O, secret masking, and robust error handling across all 98 REST endpoints.
+- **Scoped route coverage**: 98 REST endpoints registered against the audited OpenAPI baseline with persistence, disk I/O, masking, and error handling (scoped; no absolute parity claimed).
 
 ### Added & Improved
 - **Configuration & Uploads Subsystem**:

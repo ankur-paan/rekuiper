@@ -19,13 +19,13 @@ Built by **[I-Dacs Labs](https://i-dacs.com)**. Released under the permissive
 
 # Release Notes - rekuiper v0.423-beta (history)
 
-`rekuiper` v0.423-beta delivers complete, verified black-box compatibility parity with LF Edge eKuiper. Built by **[I-Dacs Labs](https://i-dacs.com)**, this release resolves dynamic rule activation on start/restart, supports nested `{ "content": "..." }` and stringified rule map imports for both ruleset and configuration endpoints, and achieves clean zero-defect pass parity against upstream eKuiper.
+`rekuiper` v0.423-beta resolves dynamic rule activation on start/restart, supports nested `{ "content": "..." }` and stringified rule map imports for both ruleset and configuration endpoints, and passes the evaluation probe suite used at that time (scoped; see TEST-CONTRACT-AUDIT where applicable).
 
-Released under the permissive **MIT License** (and dual Apache-2.0), `rekuiper` combines 100% drop-in parity for upstream eKuiper workloads with deterministic zero-GC sub-millisecond execution and **425,000+ events/sec** throughput.
+Released under the permissive **MIT License** (and dual Apache-2.0). No throughput or parity multipliers are claimed here; see BENCHMARK-AUDIT.md for the fair over-HTTP audit.
 
 ---
 
-## 🎯 100% Evaluation Parity Across All 12 Root Causes
+## Scoped evaluation fixes across documented root causes
 
 ### 1. Data Plane & Remote Ingestion Integrity (D1)
 - Fixed MQTT source broker resolution: `MqttConfig` now treats `topic` as optional with `#[serde(default)]`, allowing topic-less source configuration keys (`CONF_KEY`) to properly decode remote broker addresses (e.g. `{"server": "tcp://broker:1883"}`).
@@ -85,10 +85,11 @@ Released under the permissive **MIT License** (and dual Apache-2.0), `rekuiper` 
 
 ---
 
-## ⚡ Performance Highlights
-- **425,308 Events/Sec Throughput**: Sustained on a single CPU core with zero data loss over 1,000,000 events.
-- **8.2 MB Flat Memory Footprint**: 124x less memory than Apache Flink under burst load.
-- **Zero GC Sweeps**: Microsecond deterministic p99 latency without Stop-The-World pauses.
+## Performance notes (scoped)
+
+- Fair over-HTTP source-to-sink behavior is reported in BENCHMARK-AUDIT.md (no multipliers claimed).
+- No latency-histogram p99 is claimed.
+- Rust has no GC pauses by construction; no comparative GC-latency numbers are claimed.
 
 ---
 

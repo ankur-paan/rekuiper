@@ -6675,6 +6675,14 @@ async fn test_ruletest_large_replay_ordered_and_delete() {
 async fn test_ruletest_loop_continues_past_cap() {
     // A looping session streams indefinitely: an active subscriber keeps
     // receiving well beyond the 10k-row retention cap.
+    //
+    // Timing portability: the replay interval is 0 (unthrottled) because a
+    // nonzero millisecond interval cannot be paced portably — Windows timer
+    // granularity (~15.6ms) stretches `sleep(1ms)` per row, so 10_300 rows
+    // cannot finish in a bounded deadline there (CI: 9659/10300 in 120s on
+    // windows-latest while macOS/Ubuntu passed, and the interval-0 gap test
+    // passed on all three). Pacing semantics are covered separately by
+    // `test_ruletest_paced_replay_spacing`.
     let (base_url, _handle, _state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();
     let resp = client
@@ -6682,7 +6690,7 @@ async fn test_ruletest_loop_continues_past_cap() {
         .json(&json!({
             "id": "rt_loop",
             "sql": "SELECT n FROM loopsrc",
-            "mockSource": {"loopsrc": {"data": [{"n": 0}, {"n": 1}, {"n": 2}], "interval": 1, "loop": true}}
+            "mockSource": {"loopsrc": {"data": [{"n": 0}, {"n": 1}, {"n": 2}], "interval": 0, "loop": true}}
         }))
         .send()
         .await
@@ -6702,22 +6710,87 @@ async fn test_ruletest_loop_continues_past_cap() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     const WANT: usize = 10_300;
+    let t0 = std::time::Instant::now();
     let frames = drain_sse_frames(&mut resp, WANT, 120).await;
+    let elapsed = t0.elapsed();
     assert_eq!(
         frames.len(),
         WANT,
-        "looping feed must continue past the cap"
+        "looping feed must continue past the cap (got {}/{} in {:.1}s = {:.0} rows/s)",
+        frames.len(),
+        WANT,
+        elapsed.as_secs_f64(),
+        frames.len() as f64 / elapsed.as_secs_f64().max(0.001),
     );
-    for f in &frames {
-        assert!(
-            f == "{\"n\":0}" || f == "{\"n\":1}" || f == "{\"n\":2}",
-            "unexpected frame {}",
-            f
-        );
+    // Strict cyclic succession: no gaps, no reorders, no duplicates.
+    let seq: Vec<u64> = frames
+        .iter()
+        .map(|f| {
+            serde_json::from_str::<serde_json::Value>(f).unwrap()["n"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect();
+    for w in seq.windows(2) {
+        assert_eq!(w[1], (w[0] + 1) % 3, "gap or reorder after n={}", w[0]);
     }
     drop(resp);
     let del = client
         .delete(format!("{}/ruletest/rt_loop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_ruletest_paced_replay_spacing() {
+    // Pacing semantics: a nonzero mock interval spaces replayed rows. Only
+    // a lower bound is asserted (load can only add delay, and OS timers can
+    // fire late but not early by any significant margin).
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    let data: Vec<serde_json::Value> = (0..6u64).map(|i| json!({"n": i})).collect();
+    let resp = client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rt_paced",
+            "sql": "SELECT n FROM pacedsrc",
+            "mockSource": {"pacedsrc": {"data": data, "interval": 100, "loop": false}}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let mut resp = client
+        .get(format!("{}/test/rt_paced", base_url))
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let t0 = std::time::Instant::now();
+    let started = client
+        .post(format!("{}/ruletest/rt_paced/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), reqwest::StatusCode::OK);
+    let frames = drain_sse_frames(&mut resp, 6, 60).await;
+    let elapsed = t0.elapsed();
+    assert_eq!(frames.len(), 6, "paced replay must deliver all rows");
+    for (i, f) in frames.iter().enumerate() {
+        assert_eq!(f, &format!("{{\"n\":{}}}", i), "row {} ordered", i);
+    }
+    // 6 rows x 100ms pacing nominally take >= 600ms; allow wide margin.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(400),
+        "replay ignored pacing: 6 rows in {:.1}s",
+        elapsed.as_secs_f64()
+    );
+    drop(resp);
+    let del = client
+        .delete(format!("{}/ruletest/rt_paced", base_url))
         .send()
         .await
         .unwrap();
