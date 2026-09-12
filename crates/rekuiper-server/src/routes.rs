@@ -12,15 +12,15 @@ use axum::{
 use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
-    apply_data_template, FileSink, FileSource, FileSourceConfig, HttpPullConfig, HttpPullSource,
-    KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink, MqttSource, RedisSink,
-    RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig,
-    SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
+    apply_data_template, parse_interval_ms, FileSink, FileSource, FileSourceConfig, HttpPullConfig,
+    HttpPullSource, KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink, MqttSource,
+    RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink,
+    SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
     model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamField, StreamRecord},
-    PluginDefinition, PluginManager, RuleDefinition, RuleManager, SchemaManager, StreamBus,
-    StreamDefinition, StreamManager, TableDefinition, TableManager,
+    KvStore, PluginDefinition, PluginManager, RuleDefinition, RuleManager, SchemaManager,
+    StreamBus, StreamDefinition, StreamManager, TableDefinition, TableManager,
 };
 use rekuiper_sql::{
     builtin_function_metadata, is_builtin_function, Evaluator, Expr, JoinClause, JoinType, Parser,
@@ -407,7 +407,7 @@ pub struct AppState {
     pub source_configs: Arc<RwLock<HashMap<String, Value>>>,
     pub sink_configs: Arc<RwLock<HashMap<String, Value>>>,
     pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
-    pub source_cancels: Arc<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+    pub source_cancels: Arc<RwLock<HashMap<String, Vec<tokio::sync::watch::Sender<bool>>>>>,
     pub http_client: reqwest::Client,
     pub schema_manager: SchemaManager,
     pub plugin_manager: PluginManager,
@@ -417,6 +417,9 @@ pub struct AppState {
     pub services: Arc<RwLock<HashMap<String, ServiceDetail>>>,
     pub js_udfs: Arc<RwLock<HashMap<String, JavascriptUdf>>>,
     pub latest_import_status: Arc<RwLock<Value>>,
+    /// Embedded KV handle for config persistence across daemon restarts
+    /// (`None` in unit tests, which never restart the process).
+    pub kv: Option<Arc<dyn KvStore>>,
 }
 
 pub fn default_import_status() -> Value {
@@ -436,14 +439,35 @@ pub fn default_import_status() -> Value {
     })
 }
 
+/// Bounded replay buffer for one ruletest session: every emitted row gets a
+/// monotonically increasing sequence number and is retained in a capped ring
+/// so SSE subscribers can resume/continue without loss, duplicates, or
+/// reordering while memory stays bounded.
+#[derive(Debug, Default)]
+pub struct RuletestReplay {
+    entries: VecDeque<(u64, String)>,
+    next_seq: u64,
+}
+
+/// Retained replay rows per session (10k). Active subscribers track a cursor
+/// and stream indefinitely past the cap; a subscriber that falls further
+/// behind than the ring skips the evicted prefix (documented lag gap) and
+/// resumes at the oldest retained row — never duplicated, never reordered.
+/// Late subscribers backfill up to the retained prefix, then go live.
+pub const RULETEST_HISTORY_CAP: usize = 10_000;
+
 /// An interactive rule-simulation session: mock source data is replayed
-/// through the rule SQL and output rows stream out over SSE.
+/// through the rule SQL and output rows stream out over SSE. `replay`
+/// buffers emitted rows with sequence numbers so subscribers connecting
+/// after `start` still receive the replay (no lost-race) and live
+/// subscribers continue past the retention cap; `shutdown` stops the loop.
 #[derive(Clone)]
 pub struct RuletestSession {
     pub id: String,
     pub sql: String,
     pub mock_source: HashMap<String, SimulatorConfig>,
     pub output_tx: tokio::sync::broadcast::Sender<String>,
+    pub replay: Arc<RwLock<RuletestReplay>>,
     pub port: u16,
     pub shutdown: Arc<tokio::sync::Notify>,
 }
@@ -482,6 +506,58 @@ impl AppState {
             services: create_default_services(),
             js_udfs: create_default_js_udfs(),
             latest_import_status: Arc::new(RwLock::new(default_import_status())),
+            kv: None,
+        }
+    }
+}
+
+/// Persist one connection/source/sink config entry so daemon restarts keep
+/// resolving CONF_KEYs (MQTT brokers, SQL URLs) instead of falling back to
+/// loopback defaults with silent zero-delivery.
+async fn persist_config_entry(state: &AppState, namespace: &str, key: &str, val: &Value) {
+    if let Some(kv) = state.kv.as_ref() {
+        if let Err(e) = kv.set(namespace, key, &val.to_string()).await {
+            tracing::warn!("KV persist {}/{} failed: {}", namespace, key, e);
+        }
+    }
+}
+
+async fn unpersist_config_entry(state: &AppState, namespace: &str, key: &str) {
+    if let Some(kv) = state.kv.as_ref() {
+        if let Err(e) = kv.delete(namespace, key).await {
+            tracing::warn!("KV delete {}/{} failed: {}", namespace, key, e);
+        }
+    }
+}
+
+/// Reload persisted connection/source/sink configs at daemon startup, ahead
+/// of [`restore_running_rules`].
+pub async fn load_config_maps(state: &AppState) {
+    let Some(kv) = state.kv.as_ref() else {
+        return;
+    };
+    for (namespace, map) in [
+        ("source_configs", &state.source_configs),
+        ("sink_configs", &state.sink_configs),
+        ("connections", &state.connections),
+    ] {
+        match kv.list_all(namespace).await {
+            Ok(entries) => {
+                let mut guard = map.write();
+                for (key, val) in entries {
+                    match serde_json::from_str::<Value>(&val) {
+                        Ok(parsed) => {
+                            guard.insert(key, parsed);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Skipping corrupt {} entry {}: {}", namespace, key, e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("KV load {} failed: {}", namespace, e);
+            }
         }
     }
 }
@@ -1595,21 +1671,25 @@ fn resolve_mqtt_source(
     Some(config)
 }
 
-fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
+/// Start source producers for one stream (MQTT/file/HTTP-pull/WebSocket/
+/// RedisSub/Kafka/SQL/simulator, whichever its TYPE declares).
+fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str) {
     // MQTT is the default streaming source: typeless streams and TYPE="mqtt"
     // subscribe to the broker topic and feed the rule pipeline.
     if let Some(config) = resolve_mqtt_source(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         MqttSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
@@ -1617,15 +1697,17 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some(config) = resolve_file_source(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         FileSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
@@ -1633,15 +1715,17 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some(conf) = resolve_httppull_config(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         HttpPullSource {
             config: conf,
             tx: stream_tx,
@@ -1653,15 +1737,17 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some(url) = resolve_websocket_url(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         WebSocketSource { url, tx: stream_tx }.spawn(cancel_rx);
     }
 
@@ -1669,15 +1755,17 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some((url, channel)) = resolve_redissub_source(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         RedisSubSource {
             url,
             channel,
@@ -1690,15 +1778,17 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some(config) = resolve_kafka_source(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         KafkaSource {
             config,
             tx: stream_tx,
@@ -1710,21 +1800,23 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
     if let Some(config) = resolve_sql_source(
         &state.stream_manager,
         &state.source_configs,
-        &select_stmt.from,
+        stream_name,
         rule_id,
     ) {
-        let stream_tx = state.stream_bus.get_or_create(&select_stmt.from);
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
             .source_cancels
             .write()
-            .insert(rule_id.to_string(), cancel_tx);
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
         SqlSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
     // Simulator source streams replay configured data into the stream bus.
     // Stream options are upper-cased by the SQL parser.
-    if let Some(def) = state.stream_manager.get_stream(&select_stmt.from) {
+    if let Some(def) = state.stream_manager.get_stream(stream_name) {
         let is_simulator = def
             .options
             .get("TYPE")
@@ -1735,7 +1827,7 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
                 if let Some(conf_val) = state.source_configs.read().get(&lookup).cloned() {
                     match serde_json::from_value::<SimulatorConfig>(conf_val) {
                         Ok(conf) => {
-                            let stream_name = select_stmt.from.clone();
+                            let stream_name = stream_name.to_string();
                             let bus = state.stream_bus.clone();
                             tokio::spawn(async move {
                                 let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamRecord>(1024);
@@ -1759,6 +1851,19 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
                     }
                 }
             }
+        }
+    }
+}
+
+/// Start source producers for a rule: its FROM stream plus every joined
+/// stream (stream-stream joins fan in both sides; table targets resolve
+/// per-row through lookups and need no producer).
+fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
+    bootstrap_stream_sources(state, rule_id, &select_stmt.from);
+    for join in &select_stmt.joins {
+        if state.table_manager.get_table(&join.target).is_none() && join.target != select_stmt.from
+        {
+            bootstrap_stream_sources(state, rule_id, &join.target);
         }
     }
 }
@@ -2121,12 +2226,18 @@ fn resolve_file_source(
     Some(config)
 }
 
-/// Signal cancellation to a rule's background streaming source (MQTT, file,
-/// HTTP pull, WebSocket, Redis subscription or Kafka consumer), if one is
-/// registered.
+/// Signal cancellation to ALL of a rule's background streaming sources
+/// (MQTT, file, HTTP pull, WebSocket, Redis subscription, Kafka consumer,
+/// SQL poller, join-target producers), if any are registered. Sources are
+/// kept in a per-rule list so bootstrapping a second source (e.g. the join
+/// target of a stream-stream join) never drops — and thereby kills — the
+/// first: dropping a watch sender reads as `Err` (sender gone) in the
+/// source task, which exits immediately.
 fn cancel_rule_source(state: &AppState, rule_id: &str) {
-    if let Some(tx) = state.source_cancels.write().remove(rule_id) {
-        let _ = tx.send(true);
+    if let Some(txs) = state.source_cancels.write().remove(rule_id) {
+        for tx in txs {
+            let _ = tx.send(true);
+        }
     }
 }
 
@@ -2179,6 +2290,19 @@ fn spawn_rule_task(
     let window = select_stmt.window.clone();
     let tables = table_manager.clone();
     let confs = source_configs.clone();
+    // Stream-stream joins fan in every joined stream: subscribe each join
+    // target that is a stream (not a table) so windowed rules see both
+    // sides. Table targets resolve per-row through lookups instead.
+    let mut join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)> = Vec::new();
+    for join in &select_stmt.joins {
+        if table_manager.get_table(&join.target).is_none()
+            && join.target != select_stmt.from
+            && !join_rxs.iter().any(|(s, _)| s == &join.target)
+        {
+            let topic = resolve_source_topic(stream_manager, &join.target);
+            join_rxs.push((join.target.clone(), stream_bus.subscribe(&topic)));
+        }
+    }
 
     // Bounded decoupled sink queue: the streaming evaluation loop never blocks
     // on sink network/disk I/O. Dropping `sink_tx` (rule end/cancel) lets the
@@ -2266,6 +2390,9 @@ fn spawn_rule_task(
             interval,
             sink_tx,
             send_error,
+            join_rxs,
+            tables.clone(),
+            confs.clone(),
         )),
         Some(WindowDef::TumblingTime { unit, length }) => {
             let duration = tumbling_window_duration(&unit, length);
@@ -2278,6 +2405,9 @@ fn spawn_rule_task(
                 sink_tx,
                 event_time,
                 send_error,
+                join_rxs,
+                tables.clone(),
+                confs.clone(),
             ))
         }
         Some(WindowDef::HoppingTime {
@@ -2296,6 +2426,9 @@ fn spawn_rule_task(
                 hop_interval,
                 sink_tx,
                 send_error,
+                join_rxs,
+                tables.clone(),
+                confs.clone(),
             ))
         }
         Some(WindowDef::SlidingTime {
@@ -2315,6 +2448,9 @@ fn spawn_rule_task(
                 sink_tx,
                 event_time,
                 send_error,
+                join_rxs,
+                tables.clone(),
+                confs.clone(),
             ))
         }
     };
@@ -2623,14 +2759,22 @@ async fn dispatch_rule_actions(
 fn join_key_parts(
     join: &JoinClause,
     from: &str,
+    from_alias: Option<&str>,
     combined: &HashMap<String, Value>,
 ) -> Option<(String, String)> {
-    fn side(expr: &Expr, from: &str, target: &str) -> u8 {
+    fn side(expr: &Expr, from: &str, from_alias: Option<&str>, target: &JoinClause) -> u8 {
         match expr {
             // 0 = stream side, 1 = table side, 2 = unknown.
             Expr::FieldAccess { parent, .. } => match parent.as_ref() {
-                Expr::Identifier(name) if name == target => 1,
-                Expr::Identifier(name) if name == from => 0,
+                Expr::Identifier(name)
+                    if name == &target.target
+                        || target.alias.as_ref().is_some_and(|a| name == a) =>
+                {
+                    1
+                }
+                Expr::Identifier(name) if name == from || from_alias.is_some_and(|a| name == a) => {
+                    0
+                }
                 _ => 2,
             },
             Expr::Identifier(_) => 0,
@@ -2662,8 +2806,8 @@ fn join_key_parts(
         _ => return None,
     };
     let (table_expr, key_expr) = match (
-        side(left, from, &join.target),
-        side(right, from, &join.target),
+        side(left, from, from_alias, join),
+        side(right, from, from_alias, join),
     ) {
         (1, _) => (left, right),
         (_, 1) => (right, left),
@@ -2679,9 +2823,10 @@ fn join_key_parts(
 fn extract_lookup_key(
     join: &JoinClause,
     from: &str,
+    from_alias: Option<&str>,
     combined: &HashMap<String, Value>,
 ) -> Option<String> {
-    join_key_parts(join, from, combined).map(|(_, value)| value)
+    join_key_parts(join, from, from_alias, combined).map(|(_, value)| value)
 }
 
 /// Build a single candidate row from a fetched lookup value: objects map to
@@ -2695,6 +2840,24 @@ fn lookup_value_to_row(value: Value) -> HashMap<String, Value> {
             row
         }
     }
+}
+
+/// Table anchor fallback for SQL configs: explicit `TABLE`, else
+/// `DATASOURCE` (the documented stream/table anchor), else the object name.
+fn sql_table_fallback(options: &HashMap<String, String>, name: &str) -> String {
+    options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TABLE"))
+        .map(|(_, v)| v.clone())
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE"))
+                .map(|(_, v)| v.clone())
+                .filter(|v| !v.trim().is_empty())
+        })
+        .unwrap_or_else(|| name.to_string())
 }
 
 /// Resolve the polling config for a `TYPE="sql"` source stream: a matching
@@ -2733,7 +2896,36 @@ fn resolve_sql_source(
             drop(configs_guard);
             if let Some(val) = conf_val {
                 match serde_json::from_value::<SqlConnectorConfig>(val) {
-                    Ok(conf) => return Some(conf),
+                    Ok(mut conf) => {
+                        // Documented plugin configs carry the URL as `dburl`
+                        // and may omit the table: fall back to the stream
+                        // options (DATASOURCE/TABLE) for whatever is missing.
+                        if conf.url.trim().is_empty() {
+                            conf.url = def
+                                .options
+                                .iter()
+                                .find(|(k, _)| {
+                                    k.eq_ignore_ascii_case("URL")
+                                        || k.eq_ignore_ascii_case("DATASOURCE")
+                                })
+                                .map(|(_, v)| v.clone())
+                                .unwrap_or_default();
+                        }
+                        if conf.table.trim().is_empty() {
+                            conf.table = sql_table_fallback(&def.options, stream_name);
+                        }
+                        if conf.url.trim().is_empty() || conf.table.trim().is_empty() {
+                            // A template-SQL config without any table anchor
+                            // cannot poll; surface the misconfiguration.
+                            tracing::warn!(
+                                "[RULE {}] sql source config '{}' has no usable url/table",
+                                rule_id,
+                                lookup
+                            );
+                            return None;
+                        }
+                        return Some(conf);
+                    }
                     Err(e) => {
                         tracing::warn!(
                             "[RULE {}] invalid sql source config '{}': {}",
@@ -2774,6 +2966,8 @@ fn resolve_sql_source(
         table,
         fields: Vec::new(),
         interval,
+        template_sql_query_cfg: None,
+        internal_sql_query_cfg: None,
     })
 }
 
@@ -2791,7 +2985,16 @@ fn resolve_sql_lookup(
             let lookup = format!("sql/{}", key);
             if let Some(conf_val) = source_configs.read().get(&lookup).cloned() {
                 match serde_json::from_value::<SqlConnectorConfig>(conf_val) {
-                    Ok(conf) => return Some((conf.url, conf.table)),
+                    Ok(mut conf) => {
+                        if conf.table.trim().is_empty() {
+                            conf.table = sql_table_fallback(&def.options, target);
+                        }
+                        if conf.url.trim().is_empty() {
+                            tracing::warn!("sql lookup config '{}' has no url", lookup);
+                            return None;
+                        }
+                        return Some((conf.url, conf.table));
+                    }
                     Err(e) => {
                         tracing::warn!("Invalid sql lookup config '{}': {}", lookup, e);
                         return None;
@@ -2824,6 +3027,7 @@ async fn lookup_candidates(
     table_manager: &TableManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     from: &str,
+    from_alias: Option<&str>,
     join: &JoinClause,
     combined: &HashMap<String, Value>,
 ) -> Vec<HashMap<String, Value>> {
@@ -2832,7 +3036,7 @@ async fn lookup_candidates(
         .and_then(|def| def.options.get("TYPE").cloned())
         .unwrap_or_default();
     if table_type.eq_ignore_ascii_case("redis") {
-        let Some(key) = extract_lookup_key(join, from, combined) else {
+        let Some(key) = extract_lookup_key(join, from, from_alias, combined) else {
             return Vec::new();
         };
         let conf_key = table_manager
@@ -2852,7 +3056,7 @@ async fn lookup_candidates(
     if table_type.eq_ignore_ascii_case("sql") {
         let (url, table, col, val) = match (
             resolve_sql_lookup(table_manager, source_configs, &join.target),
-            join_key_parts(join, from, combined),
+            join_key_parts(join, from, from_alias, combined),
         ) {
             (Some((url, table)), Some((col, val))) => (url, table, col, val),
             _ => return Vec::new(),
@@ -2880,17 +3084,20 @@ async fn apply_lookup_joins(
     }
     // Qualified access (`stream.field`, `table.field`) resolves through nested
     // objects, matching the evaluator's FieldAccess semantics.
-    fn as_object(row: &HashMap<String, Value>) -> Value {
-        Value::Object(row.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-    }
     let mut combined = record.clone();
-    combined.insert(select_stmt.from.clone(), as_object(record));
+    insert_namespaced(
+        &mut combined,
+        &select_stmt.from,
+        select_stmt.from_alias.as_deref(),
+        record,
+    );
     for join in &select_stmt.joins {
         let mut matched: Option<HashMap<String, Value>> = None;
         for row in lookup_candidates(
             table_manager,
             source_configs,
             &select_stmt.from,
+            select_stmt.from_alias.as_deref(),
             join,
             &combined,
         )
@@ -2900,7 +3107,7 @@ async fn apply_lookup_joins(
             for (k, v) in &row {
                 probe.entry(k.clone()).or_insert(v.clone());
             }
-            probe.insert(join.target.clone(), as_object(&row));
+            insert_namespaced(&mut probe, &join.target, join.alias.as_deref(), &row);
             let cond_ok = match &join.on {
                 Some(cond) => Evaluator::eval_bool(cond, &probe),
                 // No ON condition: match the first candidate row.
@@ -2916,7 +3123,7 @@ async fn apply_lookup_joins(
                 for (k, v) in &row {
                     combined.entry(k.clone()).or_insert(v.clone());
                 }
-                combined.insert(join.target.clone(), as_object(&row));
+                insert_namespaced(&mut combined, &join.target, join.alias.as_deref(), &row);
             }
             None if join.join_type == JoinType::Left => {}
             None => return None,
@@ -2936,6 +3143,253 @@ async fn enqueue_sink_record(
         // Queue under backpressure: await send
         let _ = sink.send(rec).await;
     }
+}
+
+/// Insert a row under its stream/table name plus alias so qualified
+/// references (`A.id`, `a.id`) resolve through nested objects.
+fn insert_namespaced(
+    map: &mut HashMap<String, Value>,
+    name: &str,
+    alias: Option<&str>,
+    row: &HashMap<String, Value>,
+) {
+    let obj = Value::Object(row.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    map.insert(name.to_string(), obj.clone());
+    if let Some(a) = alias {
+        if a != name {
+            map.insert(a.to_string(), obj);
+        }
+    }
+}
+
+/// A window-buffered row tagged with the stream that produced it, so
+/// multi-stream windows can match rows across sources.
+#[derive(Debug, Clone)]
+struct TaggedRow {
+    source: String,
+    data: HashMap<String, Value>,
+}
+
+/// Upper bound on join fan-out per window trigger: windows are bounded
+/// buffers, and an unbounded cross product could exhaust memory.
+const MAX_JOIN_FANOUT: usize = 10_000;
+
+fn has_agg_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { name, args } => {
+            Evaluator::is_aggregate_call(name) || args.iter().any(has_agg_expr)
+        }
+        Expr::BinaryOp { left, right, .. } => has_agg_expr(left) || has_agg_expr(right),
+        Expr::UnaryOp { expr, .. } => has_agg_expr(expr),
+        Expr::Between {
+            expr, low, high, ..
+        } => has_agg_expr(expr) || has_agg_expr(low) || has_agg_expr(high),
+        Expr::InList { expr, list, .. } => has_agg_expr(expr) || list.iter().any(has_agg_expr),
+        Expr::IsNull { expr, .. } => has_agg_expr(expr),
+        Expr::FieldAccess { parent, .. } => has_agg_expr(parent),
+        Expr::Index { base, index } => has_agg_expr(base) || has_agg_expr(index),
+        Expr::Slice { base, lo, hi } => {
+            has_agg_expr(base)
+                || lo.as_ref().is_some_and(|e| has_agg_expr(e))
+                || hi.as_ref().is_some_and(|e| has_agg_expr(e))
+        }
+        Expr::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        } => {
+            operand.as_ref().is_some_and(|e| has_agg_expr(e))
+                || when_clauses
+                    .iter()
+                    .any(|(w, t)| has_agg_expr(w) || has_agg_expr(t))
+                || else_clause.as_ref().is_some_and(|e| has_agg_expr(e))
+        }
+        Expr::Over { call, partition_by } => {
+            has_agg_expr(call) || partition_by.as_ref().is_some_and(|e| has_agg_expr(e))
+        }
+        Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => false,
+    }
+}
+
+/// Evaluate one windowed batch for a rule with JOIN clauses.
+///
+/// Seeds combined rows from the FROM stream, folds each join (table point
+/// lookups take the first row satisfying ON — lookup tables resolve one row
+/// per key; stream targets nest-loop over buffered rows with the `ON`
+/// condition; CROSS pairs all candidates), then projects: aggregate SELECTs
+/// collapse the batch with `eval_aggregate`, plain SELECTs emit one row per
+/// match with `eval_select` (which also applies WHERE). LEFT preserves
+/// unmatched left rows; RIGHT/FULL additionally preserve unmatched right
+/// rows (which never exceeds the fan-out cap), including when the left side
+/// is empty. Fan-out per trigger is bounded by `MAX_JOIN_FANOUT`. Returns
+/// the output rows (possibly empty); an empty batch yields no output,
+/// matching empty-window semantics.
+async fn eval_window_join_batch(
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    select_stmt: &SelectStmt,
+    batch: &[TaggedRow],
+) -> Vec<HashMap<String, Value>> {
+    if batch.is_empty() {
+        return Vec::new();
+    }
+    let from_rows: Vec<&HashMap<String, Value>> = batch
+        .iter()
+        .filter(|r| r.source == select_stmt.from)
+        .map(|r| &r.data)
+        .collect();
+    let mut combined_rows: Vec<HashMap<String, Value>> = Vec::new();
+    for row in from_rows {
+        let mut combined = row.clone();
+        insert_namespaced(
+            &mut combined,
+            &select_stmt.from,
+            select_stmt.from_alias.as_deref(),
+            row,
+        );
+        combined_rows.push(combined);
+    }
+    for join in &select_stmt.joins {
+        let is_table = table_manager.get_table(&join.target).is_some();
+        let mut next: Vec<HashMap<String, Value>> = Vec::new();
+        if is_table {
+            for left in &combined_rows {
+                let mut matched: Option<HashMap<String, Value>> = None;
+                for row in lookup_candidates(
+                    table_manager,
+                    source_configs,
+                    &select_stmt.from,
+                    select_stmt.from_alias.as_deref(),
+                    join,
+                    left,
+                )
+                .await
+                {
+                    // CROSS joins pair every candidate; others take the
+                    // first row satisfying ON (or the first row when no ON).
+                    if join.join_type != JoinType::Cross {
+                        let mut probe = (*left).clone();
+                        for (k, v) in &row {
+                            probe.entry(k.clone()).or_insert(v.clone());
+                        }
+                        insert_namespaced(&mut probe, &join.target, join.alias.as_deref(), &row);
+                        let cond_ok = match &join.on {
+                            Some(cond) => Evaluator::eval_bool(cond, &probe),
+                            None => true,
+                        };
+                        if !cond_ok {
+                            continue;
+                        }
+                        matched = Some(row);
+                        break;
+                    }
+                    let mut merged = (*left).clone();
+                    for (k, v) in &row {
+                        merged.entry(k.clone()).or_insert(v.clone());
+                    }
+                    insert_namespaced(&mut merged, &join.target, join.alias.as_deref(), &row);
+                    if next.len() < MAX_JOIN_FANOUT {
+                        next.push(merged);
+                    }
+                }
+                if join.join_type == JoinType::Cross {
+                    continue;
+                }
+                match matched {
+                    Some(row) => {
+                        let mut merged = (*left).clone();
+                        for (k, v) in &row {
+                            merged.entry(k.clone()).or_insert(v.clone());
+                        }
+                        insert_namespaced(&mut merged, &join.target, join.alias.as_deref(), &row);
+                        next.push(merged);
+                    }
+                    None => match join.join_type {
+                        JoinType::Left | JoinType::Full => next.push((*left).clone()),
+                        _ => {}
+                    },
+                }
+            }
+        } else {
+            let right_rows: Vec<&HashMap<String, Value>> = batch
+                .iter()
+                .filter(|r| r.source == join.target)
+                .map(|r| &r.data)
+                .collect();
+            // Index of matched right rows (for RIGHT/FULL preservation).
+            let mut right_matched = vec![false; right_rows.len()];
+            for left in &combined_rows {
+                let mut any = false;
+                for (ri, right) in right_rows.iter().enumerate() {
+                    let mut probe = (*left).clone();
+                    for (k, v) in right.iter() {
+                        probe.entry(k.clone()).or_insert(v.clone());
+                    }
+                    insert_namespaced(&mut probe, &join.target, join.alias.as_deref(), right);
+                    let cond_ok = match &join.on {
+                        Some(cond) => Evaluator::eval_bool(cond, &probe),
+                        // No ON: cross product of the window.
+                        None => true,
+                    };
+                    if !cond_ok {
+                        continue;
+                    }
+                    any = true;
+                    right_matched[ri] = true;
+                    if next.len() < MAX_JOIN_FANOUT {
+                        next.push(probe);
+                    }
+                    if next.len() >= MAX_JOIN_FANOUT {
+                        break;
+                    }
+                }
+                if !any {
+                    match join.join_type {
+                        JoinType::Left | JoinType::Full => next.push((*left).clone()),
+                        _ => {}
+                    }
+                }
+                if next.len() >= MAX_JOIN_FANOUT {
+                    break;
+                }
+            }
+            if matches!(join.join_type, JoinType::Right | JoinType::Full) {
+                for (ri, right) in right_rows.iter().enumerate() {
+                    if !right_matched[ri] {
+                        if next.len() >= MAX_JOIN_FANOUT {
+                            break;
+                        }
+                        let mut preserved = (*right).clone();
+                        insert_namespaced(
+                            &mut preserved,
+                            &join.target,
+                            join.alias.as_deref(),
+                            right,
+                        );
+                        next.push(preserved);
+                    }
+                }
+            }
+        }
+        combined_rows = next;
+        // An empty intermediate only ends the pipeline for joins that cannot
+        // produce rows without left input. RIGHT/FULL joins still preserve
+        // their right side (and later joins fold over it), per SQL semantics.
+        if combined_rows.is_empty() && !matches!(join.join_type, JoinType::Right | JoinType::Full) {
+            return Vec::new();
+        }
+    }
+    let aggregate = select_stmt.fields.iter().any(has_agg_expr)
+        || select_stmt.having.as_ref().is_some_and(has_agg_expr);
+    if aggregate {
+        return Evaluator::eval_aggregate(select_stmt, &combined_rows)
+            .into_iter()
+            .collect();
+    }
+    combined_rows
+        .iter()
+        .filter_map(|row| Evaluator::eval_select(select_stmt, row))
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2991,6 +3445,66 @@ async fn run_stateless_rule(
     }
 }
 
+/// Emit one window trigger: plain windows aggregate the batch; rules with
+/// JOIN clauses resolve matches first (stream fan-in, table lookups, ON
+/// conditions) and project each match.
+async fn emit_window_batch(
+    rule_mgr: &RuleManager,
+    rule_id: &str,
+    table_manager: &TableManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    select_stmt: &SelectStmt,
+    batch: &[TaggedRow],
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+) {
+    if batch.is_empty() {
+        return;
+    }
+    if select_stmt.joins.is_empty() {
+        let flat: Vec<HashMap<String, Value>> = batch.iter().map(|r| r.data.clone()).collect();
+        if let Some(output) = Evaluator::eval_aggregate(select_stmt, &flat) {
+            enqueue_sink_record(sink, StreamRecord::new(output)).await;
+            rule_mgr.inc_sink_records(rule_id, 1);
+        }
+        return;
+    }
+    for output in eval_window_join_batch(table_manager, source_configs, select_stmt, batch).await {
+        enqueue_sink_record(sink, StreamRecord::new(output)).await;
+        rule_mgr.inc_sink_records(rule_id, 1);
+    }
+}
+
+/// Spawn forwarders that tag rows from joined streams and feed the runner's
+/// local channel. Forwarders exit when the runner drops the channel or the
+/// source bus closes.
+fn spawn_join_forwarders(
+    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+) -> tokio::sync::mpsc::Receiver<TaggedRow> {
+    let (join_tx, join_rx) = tokio::sync::mpsc::channel::<TaggedRow>(1024);
+    for (source, mut jrx) in join_rxs {
+        let jtx = join_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match jrx.recv().await {
+                    Ok(record) => {
+                        let tagged = TaggedRow {
+                            source: source.clone(),
+                            data: record.data,
+                        };
+                        if jtx.send(tagged).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+    drop(join_tx);
+    join_rx
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_count_window_rule(
     rule_mgr: RuleManager,
@@ -3001,13 +3515,23 @@ async fn run_count_window_rule(
     interval: Option<usize>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     send_error: bool,
+    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
     let count = size.max(1);
     let hop = interval.unwrap_or(count).max(1);
-    let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    let mut buffer: Vec<TaggedRow> = Vec::new();
     let mut events_since_trigger: usize = 0;
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    // When every join forwarder has exited, the merge channel closes; the
+    // rule keeps serving its FROM stream afterwards.
+    let mut joins_open = true;
     loop {
-        match rx.recv().await {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
             Ok(record) => {
                 if !is_rule_running(&rule_mgr, &rule_id) {
                     continue;
@@ -3016,17 +3540,13 @@ async fn run_count_window_rule(
                 if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
-                buffer.push(record.data);
+                buffer.push(TaggedRow { source: from_source.clone(), data: record.data });
                 events_since_trigger += 1;
                 if hop <= count {
                     // Standard count window (tumbling when hop == count, overlapping when hop < count)
                     if buffer.len() >= count {
                         let batch = &buffer[0..count];
-                        if let Some(output) = Evaluator::eval_aggregate(&select_stmt, batch) {
-                            let output_record = StreamRecord::new(output);
-                            enqueue_sink_record(&sink, output_record).await;
-                            rule_mgr.inc_sink_records(&rule_id, 1);
-                        }
+                        emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, batch, &sink).await;
                         // Discard only the oldest `hop` records; retain the rest for overlapping windows
                         buffer.drain(0..hop.min(buffer.len()));
                     }
@@ -3037,11 +3557,7 @@ async fn run_count_window_rule(
                     }
                     if events_since_trigger >= hop {
                         if !buffer.is_empty() {
-                            if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
-                                let output_record = StreamRecord::new(output);
-                                enqueue_sink_record(&sink, output_record).await;
-                                rule_mgr.inc_sink_records(&rule_id, 1);
-                            }
+                            emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
                         }
                         events_since_trigger = 0;
                         buffer.clear();
@@ -3050,6 +3566,43 @@ async fn run_count_window_rule(
             }
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
             Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        buffer.push(tagged);
+                        events_since_trigger += 1;
+                        if hop <= count {
+                            if buffer.len() >= count {
+                                let batch = &buffer[0..count];
+                                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, batch, &sink).await;
+                                buffer.drain(0..hop.min(buffer.len()));
+                            }
+                        } else if events_since_trigger >= hop {
+                            if buffer.len() > count {
+                                buffer.remove(0);
+                            }
+                            if !buffer.is_empty() {
+                                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
+                            }
+                            events_since_trigger = 0;
+                            buffer.clear();
+                        }
+                    }
+                    None => {
+                        joins_open = false;
+                    }
+                }
+            }
         }
     }
 }
@@ -3082,15 +3635,68 @@ async fn run_tumbling_window_rule(
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
     send_error: bool,
+    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
     let mut ticker = tokio::time::interval(duration);
-    let mut buffer: Vec<HashMap<String, Value>> = Vec::new();
+    let mut buffer: Vec<TaggedRow> = Vec::new();
     // Event-time state: event-timestamped rows, the watermark, and the start
     // of the currently open event-time window (aligned to its length).
-    let mut et_buffer: Vec<(i64, HashMap<String, Value>)> = Vec::new();
+    let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
     let mut watermark: i64 = i64::MIN;
     let mut window_start: Option<i64> = None;
     let window_millis = duration.as_millis() as i64;
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
+    // Ingest one row (FROM or joined stream) into the wall/event buffers.
+    macro_rules! ingest {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let event_ts =
+                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                if event_ts < watermark {
+                    // Late arrival beyond the tolerance horizon: drop.
+                } else {
+                    watermark =
+                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    let aligned = event_ts - event_ts.rem_euclid(window_millis.max(1));
+                    if window_start.is_none() {
+                        window_start = Some(aligned);
+                    }
+                    et_buffer.push((event_ts, tagged));
+                    // Close every window the watermark has passed.
+                    while let Some(t0) = window_start {
+                        let t_end = t0.saturating_add(window_millis);
+                        if watermark < t_end {
+                            break;
+                        }
+                        let batch: Vec<TaggedRow> = et_buffer
+                            .iter()
+                            .filter(|(ts, _)| *ts >= t0 && *ts < t_end)
+                            .map(|(_, row)| row.clone())
+                            .collect();
+                        et_buffer.retain(|(ts, _)| *ts >= t_end);
+                        window_start = Some(t_end);
+                        emit_window_batch(
+                            &rule_mgr,
+                            &rule_id,
+                            &table_manager,
+                            &source_configs,
+                            &select_stmt,
+                            &batch,
+                            &sink,
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                buffer.push(tagged);
+            }
+        }};
+    }
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -3105,53 +3711,28 @@ async fn run_tumbling_window_rule(
                         {
                             continue;
                         }
-                        if event_time.enabled {
-                            let event_ts = extract_event_timestamp(
-                                &record.data,
-                                event_time.timestamp_field.as_deref(),
-                            );
-                            if event_ts < watermark {
-                                // Late arrival beyond the tolerance horizon: drop.
-                                continue;
-                            }
-                            watermark = watermark
-                                .max(event_ts.saturating_sub(event_time.late_tolerance_ms));
-                            let aligned =
-                                event_ts - event_ts.rem_euclid(window_millis.max(1));
-                            if window_start.is_none() {
-                                window_start = Some(aligned);
-                            }
-                            et_buffer.push((event_ts, record.data));
-                            // Close every window the watermark has passed.
-                            while let Some(t0) = window_start {
-                                let t_end = t0.saturating_add(window_millis);
-                                if watermark < t_end {
-                                    break;
-                                }
-                                let batch: Vec<HashMap<String, Value>> = et_buffer
-                                    .iter()
-                                    .filter(|(ts, _)| *ts >= t0 && *ts < t_end)
-                                    .map(|(_, data)| data.clone())
-                                    .collect();
-                                et_buffer.retain(|(ts, _)| *ts >= t_end);
-                                window_start = Some(t_end);
-                                if batch.is_empty() {
-                                    continue;
-                                }
-                                if let Some(output) =
-                                    Evaluator::eval_aggregate(&select_stmt, &batch)
-                                {
-                                    let output_record = StreamRecord::new(output);
-                                    enqueue_sink_record(&sink, output_record).await;
-                                    rule_mgr.inc_sink_records(&rule_id, 1);
-                                }
-                            }
-                            continue;
-                        }
-                        buffer.push(record.data);
+                        ingest!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        ingest!(tagged);
+                    }
+                    None => {
+                        joins_open = false;
+                    }
                 }
             }
             _ = ticker.tick() => {
@@ -3162,11 +3743,7 @@ async fn run_tumbling_window_rule(
                 if buffer.is_empty() {
                     continue;
                 }
-                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &buffer) {
-                    let output_record = StreamRecord::new(output);
-                    enqueue_sink_record(&sink, output_record).await;
-                    rule_mgr.inc_sink_records(&rule_id, 1);
-                }
+                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
                 buffer.clear();
             }
         }
@@ -3183,12 +3760,18 @@ async fn run_hopping_window_rule(
     hop: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     send_error: bool,
+    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
     let mut ticker = tokio::time::interval(hop);
     // Tokio's interval fires immediately on the first tick; consume it so the
     // first window emission aligns with elapsed hop time.
     ticker.tick().await;
-    let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
+    let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -3203,10 +3786,28 @@ async fn run_hopping_window_rule(
                         {
                             continue;
                         }
-                        buffer.push((std::time::Instant::now(), record.data));
+                        buffer.push((std::time::Instant::now(), TaggedRow { source: from_source.clone(), data: record.data }));
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        buffer.push((std::time::Instant::now(), tagged));
+                    }
+                    None => {
+                        joins_open = false;
+                    }
                 }
             }
             _ = ticker.tick() => {
@@ -3216,13 +3817,9 @@ async fn run_hopping_window_rule(
                 if buffer.is_empty() {
                     continue;
                 }
-                let batch: Vec<HashMap<String, Value>> =
-                    buffer.iter().map(|(_, data)| data.clone()).collect();
-                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
-                    let output_record = StreamRecord::new(output);
-                    enqueue_sink_record(&sink, output_record).await;
-                    rule_mgr.inc_sink_records(&rule_id, 1);
-                }
+                let batch: Vec<TaggedRow> =
+                    buffer.iter().map(|(_, row)| row.clone()).collect();
+                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &batch, &sink).await;
             }
         }
     }
@@ -3239,14 +3836,77 @@ async fn run_sliding_window_rule(
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
     send_error: bool,
+    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
-    let mut buffer: Vec<(std::time::Instant, HashMap<String, Value>)> = Vec::new();
+    let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
     // Event-time state: event-timestamped rows plus the watermark.
-    let mut et_buffer: Vec<(i64, HashMap<String, Value>)> = Vec::new();
+    let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
     let mut watermark: i64 = i64::MIN;
     let window_millis = length.as_millis() as i64;
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
+    // Ingest one row then evaluate the trailing horizon (shared by FROM
+    // and joined-stream rows).
+    macro_rules! ingest_slide {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let event_ts =
+                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                if event_ts < watermark {
+                    // Late arrival beyond the tolerance horizon: drop.
+                } else {
+                    watermark =
+                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    et_buffer.push((event_ts, tagged));
+                    et_buffer.sort_by_key(|(ts, _)| *ts);
+                    // Lower-bounded horizon only: expiry is purely age-based
+                    // (`ts >= event_ts - length`). Newer buffered rows must
+                    // survive out-of-order arrivals within the window.
+                    et_buffer.retain(|(ts, _)| *ts >= event_ts.saturating_sub(window_millis));
+                    let batch: Vec<TaggedRow> =
+                        et_buffer.iter().map(|(_, row)| row.clone()).collect();
+                    emit_window_batch(
+                        &rule_mgr,
+                        &rule_id,
+                        &table_manager,
+                        &source_configs,
+                        &select_stmt,
+                        &batch,
+                        &sink,
+                    )
+                    .await;
+                }
+            } else {
+                let now = std::time::Instant::now();
+                buffer.push((now, tagged));
+                let eval_time = std::time::Instant::now();
+                // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
+                buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
+                if !buffer.is_empty() {
+                    let batch: Vec<TaggedRow> =
+                        buffer.iter().map(|(_, row)| row.clone()).collect();
+                    emit_window_batch(
+                        &rule_mgr,
+                        &rule_id,
+                        &table_manager,
+                        &source_configs,
+                        &select_stmt,
+                        &batch,
+                        &sink,
+                    )
+                    .await;
+                }
+            }
+        }};
+    }
     loop {
-        match rx.recv().await {
+        tokio::select! {
+            res = rx.recv() => {
+            match res {
             Ok(record) => {
                 if !is_rule_running(&rule_mgr, &rule_id) {
                     continue;
@@ -3262,53 +3922,35 @@ async fn run_sliding_window_rule(
                         tokio::time::sleep(delay_dur).await;
                     }
                 }
-                if event_time.enabled {
-                    let event_ts = extract_event_timestamp(
-                        &record.data,
-                        event_time.timestamp_field.as_deref(),
-                    );
-                    if event_ts < watermark {
-                        // Late arrival beyond the tolerance horizon: drop.
-                        continue;
-                    }
-                    watermark =
-                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
-                    et_buffer.push((event_ts, record.data));
-                    et_buffer.sort_by_key(|(ts, _)| *ts);
-                    // Lower-bounded horizon only: expiry is purely age-based
-                    // (`ts >= event_ts - length`). Newer buffered rows must
-                    // survive out-of-order arrivals within the window.
-                    et_buffer.retain(|(ts, _)| *ts >= event_ts.saturating_sub(window_millis));
-                    if et_buffer.is_empty() {
-                        continue;
-                    }
-                    let batch: Vec<HashMap<String, Value>> =
-                        et_buffer.iter().map(|(_, data)| data.clone()).collect();
-                    if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
-                        let output_record = StreamRecord::new(output);
-                        enqueue_sink_record(&sink, output_record).await;
-                        rule_mgr.inc_sink_records(&rule_id, 1);
-                    }
-                    continue;
-                }
-                let now = std::time::Instant::now();
-                buffer.push((now, record.data));
-                let eval_time = std::time::Instant::now();
-                // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
-                buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
-                if buffer.is_empty() {
-                    continue;
-                }
-                let batch: Vec<HashMap<String, Value>> =
-                    buffer.iter().map(|(_, data)| data.clone()).collect();
-                if let Some(output) = Evaluator::eval_aggregate(&select_stmt, &batch) {
-                    let output_record = StreamRecord::new(output);
-                    enqueue_sink_record(&sink, output_record).await;
-                    rule_mgr.inc_sink_records(&rule_id, 1);
-                }
+                ingest_slide!(TaggedRow { source: from_source.clone(), data: record.data });
             }
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
             Err(broadcast::error::RecvError::Closed) => break,
+            }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&rule_mgr, &rule_id) {
+                            continue;
+                        }
+                        rule_mgr.inc_source_records(&rule_id, 1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        if let Some(delay_dur) = delay {
+                            if !delay_dur.is_zero() {
+                                tokio::time::sleep(delay_dur).await;
+                            }
+                        }
+                        ingest_slide!(tagged);
+                    }
+                    None => {
+                        joins_open = false;
+                    }
+                }
+            }
         }
     }
 }
@@ -3375,6 +4017,19 @@ fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
         }
         Expr::IsNull { expr, .. } => collect_called_functions(expr, out),
         Expr::FieldAccess { parent, .. } => collect_called_functions(parent, out),
+        Expr::Index { base, index } => {
+            collect_called_functions(base, out);
+            collect_called_functions(index, out);
+        }
+        Expr::Slice { base, lo, hi } => {
+            collect_called_functions(base, out);
+            if let Some(e) = lo {
+                collect_called_functions(e, out);
+            }
+            if let Some(e) = hi {
+                collect_called_functions(e, out);
+            }
+        }
         Expr::Case {
             operand,
             when_clauses,
@@ -3732,6 +4387,15 @@ fn expr_to_string(expr: &Expr) -> String {
         Expr::FieldAccess { parent, field } => {
             format!("{}.{}", expr_to_string(parent), field)
         }
+        Expr::Index { base, index } => {
+            format!("{}[{}]", expr_to_string(base), expr_to_string(index))
+        }
+        Expr::Slice { base, lo, hi } => format!(
+            "{}[{}:{}]",
+            expr_to_string(base),
+            lo.as_ref().map(|e| expr_to_string(e)).unwrap_or_default(),
+            hi.as_ref().map(|e| expr_to_string(e)).unwrap_or_default()
+        ),
         Expr::Call { name, args } => format!(
             "{}({})",
             name,
@@ -6229,7 +6893,14 @@ async fn save_source_conf_key(
     state
         .source_configs
         .write()
-        .insert(format!("{}/{}", name, conf_key), payload);
+        .insert(format!("{}/{}", name, conf_key), payload.clone());
+    persist_config_entry(
+        &state,
+        "source_configs",
+        &format!("{}/{}", name, conf_key),
+        &payload,
+    )
+    .await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -6269,6 +6940,7 @@ async fn delete_source_conf_key(
         .source_configs
         .write()
         .remove(&format!("{}/{}", name, conf_key));
+    unpersist_config_entry(&state, "source_configs", &format!("{}/{}", name, conf_key)).await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -6291,7 +6963,14 @@ async fn save_sink_conf_key(
     state
         .sink_configs
         .write()
-        .insert(format!("{}/{}", name, conf_key), payload);
+        .insert(format!("{}/{}", name, conf_key), payload.clone());
+    persist_config_entry(
+        &state,
+        "sink_configs",
+        &format!("{}/{}", name, conf_key),
+        &payload,
+    )
+    .await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -6331,6 +7010,7 @@ async fn delete_sink_conf_key(
         .sink_configs
         .write()
         .remove(&format!("{}/{}", name, conf_key));
+    unpersist_config_entry(&state, "sink_configs", &format!("{}/{}", name, conf_key)).await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -6350,9 +7030,28 @@ async fn save_connection_conf_key(
     } else {
         serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
     };
-    let mut conns = state.connections.write();
-    conns.insert(format!("{}.{}", name, conf_key), payload.clone());
-    conns.insert(format!("{}/{}", name, conf_key), payload);
+    state
+        .connections
+        .write()
+        .insert(format!("{}.{}", name, conf_key), payload.clone());
+    state
+        .connections
+        .write()
+        .insert(format!("{}/{}", name, conf_key), payload.clone());
+    persist_config_entry(
+        &state,
+        "connections",
+        &format!("{}.{}", name, conf_key),
+        &payload,
+    )
+    .await;
+    persist_config_entry(
+        &state,
+        "connections",
+        &format!("{}/{}", name, conf_key),
+        &payload,
+    )
+    .await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -6392,9 +7091,16 @@ async fn delete_connection_conf_key(
     if let Err(resp) = check_valid_name(&conf_key) {
         return resp;
     }
-    let mut conns = state.connections.write();
-    conns.remove(&format!("{}.{}", name, conf_key));
-    conns.remove(&format!("{}/{}", name, conf_key));
+    state
+        .connections
+        .write()
+        .remove(&format!("{}.{}", name, conf_key));
+    state
+        .connections
+        .write()
+        .remove(&format!("{}/{}", name, conf_key));
+    unpersist_config_entry(&state, "connections", &format!("{}.{}", name, conf_key)).await;
+    unpersist_config_entry(&state, "connections", &format!("{}/{}", name, conf_key)).await;
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -7168,38 +7874,14 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
         )
             .into_response();
     }
-    // Bind the per-session SSE listener first so the reported port is live
-    // from the moment the session is created (baseline serves the event
-    // stream on this port).
-    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
-        Ok(listener) => listener,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to bind ruletest listener: {}", e),
-            )
-                .into_response();
-        }
-    };
-    let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
+    // The SSE feed serves on the documented `httpServerPort` (default
+    // 10081): a shared listener is bound at daemon startup (see
+    // `test_sse_router`), so the reported port is stable and live from the
+    // moment the session is created.
+    let port = state.config.read().basic.http_server_port;
     let id = payload.id.unwrap_or_else(generate_ruletest_id);
     let (output_tx, _) = tokio::sync::broadcast::channel::<String>(256);
     let shutdown = Arc::new(tokio::sync::Notify::new());
-    {
-        let feed_tx = output_tx.clone();
-        let shutdown_signal = shutdown.clone();
-        let app = axum::Router::new()
-            .route("/", axum::routing::get(ruletest_sse_feed))
-            .route("/*path", axum::routing::get(ruletest_sse_feed))
-            .with_state(feed_tx);
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    shutdown_signal.notified().await;
-                })
-                .await;
-        });
-    }
     state.ruletests.write().insert(
         id.clone(),
         RuletestSession {
@@ -7207,6 +7889,7 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
             sql,
             mock_source: payload.mock_source,
             output_tx,
+            replay: Arc::new(RwLock::new(RuletestReplay::default())),
             port,
             shutdown,
         },
@@ -7214,57 +7897,96 @@ async fn create_ruletest(State(state): State<AppState>, body: Bytes) -> Response
     (StatusCode::OK, Json(json!({ "id": id, "port": port }))).into_response()
 }
 
-/// Live output feed for one ruletest session: replays the session broadcast
-/// as Server-Sent Events on any path of its dedicated listener.
-async fn ruletest_sse_feed(State(tx): State<tokio::sync::broadcast::Sender<String>>) -> Response {
-    let rx = tx.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        match rx.recv().await {
-            Ok(line) => Some((Ok::<_, axum::Error>(Event::default().data(line)), rx)),
-            Err(_) => None,
-        }
-    });
-    Sse::new(stream)
-        .keep_alive(KeepAlive::new())
-        .into_response()
-}
-
 async fn start_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     let Some(session) = state.ruletests.read().get(&name).cloned() else {
-        // Keep the endpoint total: unknown sessions are still acknowledged.
-        return (StatusCode::OK, "started\n").into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": 1000, "message": format!("test rule {} not found", name)})),
+        )
+            .into_response();
     };
+    // Paced replay of the mock source: rows stream at the configured
+    // interval, looping until the session is deleted (or a 10-minute
+    // session cap, mirroring baseline trial-run expiry). Every row is
+    // buffered in session history so late SSE subscribers lose nothing.
     tokio::spawn(async move {
         let mut parser = Parser::new(&session.sql);
         let Ok(select_stmt) = parser.parse_select() else {
             return;
         };
-        // Replay the mock data registered for the rule's source stream.
-        let data: Vec<HashMap<String, Value>> = session
-            .mock_source
-            .get(&select_stmt.from)
-            .map(|conf| conf.data.clone())
-            .unwrap_or_default();
+        let conf = session.mock_source.get(&select_stmt.from).cloned();
+        let data: Vec<HashMap<String, Value>> =
+            conf.as_ref().map(|c| c.data.clone()).unwrap_or_default();
+        if data.is_empty() {
+            // No mock rows: fall back to a single empty trigger row so the
+            // rule still evaluates once (baseline runs the real source).
+            let rule_state = RuleState::default();
+            for row in
+                Evaluator::eval_select_stateful_multi(&select_stmt, &HashMap::new(), &rule_state)
+            {
+                emit_ruletest_line(&session, &row);
+            }
+            return;
+        }
+        let interval = conf
+            .as_ref()
+            .map(|c| parse_interval_ms(&c.interval))
+            .unwrap_or_else(|| std::time::Duration::from_millis(10));
+        let loop_data = conf.as_ref().is_some_and(|c| c.loop_data);
         let rule_state = RuleState::default();
-        for record in &data {
-            for row in Evaluator::eval_select_stateful_multi(&select_stmt, record, &rule_state) {
-                let line = serde_json::to_string(&row).unwrap_or_default();
-                let _ = session.output_tx.send(line);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10 * 60);
+        loop {
+            for record in &data {
+                if tokio::time::Instant::now() >= deadline {
+                    return;
+                }
+                for row in Evaluator::eval_select_stateful_multi(&select_stmt, record, &rule_state)
+                {
+                    emit_ruletest_line(&session, &row);
+                }
+                tokio::select! {
+                    _ = session.shutdown.notified() => return,
+                    _ = tokio::time::sleep(interval) => {}
+                }
+            }
+            if !loop_data {
+                return;
             }
         }
     });
     (StatusCode::OK, "started\n").into_response()
 }
 
+/// Buffer one replayed row into the bounded session ring (evicting the
+/// oldest past the cap) and wake SSE subscribers via broadcast.
+fn emit_ruletest_line(session: &RuletestSession, row: &HashMap<String, Value>) {
+    let line = serde_json::to_string(row).unwrap_or_default();
+    {
+        let mut replay = session.replay.write();
+        let seq = replay.next_seq;
+        replay.next_seq = seq.saturating_add(1);
+        replay.entries.push_back((seq, line.clone()));
+        while replay.entries.len() > RULETEST_HISTORY_CAP {
+            replay.entries.pop_front();
+        }
+    }
+    let _ = session.output_tx.send(line);
+}
+
 async fn delete_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
-    // Shutting down the dedicated SSE listener alongside the session.
+    // Stopping the replay loop alongside the session.
     if let Some(session) = state.ruletests.write().remove(&name) {
-        session.shutdown.notify_one();
+        session.shutdown.notify_waiters();
     }
     (StatusCode::OK, "dropped\n").into_response()
 }
 
-async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+/// Documented SSE feed: `GET /test/:id` streams the session replay as
+/// `text/event-stream` — retained rows first (late subscribers backfill up
+/// to the retention cap, then go live), then live rows indefinitely.
+/// Served both on the main REST router and on the dedicated `httpServerPort`
+/// listener (see [`test_sse_router`]).
+pub async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     let Some(session) = state.ruletests.read().get(&name).cloned() else {
         return (
             StatusCode::NOT_FOUND,
@@ -7273,15 +7995,77 @@ async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String>) -
             .into_response();
     };
     let rx = session.output_tx.subscribe();
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        match rx.recv().await {
-            Ok(line) => Some((Ok::<_, axum::Error>(Event::default().data(line)), rx)),
-            Err(_) => None,
-        }
-    });
+    let replay = session.replay.clone();
+    // Cursor resume over the sequence-numbered ring: the replay buffer is
+    // the source of truth and broadcast messages are only wake-ups. A
+    // subscriber sends every row newer than its cursor, in order; a cursor
+    // older than the retained prefix skips the evicted gap (documented lag)
+    // and resumes at the oldest retained row. Session deletion drops the
+    // broadcast sender, which terminates the stream.
+    struct SseCursor {
+        rx: broadcast::Receiver<String>,
+        replay: Arc<RwLock<RuletestReplay>>,
+        cursor: u64,
+        pending: VecDeque<String>,
+    }
+    let stream = futures::stream::unfold(
+        SseCursor {
+            rx,
+            replay,
+            cursor: 0,
+            pending: VecDeque::new(),
+        },
+        |mut st| async move {
+            loop {
+                if let Some(line) = st.pending.pop_front() {
+                    return Some((Ok::<_, axum::Error>(Event::default().data(line)), st));
+                }
+                // Single atomic snapshot: copy every row at/after the cursor
+                // AND derive the next cursor from the last row actually
+                // copied, under the same lock. Rows appended concurrently
+                // after the snapshot stay above the cursor and are picked up
+                // on the next pass — never skipped, never duplicated.
+                // A cursor older than the retained prefix resumes at the
+                // oldest retained row (documented lag gap).
+                let (fresh, next): (Vec<String>, u64) = {
+                    let guard = st.replay.read();
+                    let mut fresh = Vec::new();
+                    let mut next = st.cursor;
+                    for (seq, line) in guard.entries.iter() {
+                        if *seq >= st.cursor {
+                            fresh.push(line.clone());
+                            next = seq.saturating_add(1);
+                        }
+                    }
+                    (fresh, next)
+                };
+                if !fresh.is_empty() {
+                    st.cursor = next;
+                    st.pending = fresh.into();
+                    continue;
+                }
+                match st.rx.recv().await {
+                    // A new row was buffered; refill from the ring.
+                    Ok(_) => continue,
+                    // Overflow drops broadcast copies only; the ring stays
+                    // complete, so keep refilling from the cursor.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        },
+    );
     Sse::new(stream)
         .keep_alive(KeepAlive::new())
         .into_response()
+}
+
+/// Dedicated ruletest SSE listener serving the documented
+/// `http://<httpServerIp>:<httpServerPort>/test/:id` endpoint.
+pub fn test_sse_router(state: AppState) -> axum::Router {
+    axum::Router::new()
+        .route("/test/:name", get(sse_ruletest))
+        .with_state(state)
 }
 
 #[cfg(test)]
@@ -7375,6 +8159,30 @@ mod tests {
     #[tokio::test]
     async fn resolve_sql_source_from_stream_options() {
         // Lowercase option spellings resolve like the uppercase ones.
+        // Documented plugin shape: dburl + templateSqlQueryCfg, table
+        // anchored by the stream DATASOURCE.
+        let manager = test_stream_manager(&[
+            ("TYPE", "sql"),
+            ("DATASOURCE", "rksrc"),
+            ("CONF_KEY", "postgresql_config"),
+        ])
+        .await;
+        let configs = test_source_configs(&[(
+            "sql/postgresql_config",
+            json!({
+                "dburl": "postgres://u:p@h/db?sslmode=disable",
+                "interval": 5000,
+                "templateSqlQueryCfg": {"templateSql": "SELECT id, val FROM rksrc"},
+            }),
+        )]);
+        let cfg = resolve_sql_source(&manager, &configs, "demo", "r1").unwrap();
+        assert_eq!(cfg.url, "postgres://u:p@h/db?sslmode=disable");
+        assert_eq!(cfg.table, "rksrc");
+        assert_eq!(cfg.interval, 5000);
+        assert_eq!(
+            rekuiper_connectors::sql_source_query(&cfg),
+            "SELECT id, val FROM rksrc"
+        );
         let manager = test_stream_manager(&[
             ("type", "SQL"),
             ("datasource", "sqlite://x.db"),
@@ -7393,6 +8201,217 @@ mod tests {
         assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
         let manager = test_stream_manager(&[]).await;
         assert!(resolve_sql_source(&manager, &test_source_configs(&[]), "demo", "r1").is_none());
+    }
+
+    fn tagged(source: &str, pairs: &[(&str, Value)]) -> TaggedRow {
+        TaggedRow {
+            source: source.to_string(),
+            data: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        }
+    }
+
+    fn parse_stmt(sql: &str) -> SelectStmt {
+        Parser::new(sql).parse_select().expect("join SQL parses")
+    }
+
+    #[tokio::test]
+    async fn window_join_right_preserves_unmatched_without_left() {
+        // RIGHT JOIN with an empty left side still emits right rows.
+        let stmt = parse_stmt(
+            "SELECT l.id AS id, r.val AS v FROM l RIGHT JOIN r ON l.id = r.id GROUP BY CountWindow(2)",
+        );
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("r", &[("id", json!(1)), ("val", json!(9))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), 1);
+        // Missing left side projects to Null; the preserved right side is intact.
+        assert_eq!(out[0].get("id"), Some(&serde_json::Value::Null));
+        assert_eq!(out[0].get("v"), Some(&json!(9)));
+    }
+
+    #[tokio::test]
+    async fn window_join_inner_empty_left_yields_nothing() {
+        let stmt = parse_stmt(
+            "SELECT l.id AS id FROM l INNER JOIN r ON l.id = r.id GROUP BY CountWindow(2)",
+        );
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("r", &[("id", json!(1))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn window_join_cross_fanout_is_bounded() {
+        // 201 x 201 pairs would fan out to 40401 rows; the cap holds.
+        let stmt = parse_stmt("SELECT l.id AS id FROM l CROSS JOIN r GROUP BY CountWindow(50000)");
+        let tables = TableManager::new();
+        let confs = test_source_configs(&[]);
+        let mut batch = Vec::new();
+        for i in 0..201 {
+            batch.push(tagged("l", &[("id", json!(i))]));
+            batch.push(tagged("r", &[("id", json!(i))]));
+        }
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), MAX_JOIN_FANOUT);
+    }
+
+    #[tokio::test]
+    async fn window_join_table_takes_first_on_match() {
+        // Lookup tables resolve one row per key: the first ON-matching row
+        // wins (point-lookup semantics, also used by the stateless path).
+        let tables = TableManager::new();
+        tables
+            .create_table(TableDefinition {
+                name: "t".to_string(),
+                sql: String::new(),
+                stream_fields: Vec::new(),
+                options: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        tables.insert_table_row(
+            "t",
+            [("id".to_string(), json!(1)), ("v".to_string(), json!("a"))]
+                .into_iter()
+                .collect(),
+        );
+        tables.insert_table_row(
+            "t",
+            [("id".to_string(), json!(1)), ("v".to_string(), json!("b"))]
+                .into_iter()
+                .collect(),
+        );
+        let stmt = parse_stmt(
+            "SELECT s.id AS id, t.v AS v FROM s INNER JOIN t ON s.id = t.id GROUP BY CountWindow(2)",
+        );
+        let confs = test_source_configs(&[]);
+        let batch = vec![tagged("s", &[("id", json!(1))])];
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].get("v"), Some(&json!("a")));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_join_registers_all_source_cancels() {
+        // Stream-stream joins bootstrap one producer per side. Every
+        // producer's cancel handle must be retained: overwriting the entry
+        // drops the first sender, and a dropped watch sender reads as
+        // `Err` in the source task, which exits immediately (join side A
+        // would silently stop delivering).
+        let bus = StreamBus::new();
+        let sm = StreamManager::new();
+        for name in ["ja", "jb"] {
+            sm.create_stream(StreamDefinition {
+                name: name.to_string(),
+                sql: String::new(),
+                stream_fields: Vec::new(),
+                options: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        }
+        let state = AppState::new(
+            "test".to_string(),
+            rekuiper_conf::KuiperConfig::default(),
+            sm,
+            TableManager::new(),
+            RuleManager::new(bus.clone()),
+            bus,
+        );
+        let mut parser = Parser::new(
+            "SELECT ja.id AS id, jb.val AS v FROM ja INNER JOIN jb ON ja.id = jb.id GROUP BY CountWindow(2)",
+        );
+        let stmt = parser.parse_select().unwrap();
+        bootstrap_rule_sources(&state, "rj", &stmt);
+        let guards = state.source_cancels.read();
+        let txs = guards.get("rj").expect("join rule has cancel handles");
+        assert_eq!(txs.len(), 2, "one cancel sender per joined stream");
+        drop(guards);
+        cancel_rule_source(&state, "rj");
+        assert!(!state.source_cancels.read().contains_key("rj"));
+    }
+
+    #[tokio::test]
+    async fn config_maps_persist_and_reload_across_restart() {
+        // D-RESTART: CONF_KEYs (MQTT brokers, SQL URLs) must survive a
+        // daemon restart instead of falling back to loopback defaults.
+        use rekuiper_core::MemKvStore;
+        let kv: Arc<dyn KvStore> = Arc::new(MemKvStore::new());
+        let state = AppState {
+            kv: Some(kv.clone()),
+            ..AppState::new(
+                "test".to_string(),
+                rekuiper_conf::KuiperConfig::default(),
+                StreamManager::new(),
+                TableManager::new(),
+                RuleManager::new(StreamBus::new()),
+                StreamBus::new(),
+            )
+        };
+        persist_config_entry(
+            &state,
+            "source_configs",
+            "mqtt/evalmqtt",
+            &json!({"server": "tcp://broker:1883"}),
+        )
+        .await;
+        persist_config_entry(
+            &state,
+            "source_configs",
+            "sql/postgresql_config",
+            &json!({"dburl": "postgres://u:p@h/db", "interval": 5000}),
+        )
+        .await;
+        // A fresh daemon with empty maps reloads everything from KV.
+        let fresh = AppState {
+            kv: Some(kv),
+            ..AppState::new(
+                "test".to_string(),
+                rekuiper_conf::KuiperConfig::default(),
+                StreamManager::new(),
+                TableManager::new(),
+                RuleManager::new(StreamBus::new()),
+                StreamBus::new(),
+            )
+        };
+        load_config_maps(&fresh).await;
+        assert_eq!(
+            fresh
+                .source_configs
+                .read()
+                .get("mqtt/evalmqtt")
+                .and_then(|v| v.get("server"))
+                .and_then(|v| v.as_str()),
+            Some("tcp://broker:1883")
+        );
+        assert!(fresh
+            .source_configs
+            .read()
+            .contains_key("sql/postgresql_config"));
+        // Deletes propagate too.
+        unpersist_config_entry(&state, "source_configs", "mqtt/evalmqtt").await;
+        let fresh2 = AppState {
+            kv: Some(state.kv.clone().unwrap()),
+            ..AppState::new(
+                "test".to_string(),
+                rekuiper_conf::KuiperConfig::default(),
+                StreamManager::new(),
+                TableManager::new(),
+                RuleManager::new(StreamBus::new()),
+                StreamBus::new(),
+            )
+        };
+        load_config_maps(&fresh2).await;
+        assert!(!fresh2.source_configs.read().contains_key("mqtt/evalmqtt"));
+        assert!(fresh2
+            .source_configs
+            .read()
+            .contains_key("sql/postgresql_config"));
     }
 
     // D9: RS256 JWT vectors generated offline (2048-bit key, 1-year valid

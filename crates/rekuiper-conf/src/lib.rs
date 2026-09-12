@@ -35,6 +35,12 @@ pub struct BasicConfig {
     pub prometheus: bool,
     #[serde(default = "default_prometheus_port")]
     pub prometheus_port: u16,
+    /// Ruletest SSE server bind IP (`httpServerIp` in kuiper.yaml).
+    #[serde(default = "default_http_server_ip")]
+    pub http_server_ip: String,
+    /// Ruletest SSE server port (`httpServerPort`; documented default 10081).
+    #[serde(default = "default_http_server_port")]
+    pub http_server_port: u16,
 }
 
 fn default_ip() -> String {
@@ -61,6 +67,12 @@ fn default_timezone() -> String {
 fn default_prometheus_port() -> u16 {
     20499
 }
+fn default_http_server_ip() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_http_server_port() -> u16 {
+    10081
+}
 
 impl Default for BasicConfig {
     fn default() -> Self {
@@ -76,6 +88,8 @@ impl Default for BasicConfig {
             timezone: default_timezone(),
             prometheus: false,
             prometheus_port: default_prometheus_port(),
+            http_server_ip: default_http_server_ip(),
+            http_server_port: default_http_server_port(),
         }
     }
 }
@@ -195,6 +209,12 @@ fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
         "PROMETHEUSPORT" => {
             if let Ok(v) = val.trim().parse() {
                 basic.prometheus_port = v;
+            }
+        }
+        "HTTPSERVERIP" => basic.http_server_ip = val.to_string(),
+        "HTTPSERVERPORT" => {
+            if let Ok(v) = val.trim().parse() {
+                basic.http_server_port = v;
             }
         }
         _ => {}

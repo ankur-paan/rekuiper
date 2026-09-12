@@ -10,7 +10,7 @@ on:
       tag:
         description: 'Release tag (e.g. v0.423-beta)'
         required: false
-        default: 'v0.423-beta'
+        default: 'v0.424-beta'
 
 permissions:
   contents: write
