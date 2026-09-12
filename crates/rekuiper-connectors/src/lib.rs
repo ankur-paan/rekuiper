@@ -2128,7 +2128,10 @@ pub fn sqlite_insert_row_sql(table: &str, cols: &[String], nulls: &[bool]) -> St
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("INSERT INTO {} ({}) VALUES ({})", table, names, placeholders)
+    format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        table, names, placeholders
+    )
 }
 
 /// `INSERT INTO {table} ({cols}) VALUES ($1, ...)` for PostgreSQL, whose
@@ -2162,7 +2165,10 @@ pub fn pg_insert_row_sql(table: &str, cols: &[String], nulls: &[bool]) -> String
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("INSERT INTO {} ({}) VALUES ({})", table, names, placeholders)
+    format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        table, names, placeholders
+    )
 }
 
 /// Connect a PostgreSQL pool with a bounded handshake timeout so dead
@@ -2988,11 +2994,7 @@ mod tests {
             "INSERT INTO t (a, b, c) VALUES ($1, NULL, $2)"
         );
         assert_eq!(
-            super::sqlite_insert_row_sql(
-                "t",
-                &["a".to_string(), "b".to_string()],
-                &[true, false]
-            ),
+            super::sqlite_insert_row_sql("t", &["a".to_string(), "b".to_string()], &[true, false]),
             "INSERT INTO t (a, b) VALUES (NULL, ?)"
         );
         let sink = super::SqlSink {
@@ -3012,7 +3014,9 @@ mod tests {
             .unwrap();
         let mut missing = HashMap::new();
         missing.insert("eid".to_string(), json!("n2"));
-        sink.insert_record(&StreamRecord::new(missing)).await.unwrap();
+        sink.insert_record(&StreamRecord::new(missing))
+            .await
+            .unwrap();
         let mut mixed = HashMap::new();
         mixed.insert("eid".to_string(), json!("n3"));
         mixed.insert("temp".to_string(), json!(21));

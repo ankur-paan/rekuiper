@@ -6762,7 +6762,11 @@ async fn test_ruletest_concurrent_stream_has_no_gaps() {
     assert_eq!(frames.len(), WANT, "concurrent feed must keep flowing");
     let seq: Vec<u64> = frames
         .iter()
-        .map(|f| serde_json::from_str::<serde_json::Value>(f).unwrap()["k"].as_u64().unwrap())
+        .map(|f| {
+            serde_json::from_str::<serde_json::Value>(f).unwrap()["k"]
+                .as_u64()
+                .unwrap()
+        })
         .collect();
     for w in seq.windows(2) {
         assert_eq!(

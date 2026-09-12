@@ -3375,9 +3375,7 @@ async fn eval_window_join_batch(
         // An empty intermediate only ends the pipeline for joins that cannot
         // produce rows without left input. RIGHT/FULL joins still preserve
         // their right side (and later joins fold over it), per SQL semantics.
-        if combined_rows.is_empty()
-            && !matches!(join.join_type, JoinType::Right | JoinType::Full)
-        {
+        if combined_rows.is_empty() && !matches!(join.join_type, JoinType::Right | JoinType::Full) {
             return Vec::new();
         }
     }
@@ -8250,8 +8248,7 @@ mod tests {
     #[tokio::test]
     async fn window_join_cross_fanout_is_bounded() {
         // 201 x 201 pairs would fan out to 40401 rows; the cap holds.
-        let stmt =
-            parse_stmt("SELECT l.id AS id FROM l CROSS JOIN r GROUP BY CountWindow(50000)");
+        let stmt = parse_stmt("SELECT l.id AS id FROM l CROSS JOIN r GROUP BY CountWindow(50000)");
         let tables = TableManager::new();
         let confs = test_source_configs(&[]);
         let mut batch = Vec::new();
