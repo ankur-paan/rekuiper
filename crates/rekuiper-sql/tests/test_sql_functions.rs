@@ -355,6 +355,139 @@ fn test_json_path_exists() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Postfix index/slice expressions + JSONPath wildcards (0.424 parity)
+// ---------------------------------------------------------------------------
+
+fn nest_record() -> Record {
+    rec(&[
+        ("id", json!(7)),
+        ("children", json!(["Sara", "Alex", "Jack"])),
+        (
+            "followers",
+            json!({"Group1": [{"first": "John", "last": "Shavor", "age": 22}]}),
+        ),
+    ])
+}
+
+#[test]
+fn test_postfix_index_documented() {
+    let r = nest_record();
+    // Zero-based; -1 is the last element.
+    assert_eq!(
+        eval_one("SELECT children[0] AS v FROM demo", &r),
+        json!("Sara")
+    );
+    assert_eq!(
+        eval_one("SELECT children[1] AS v FROM demo", &r),
+        json!("Alex")
+    );
+    assert_eq!(
+        eval_one("SELECT children[-1] AS v FROM demo", &r),
+        json!("Jack")
+    );
+    assert_eq!(
+        eval_one("SELECT children[-2] AS v FROM demo", &r),
+        json!("Alex")
+    );
+    // Out of range and non-arrays yield Null, never an error.
+    assert_eq!(
+        eval_one("SELECT children[9] AS v FROM demo", &r),
+        Value::Null
+    );
+    assert_eq!(eval_one("SELECT id[0] AS v FROM demo", &r), Value::Null);
+    // String keys look up object fields.
+    assert_eq!(
+        eval_one("SELECT followers['Group1'] AS v FROM demo", &r),
+        json!([{"first": "John", "last": "Shavor", "age": 22}])
+    );
+    // Chained navigation after an index.
+    assert_eq!(
+        eval_one("SELECT followers['Group1'][0]->last AS v FROM demo", &r),
+        json!("Shavor")
+    );
+}
+
+#[test]
+fn test_postfix_slice_documented() {
+    let r = nest_record();
+    // End-exclusive; negatives count from the end.
+    assert_eq!(
+        eval_one("SELECT children[0:1] AS v FROM demo", &r),
+        json!(["Sara"])
+    );
+    assert_eq!(
+        eval_one("SELECT children[1:-1] AS v FROM demo", &r),
+        json!(["Alex"])
+    );
+    assert_eq!(
+        eval_one("SELECT children[0:-1] AS v FROM demo", &r),
+        json!(["Sara", "Alex"])
+    );
+    assert_eq!(
+        eval_one("SELECT children[0:2] AS v FROM demo", &r),
+        json!(["Sara", "Alex"])
+    );
+    // Omitted bounds mean array start/end.
+    assert_eq!(
+        eval_one("SELECT children[:] AS v FROM demo", &r),
+        json!(["Sara", "Alex", "Jack"])
+    );
+    assert_eq!(
+        eval_one("SELECT children[:2] AS v FROM demo", &r),
+        json!(["Sara", "Alex"])
+    );
+    assert_eq!(
+        eval_one("SELECT children[1:] AS v FROM demo", &r),
+        json!(["Alex", "Jack"])
+    );
+    // Inverted ranges yield an empty array, not an error.
+    assert_eq!(
+        eval_one("SELECT children[2:1] AS v FROM demo", &r),
+        json!([])
+    );
+    assert_eq!(eval_one("SELECT id[0:1] AS v FROM demo", &r), Value::Null);
+}
+
+#[test]
+fn test_json_path_wildcard_documented() {
+    let r = nest_record();
+    // Documented example shape over a single-member group.
+    assert_eq!(
+        eval_one(
+            "SELECT json_path_query(followers, '$.Group1[*].last') AS v FROM demo",
+            &r
+        ),
+        json!(["Shavor"])
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT json_path_query_first(followers, '$.Group1[*].last') AS v FROM demo",
+            &r
+        ),
+        json!("Shavor")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT json_path_exists(followers, '$.Group1[*].last') AS v FROM demo",
+            &r
+        ),
+        json!(true)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT json_path_exists(followers, '$.Group2[*].last') AS v FROM demo",
+            &r
+        ),
+        json!(false)
+    );
+    // Scalar `$`-rooted paths still unwrap to scalars.
+    assert_eq!(
+        eval_one("SELECT json_path_query(id, '$') AS v FROM demo", &r),
+        json!(7)
+    );
+}
+
 #[test]
 fn test_json_map() {
     assert_eq!(

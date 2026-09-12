@@ -725,6 +725,18 @@ async fn test_all_openapi_paths_responding() {
         .send()
         .await
         .unwrap();
+    // Seed a ruletest session so its start endpoint is genuine (unknown
+    // sessions 404 instead of fake-OK).
+    client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rule_openapi",
+            "sql": "SELECT * FROM demo",
+            "mockSource": {"demo": {"data": [{"temp": 30}], "interval": 100, "loop": false}}
+        }))
+        .send()
+        .await
+        .unwrap();
 
     for path in [
         "/v2/rules/rule_openapi/status",
@@ -1472,6 +1484,89 @@ async fn test_stream_table_lookup_join() {
         ),
         "unmatched status should be null or missing, got {:?}",
         second.data.get("status")
+    );
+}
+
+#[tokio::test]
+async fn test_windowed_stream_stream_join() {
+    // D-JOIN: doc-shape windowed stream-stream joins match on the ON key
+    // instead of yielding all-null rows.
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    for stream in ["wsa", "wsb"] {
+        let resp = client
+            .post(format!("{}/streams", base_url))
+            .json(&json!({
+                "sql": format!("CREATE STREAM {} () WITH (FORMAT=\"json\")", stream)
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+    }
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_wjoin",
+            "sql": "SELECT wsa.id AS id, wsb.val AS v FROM wsa INNER JOIN wsb ON wsa.id = wsb.id GROUP BY CountWindow(2)",
+            "actions": [{"memory": {"topic": "wjoin_res"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // Subscribe before ingesting so nothing is lost.
+    let mut rx = state.stream_bus.subscribe("wjoin_res");
+    for (stream, body) in [
+        ("wsa", json!({"id": 42})),
+        ("wsb", json!({"id": 42, "val": 9})),
+    ] {
+        let resp = client
+            .post(format!("{}/streams/{}/data", base_url, stream))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    }
+    let got = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out waiting for join output")
+        .expect("wjoin_res topic closed");
+    assert_eq!(got.data.get("id"), Some(&json!(42)));
+    assert_eq!(got.data.get("v"), Some(&json!(9)));
+
+    // LEFT JOIN with a left-only event emits the left row (null right side).
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_wleft",
+            "sql": "SELECT wsa.id AS id, wsb.val AS v FROM wsa LEFT JOIN wsb ON wsa.id = wsb.id GROUP BY CountWindow(1)",
+            "actions": [{"memory": {"topic": "wleft_res"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let mut rx = state.stream_bus.subscribe("wleft_res");
+    let resp = client
+        .post(format!("{}/streams/wsa/data", base_url))
+        .json(&json!({"id": 43}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let got = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out waiting for left-join output")
+        .expect("wleft_res topic closed");
+    assert_eq!(got.data.get("id"), Some(&json!(43)));
+    assert!(
+        matches!(got.data.get("v"), None | Some(serde_json::Value::Null)),
+        "unmatched val should be null or missing, got {:?}",
+        got.data.get("v")
     );
 }
 
@@ -6397,20 +6492,33 @@ async fn test_ruletest_live_sse_port() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let created: serde_json::Value = resp.json().await.unwrap();
-    let port = created["port"].as_u64().expect("live port") as u16;
-    assert!(port > 0, "session must report a live port");
+    // Documented contract: the stable configured SSE port (10081 default).
+    assert_eq!(created["port"], json!(10081));
 
-    // Open one persistent SSE connection, then (re)start the replay until
-    // a full two-frame burst arrives. A restart is needed only when the
-    // first replay wins the race against the SSE subscription (broadcast
-    // channels do not backfill); once subscribed, every replay lands in
-    // full, so this terminates deterministically.
-    let sse_url = format!("http://127.0.0.1:{}/", port);
-    let mut resp = client
-        .get(&sse_url)
+    // Start the replay first: history buffering makes late subscribers
+    // deterministic (no subscribe-before-start race).
+    let started = client
+        .post(format!("{}/ruletest/rt_live/start", base_url))
         .send()
         .await
-        .expect("SSE listener must accept connections");
+        .unwrap();
+    assert_eq!(started.status(), reqwest::StatusCode::OK);
+    // Unknown sessions are a genuine 404, never fake-OK.
+    let missing = client
+        .post(format!("{}/ruletest/no_such_session/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // The documented SSE endpoint streams both buffered frames.
+    let sse_url = format!("{}/test/rt_live", base_url);
+    let mut resp = client
+        .get(&sse_url)
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .expect("SSE endpoint must accept connections");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     assert_eq!(
         resp.headers()
@@ -6420,58 +6528,193 @@ async fn test_ruletest_live_sse_port() {
     );
     let mut buf: Vec<u8> = Vec::new();
     let mut frames: Vec<String> = Vec::new();
-    for _ in 0..4 {
-        let started = client
-            .post(format!("{}/ruletest/rt_live/start", base_url))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(started.status(), reqwest::StatusCode::OK);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while frames.len() < 2 && std::time::Instant::now() < deadline {
-            match tokio::time::timeout(std::time::Duration::from_millis(500), resp.chunk()).await {
-                Ok(Ok(Some(chunk))) => {
-                    buf.extend_from_slice(&chunk);
-                    while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
-                        let frame: Vec<u8> = buf.drain(..pos + 2).collect();
-                        for line in String::from_utf8_lossy(&frame).lines() {
-                            if let Some(data) = line.strip_prefix("data:") {
-                                frames.push(data.trim().to_string());
-                            }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while frames.len() < 2 && std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), resp.chunk()).await {
+            Ok(Ok(Some(chunk))) => {
+                buf.extend_from_slice(&chunk);
+                while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                    let frame: Vec<u8> = buf.drain(..pos + 2).collect();
+                    for line in String::from_utf8_lossy(&frame).lines() {
+                        if let Some(data) = line.strip_prefix("data:") {
+                            frames.push(data.trim().to_string());
                         }
                     }
                 }
-                _ => break,
             }
+            _ => break,
         }
-        if frames.len() == 2 {
-            break;
-        }
-        frames.clear();
     }
     assert_eq!(
         frames,
         vec!["{\"b\":4}".to_string(), "{\"b\":6}".to_string()]
     );
 
-    // Deleting the session shuts the listener down: reconnects refuse.
+    // Deleting the session drops the feed: the endpoint 404s afterwards.
     let resp = client
         .delete(format!("{}/ruletest/rt_live", base_url))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let mut refused = false;
-    for _ in 0..30 {
-        match reqwest::Client::new().get(&sse_url).send().await {
-            Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
-            Err(_) => {
-                refused = true;
-                break;
+    let gone = client.get(&sse_url).send().await.unwrap();
+    assert_eq!(gone.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+/// Drain `want` SSE `data:` frames from an open response (deadline-bounded).
+async fn drain_sse_frames(resp: &mut reqwest::Response, want: usize, secs: u64) -> Vec<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut frames: Vec<String> = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while frames.len() < want && std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), resp.chunk()).await {
+            Ok(Ok(Some(chunk))) => {
+                buf.extend_from_slice(&chunk);
+                while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                    let frame: Vec<u8> = buf.drain(..pos + 2).collect();
+                    for line in String::from_utf8_lossy(&frame).lines() {
+                        if let Some(data) = line.strip_prefix("data:") {
+                            frames.push(data.trim().to_string());
+                            if frames.len() >= want {
+                                break;
+                            }
+                        }
+                    }
+                }
             }
+            _ => break,
         }
     }
-    assert!(refused, "SSE listener must stop after session delete");
+    frames
+}
+
+#[tokio::test]
+async fn test_ruletest_large_replay_ordered_and_delete() {
+    // Release-blocker regression: rows past the 10k retention cap must keep
+    // streaming to live subscribers in order, without duplicates or gaps.
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    const N: usize = 10_500;
+    let data: Vec<serde_json::Value> = (0..N as u64).map(|i| json!({"n": i})).collect();
+    let resp = client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rt_big",
+            "sql": "SELECT n FROM big",
+            "mockSource": {"big": {"data": data, "interval": 0, "loop": false}}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let started = client
+        .post(format!("{}/ruletest/rt_big/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), reqwest::StatusCode::OK);
+
+    // A subscriber that stays connected receives the whole replay in exact
+    // sequence order, including everything past the retention cap.
+    let mut resp = client
+        .get(format!("{}/test/rt_big", base_url))
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let frames = drain_sse_frames(&mut resp, N, 120).await;
+    assert_eq!(frames.len(), N, "live subscriber must receive all rows");
+    for (i, f) in frames.iter().enumerate() {
+        assert_eq!(f, &format!("{{\"n\":{}}}", i), "row {} ordered", i);
+    }
+    drop(resp);
+
+    // Deleting the session terminates open feeds and the endpoint 404s.
+    let mut resp = client
+        .get(format!("{}/test/rt_big", base_url))
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    let probe = drain_sse_frames(&mut resp, 3, 30).await;
+    assert!(!probe.is_empty());
+    let del = client
+        .delete(format!("{}/ruletest/rt_big", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), reqwest::StatusCode::OK);
+    // The open feed ends once its backlog drains: keep reading until the
+    // server terminates the stream (deadline-bounded).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut terminated = false;
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), resp.chunk()).await {
+            Ok(Ok(None)) => {
+                terminated = true;
+                break;
+            }
+            Ok(Ok(Some(_))) => continue,
+            _ => continue,
+        }
+    }
+    assert!(terminated, "open SSE feed must terminate after session delete");
+    let gone = client
+        .get(format!("{}/test/rt_big", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_ruletest_loop_continues_past_cap() {
+    // A looping session streams indefinitely: an active subscriber keeps
+    // receiving well beyond the 10k-row retention cap.
+    let (base_url, _handle, _state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/ruletest", base_url))
+        .json(&json!({
+            "id": "rt_loop",
+            "sql": "SELECT n FROM loopsrc",
+            "mockSource": {"loopsrc": {"data": [{"n": 0}, {"n": 1}, {"n": 2}], "interval": 1, "loop": true}}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let started = client
+        .post(format!("{}/ruletest/rt_loop/start", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), reqwest::StatusCode::OK);
+    let mut resp = client
+        .get(format!("{}/test/rt_loop", base_url))
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    const WANT: usize = 10_300;
+    let frames = drain_sse_frames(&mut resp, WANT, 120).await;
+    assert_eq!(frames.len(), WANT, "looping feed must continue past the cap");
+    for f in &frames {
+        assert!(
+            f == "{\"n\":0}" || f == "{\"n\":1}" || f == "{\"n\":2}",
+            "unexpected frame {}",
+            f
+        );
+    }
+    drop(resp);
+    let del = client
+        .delete(format!("{}/ruletest/rt_loop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), reqwest::StatusCode::OK);
 }
 
 #[tokio::test]

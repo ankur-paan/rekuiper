@@ -563,6 +563,22 @@ impl MqttSource {
                                     }
                                 }
                             }
+                            // rumqttc does not restore subscriptions across
+                            // reconnects: every (re)connect handshake must
+                            // re-subscribe or the source goes silently deaf
+                            // after a broker restart.
+                            Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                                if let Err(e) = client
+                                    .subscribe(self.config.topic.clone(), self.config.qos_level())
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "MQTT resubscribe to {} failed: {}",
+                                        self.config.topic,
+                                        e
+                                    );
+                                }
+                            }
                             Ok(_) => {}
                             Err(e) => {
                                 tracing::warn!("MQTT connection error: {}", e);
@@ -607,6 +623,13 @@ impl MqttSource {
                             tracing::warn!("Skipping invalid MQTT payload: {}", e);
                         }
                     }
+                }
+                // See `spawn`: subscriptions die with the connection.
+                Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                    client
+                        .subscribe(self.config.topic.clone(), self.config.qos_level())
+                        .await
+                        .map_err(|e| anyhow::anyhow!("MQTT resubscribe failed: {}", e))?;
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -1711,14 +1734,20 @@ pub fn apply_data_template(
 }
 
 /// SQL connector configuration (SQLite / PostgreSQL sink, lookup and
-/// polling source).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// polling source). Accepts both the native rekuiper shape (`url`/`table`)
+/// and the documented eKuiper plugin shape (`dburl`,
+/// `templateSqlQueryCfg`/`internalSqlQueryCfg`; see
+/// https://ekuiper.org/docs/en/latest/guide/sources/plugin/sql.html).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SqlConnectorConfig {
     /// Database URL, e.g. `"sqlite::memory:"` or
-    /// `"postgres://user:pass@localhost:5432/db"`.
+    /// `"postgres://user:pass@localhost:5432/db"`. `dburl` is the
+    /// documented plugin spelling.
+    #[serde(default, alias = "dburl")]
     pub url: String,
     /// Target table name.
+    #[serde(default)]
     pub table: String,
     /// Columns to write (defaults to the record's own keys).
     #[serde(default)]
@@ -1726,10 +1755,294 @@ pub struct SqlConnectorConfig {
     /// Poll interval in milliseconds (polling sources).
     #[serde(default = "default_sql_interval")]
     pub interval: u64,
+    /// Documented template-SQL query config (takes precedence when set).
+    #[serde(default)]
+    pub template_sql_query_cfg: Option<TemplateSqlQueryCfg>,
+    /// Documented internal query-builder config.
+    #[serde(default)]
+    pub internal_sql_query_cfg: Option<InternalSqlQueryCfg>,
+}
+
+/// One indexed column of a SQL source query config.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexFieldCfg {
+    #[serde(default)]
+    pub index_field: String,
+    #[serde(default)]
+    pub index_value: serde_json::Value,
+    #[serde(default)]
+    pub index_field_type: String,
+    #[serde(default)]
+    pub date_time_format: String,
+}
+
+/// Documented `templateSqlQueryCfg`: a raw SQL template where `{{.field}}`
+/// placeholders render from the configured index values.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateSqlQueryCfg {
+    #[serde(default, alias = "TemplateSql", alias = "templateSql")]
+    pub template_sql: String,
+    #[serde(default)]
+    pub index_field: String,
+    #[serde(default)]
+    pub index_value: serde_json::Value,
+    #[serde(default)]
+    pub index_field_type: String,
+    #[serde(default)]
+    pub index_fields: Vec<IndexFieldCfg>,
+    #[serde(default)]
+    pub date_time_format: String,
+}
+
+impl TemplateSqlQueryCfg {
+    fn index_pairs(&self) -> Vec<(String, serde_json::Value)> {
+        let mut pairs = Vec::new();
+        if !self.index_field.is_empty() {
+            pairs.push((self.index_field.clone(), self.index_value.clone()));
+        }
+        for f in &self.index_fields {
+            if !f.index_field.is_empty() {
+                pairs.push((f.index_field.clone(), f.index_value.clone()));
+            }
+        }
+        pairs
+    }
+}
+
+/// Documented `internalSqlQueryCfg`: table + limit + index columns from
+/// which the source builds its polling query.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalSqlQueryCfg {
+    #[serde(default)]
+    pub table: String,
+    #[serde(default)]
+    pub limit: u64,
+    #[serde(default)]
+    pub index_field: String,
+    #[serde(default)]
+    pub index_value: serde_json::Value,
+    #[serde(default)]
+    pub index_field_type: String,
+    #[serde(default)]
+    pub index_fields: Vec<IndexFieldCfg>,
+    #[serde(default)]
+    pub date_time_format: String,
+}
+
+impl InternalSqlQueryCfg {
+    fn index_pairs(&self) -> Vec<(String, serde_json::Value)> {
+        let mut pairs = Vec::new();
+        if !self.index_field.is_empty() {
+            pairs.push((self.index_field.clone(), self.index_value.clone()));
+        }
+        for f in &self.index_fields {
+            if !f.index_field.is_empty() {
+                pairs.push((f.index_field.clone(), f.index_value.clone()));
+            }
+        }
+        pairs
+    }
 }
 
 fn default_sql_interval() -> u64 {
     1000
+}
+
+/// Render a JSON value as a SQL literal for template substitution.
+fn sql_literal(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "NULL".to_string(),
+        serde_json::Value::Bool(b) => {
+            if *b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            format!("'{}'", v.to_string().replace('\'', "''"))
+        }
+    }
+}
+
+/// Substitute `{{.field}}` (or `{{ .field }}`) placeholders in a template
+/// SQL string with SQL literals. Unknown placeholders are left untouched.
+pub fn render_template_sql(template: &str, pairs: &[(String, serde_json::Value)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                let key = after[..end].trim().trim_start_matches('.').trim();
+                match pairs.iter().find(|(k, _)| k == key) {
+                    Some((_, v)) => out.push_str(&sql_literal(v)),
+                    None => {
+                        out.push_str("{{");
+                        out.push_str(&after[..end]);
+                        out.push_str("}}");
+                    }
+                }
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Build the polling query for a SQL source: the template SQL wins when
+/// present, then the internal query-builder config, else `SELECT *`.
+pub fn sql_source_query(config: &SqlConnectorConfig) -> String {
+    sql_source_query_with(config, &initial_index_pairs(config))
+}
+
+/// Initial index pairs from the configured query cfgs (template wins).
+fn initial_index_pairs(config: &SqlConnectorConfig) -> Vec<(String, serde_json::Value)> {
+    if let Some(t) = &config.template_sql_query_cfg {
+        if !t.template_sql.trim().is_empty() {
+            let mut pairs = t.index_pairs();
+            if pairs.is_empty() && !t.index_field.is_empty() {
+                pairs.push((t.index_field.clone(), t.index_value.clone()));
+            }
+            return pairs;
+        }
+    }
+    if let Some(i) = &config.internal_sql_query_cfg {
+        let mut pairs = i.index_pairs();
+        if pairs.is_empty() && !i.index_field.is_empty() {
+            pairs.push((i.index_field.clone(), i.index_value.clone()));
+        }
+        return pairs;
+    }
+    Vec::new()
+}
+
+/// Render the polling query with explicit per-poll index values (advanced
+/// across polls by [`SqlSource`]).
+pub fn sql_source_query_with(
+    config: &SqlConnectorConfig,
+    pairs: &[(String, serde_json::Value)],
+) -> String {
+    if let Some(t) = &config.template_sql_query_cfg {
+        if !t.template_sql.trim().is_empty() {
+            return render_template_sql(&t.template_sql, pairs);
+        }
+    }
+    if let Some(i) = &config.internal_sql_query_cfg {
+        let table = if i.table.is_empty() {
+            config.table.clone()
+        } else {
+            i.table.clone()
+        };
+        let mut sql = format!("SELECT * FROM {}", table);
+        if !pairs.is_empty() {
+            let conds = pairs
+                .iter()
+                .map(|(k, v)| format!("{} > {}", k, sql_literal(v)))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            sql.push_str(&format!(" WHERE {}", conds));
+            // Declaration order sets the pagination order (last row wins),
+            // mirroring upstream `order by {field} ASC`.
+            let order = pairs
+                .iter()
+                .map(|(k, _)| format!("{} ASC", k))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql.push_str(&format!(" ORDER BY {}", order));
+        }
+        if i.limit > 0 {
+            sql.push_str(&format!(" LIMIT {}", i.limit));
+        }
+        return sql;
+    }
+    format!("SELECT * FROM {}", config.table)
+}
+
+/// Advance tracked index columns from fetched rows, last row wins (rows
+/// arrive in `ORDER BY .. ASC` pagination order for internal queries),
+/// mirroring upstream `UpdateMaxIndexValue`.
+fn advance_index(index: &mut [(String, serde_json::Value)], rows: &[StreamRecord]) {
+    for row in rows {
+        for (field, value) in index.iter_mut() {
+            if let Some(v) = row.data.get(field) {
+                *value = v.clone();
+            }
+        }
+    }
+}
+
+/// A dynamically-typed bind parameter: numbers keep their JSON type so
+/// drivers infer the right column type (a float must not arrive as text).
+/// Null/missing values are NOT bound: PostgreSQL types even a NULL
+/// parameter from its Rust type, so `None::<String>` is rejected by
+/// non-text columns. Instead the sink omits null columns from the INSERT
+/// (database defaults, i.e. NULL, apply).
+#[derive(Debug, Clone)]
+enum SqlBindVal {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Text(String),
+}
+
+fn json_to_bind(v: Option<&serde_json::Value>) -> Option<SqlBindVal> {
+    match v {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Bool(b)) => Some(SqlBindVal::Bool(*b)),
+        Some(serde_json::Value::Number(n)) => {
+            if let Some(i) = n.as_i64() {
+                Some(SqlBindVal::Int(i))
+            } else if let Some(u) = n.as_u64() {
+                if u <= i64::MAX as u64 {
+                    Some(SqlBindVal::Int(u as i64))
+                } else {
+                    Some(SqlBindVal::Float(u as f64))
+                }
+            } else if let Some(f) = n.as_f64() {
+                Some(SqlBindVal::Float(f))
+            } else {
+                Some(SqlBindVal::Text(n.to_string()))
+            }
+        }
+        Some(serde_json::Value::String(s)) => Some(SqlBindVal::Text(s.clone())),
+        Some(other) => Some(SqlBindVal::Text(other.to_string())),
+    }
+}
+
+fn bind_sqlite_arg<'q>(
+    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    val: &'q SqlBindVal,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    match val {
+        SqlBindVal::Int(i) => query.bind(*i),
+        SqlBindVal::Float(f) => query.bind(*f),
+        SqlBindVal::Bool(b) => query.bind(*b),
+        SqlBindVal::Text(s) => query.bind(s),
+    }
+}
+
+fn bind_pg_arg<'q>(
+    query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    val: &'q SqlBindVal,
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    match val {
+        SqlBindVal::Int(i) => query.bind(*i),
+        SqlBindVal::Float(f) => query.bind(*f),
+        SqlBindVal::Bool(b) => query.bind(*b),
+        SqlBindVal::Text(s) => query.bind(s),
+    }
 }
 
 /// SQL sink: executes parameterized row inserts into the database (SQLite
@@ -1746,33 +2059,41 @@ impl SqlSink {
         } else {
             self.config.fields.clone()
         };
-        let values: Vec<String> = fields
+        // Null/missing columns are omitted from the INSERT (database
+        // defaults apply) because a typed NULL parameter is rejected by
+        // non-text columns on PostgreSQL.
+        let present: Vec<(&String, SqlBindVal)> = fields
             .iter()
-            .map(|f| {
-                record
-                    .data
-                    .get(f)
-                    .map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                    .unwrap_or_default()
-            })
+            .filter_map(|f| json_to_bind(record.data.get(f)).map(|v| (f, v)))
             .collect();
         if self.config.url.starts_with("sqlite") {
             let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
-            let sql = sqlite_insert_sql(&self.config.table, &fields);
+            if present.is_empty() {
+                sqlx::query(&format!("INSERT INTO {} DEFAULT VALUES", self.config.table))
+                    .execute(&pool)
+                    .await?;
+                return Ok(());
+            }
+            let cols: Vec<String> = present.iter().map(|(f, _)| (*f).clone()).collect();
+            let sql = sqlite_insert_sql(&self.config.table, &cols);
             let mut query = sqlx::query(&sql);
-            for v in &values {
-                query = query.bind(v);
+            for (_, v) in &present {
+                query = bind_sqlite_arg(query, v);
             }
             query.execute(&pool).await?;
         } else if self.config.url.starts_with("postgres") {
             let pool = pg_pool(&self.config.url).await?;
-            let sql = pg_insert_sql(&self.config.table, &fields);
+            if present.is_empty() {
+                sqlx::query(&format!("INSERT INTO {} DEFAULT VALUES", self.config.table))
+                    .execute(&pool)
+                    .await?;
+                return Ok(());
+            }
+            let cols: Vec<String> = present.iter().map(|(f, _)| (*f).clone()).collect();
+            let sql = pg_insert_sql(&self.config.table, &cols);
             let mut query = sqlx::query(&sql);
-            for v in &values {
-                query = query.bind(v);
+            for (_, v) in &present {
+                query = bind_pg_arg(query, v);
             }
             query.execute(&pool).await?;
         }
@@ -1892,9 +2213,9 @@ fn pg_column_value(row: &sqlx::postgres::PgRow, col: &str) -> serde_json::Value 
     serde_json::Value::Null
 }
 
-/// Point lookup against a SQL database, mapping the row columns to values.
-/// SQLite decodes every column as text (historical behavior); PostgreSQL
-/// preserves JSON types. Returns `None` when no row matches.
+/// Point lookup against a SQL database, mapping the row columns to
+/// type-preserving values (numbers stay numbers on both backends).
+/// Returns `None` when no row matches.
 pub async fn sql_lookup_key(
     url: &str,
     table: &str,
@@ -1913,8 +2234,7 @@ pub async fn sql_lookup_key(
             let mut map = serde_json::Map::new();
             for col in r.columns() {
                 let name = col.name();
-                let val: String = r.try_get(name).unwrap_or_default();
-                map.insert(name.to_string(), serde_json::Value::String(val));
+                map.insert(name.to_string(), sqlite_column_value(&r, name));
             }
             return Ok(Some(serde_json::Value::Object(map)));
         }
@@ -1938,12 +2258,17 @@ pub async fn sql_lookup_key(
     Ok(None)
 }
 
-/// Polling SQL source: every `interval` ms runs `SELECT * FROM {table}` and
-/// broadcasts each row as a [`StreamRecord`]. Mirrors the `HttpPullSource`
-/// ticker/cancellation discipline.
+/// Polling SQL source: every `interval` ms runs the configured query and
+/// broadcasts each row as a [`StreamRecord`]. Index columns (`indexFields`,
+/// plus the legacy singular pair) advance across polls: each poll renders
+/// with the current values and the last row wins per column (with `ORDER BY
+/// .. ASC` pagination for internal queries), so subsequent polls emit only
+/// newer rows — mirroring upstream incremental polling. Mirrors the
+/// `HttpPullSource` ticker/cancellation discipline.
 pub struct SqlSource {
     pub config: SqlConnectorConfig,
     pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    index: Vec<(String, serde_json::Value)>,
 }
 
 impl SqlSource {
@@ -1951,11 +2276,12 @@ impl SqlSource {
         config: SqlConnectorConfig,
         tx: tokio::sync::broadcast::Sender<StreamRecord>,
     ) -> Self {
-        Self { config, tx }
+        let index = initial_index_pairs(&config);
+        Self { config, tx, index }
     }
 
     pub fn spawn(
-        self,
+        mut self,
         mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
@@ -1999,8 +2325,10 @@ impl SqlSource {
         })
     }
 
-    async fn poll_once(&self) -> Result<Vec<StreamRecord>> {
-        let sql = format!("SELECT * FROM {}", self.config.table);
+    /// Poll once with the current index values, then advance tracked
+    /// indexes from the fetched rows (last row wins).
+    async fn poll_once(&mut self) -> Result<Vec<StreamRecord>> {
+        let sql = sql_source_query_with(&self.config, &self.index);
         if self.config.url.starts_with("sqlite") {
             let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
             let rows = sqlx::query(&sql).fetch_all(&pool).await?;
@@ -2014,6 +2342,7 @@ impl SqlSource {
                 }
                 out.push(StreamRecord::new(map.into_iter().collect()));
             }
+            advance_index(&mut self.index, &out);
             return Ok(out);
         }
         if self.config.url.starts_with("postgres") {
@@ -2029,6 +2358,7 @@ impl SqlSource {
                 }
                 out.push(StreamRecord::new(map.into_iter().collect()));
             }
+            advance_index(&mut self.index, &out);
             return Ok(out);
         }
         bail!("Unsupported SQL source URL scheme: {}", self.config.url)
@@ -2377,6 +2707,8 @@ mod tests {
             table: "t".to_string(),
             fields: vec!["id".to_string()],
             interval: 1000,
+            template_sql_query_cfg: None,
+            internal_sql_query_cfg: None,
         };
         let sink = super::SqlSink {
             config: cfg.clone(),
@@ -2385,7 +2717,7 @@ mod tests {
         data.insert("id".to_string(), json!(1));
         assert!(sink.insert_record(&StreamRecord::new(data)).await.is_err());
         assert!(super::sql_lookup_key(url, "t", "id", "1").await.is_err());
-        let src = super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
+        let mut src = super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
         assert!(src.poll_once().await.is_err());
     }
 
@@ -2421,6 +2753,306 @@ mod tests {
             temps.push(record.data.get("temp").cloned().unwrap());
         }
         assert_eq!(temps, vec![json!(10.0), json!(20.0), json!(30.0)]);
+    }
+
+    #[test]
+    fn test_sql_connector_config_documented_shape() {
+        // Documented eKuiper plugin shape: dburl + templateSqlQueryCfg.
+        let cfg: super::SqlConnectorConfig = serde_json::from_value(json!({
+            "dburl": "postgres://u:p@h/db?sslmode=disable",
+            "interval": 5000,
+            "templateSqlQueryCfg": {"templateSql": "SELECT id, val FROM rksrc"}
+        }))
+        .unwrap();
+        assert_eq!(cfg.url, "postgres://u:p@h/db?sslmode=disable");
+        assert_eq!(cfg.interval, 5000);
+        let t = cfg.template_sql_query_cfg.expect("template cfg parsed");
+        assert_eq!(t.template_sql, "SELECT id, val FROM rksrc");
+        // Native shape keeps working.
+        let native: super::SqlConnectorConfig = serde_json::from_value(json!({
+            "url": "sqlite::memory:", "table": "alerts"
+        }))
+        .unwrap();
+        assert_eq!(native.table, "alerts");
+        assert_eq!(native.interval, 1000);
+        assert!(native.template_sql_query_cfg.is_none());
+        // Internal incremental shape parses exactly as PUT by probes.
+        let inc: super::SqlConnectorConfig = serde_json::from_value(json!({
+            "dburl": "postgres://u:p@h/db?sslmode=disable",
+            "interval": 3000,
+            "internalSqlQueryCfg": {
+                "table": "rksrc",
+                "limit": 10,
+                "indexFields": [{"indexField": "id", "indexValue": 0, "indexFieldType": "bigint"}],
+            },
+        }))
+        .unwrap();
+        assert_eq!(inc.url, "postgres://u:p@h/db?sslmode=disable");
+        let inner = inc.internal_sql_query_cfg.clone().expect("internal cfg parsed");
+        assert_eq!(inner.table, "rksrc");
+        assert_eq!(inner.limit, 10);
+        assert_eq!(inner.index_fields.len(), 1);
+        assert_eq!(inner.index_fields[0].index_field, "id");
+        assert_eq!(
+            super::sql_source_query(&inc),
+            "SELECT * FROM rksrc WHERE id > 0 ORDER BY id ASC LIMIT 10"
+        );
+    }
+
+    #[test]
+    fn test_sql_source_query_builders() {
+        let base = super::SqlConnectorConfig {
+            url: "x".to_string(),
+            table: "rksrc".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(super::sql_source_query(&base), "SELECT * FROM rksrc");
+        let tpl = super::SqlConnectorConfig {
+            template_sql_query_cfg: Some(super::TemplateSqlQueryCfg {
+                template_sql: "SELECT id, val FROM rksrc".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(super::sql_source_query(&tpl), "SELECT id, val FROM rksrc");
+        let tpl_vars = super::SqlConnectorConfig {
+            template_sql_query_cfg: Some(super::TemplateSqlQueryCfg {
+                template_sql: "select * from t where a > {{.a}} and b > {{ .b }}".to_string(),
+                index_fields: vec![
+                    super::IndexFieldCfg {
+                        index_field: "a".to_string(),
+                        index_value: json!(3),
+                        ..Default::default()
+                    },
+                    super::IndexFieldCfg {
+                        index_field: "b".to_string(),
+                        index_value: json!("x'y"),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::sql_source_query(&tpl_vars),
+            "select * from t where a > 3 and b > 'x''y'"
+        );
+        let internal = super::SqlConnectorConfig {
+            internal_sql_query_cfg: Some(super::InternalSqlQueryCfg {
+                table: "Student".to_string(),
+                limit: 10,
+                index_field: "stun".to_string(),
+                index_value: json!(100),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::sql_source_query(&internal),
+            "SELECT * FROM Student WHERE stun > 100 ORDER BY stun ASC LIMIT 10"
+        );
+    }
+
+    fn sqlite_file_url(name: &str) -> String {
+        let mut p = std::env::temp_dir();
+        p.push(format!("rekuiper-{}-{}.db", name, std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        format!("sqlite://{}?mode=rwc", p.display())
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_sink_sink_preserves_float_and_poll_typed() {
+        let url = sqlite_file_url("sinkfloat");
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE rksink(eid TEXT PRIMARY KEY, temp REAL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+        let sink = super::SqlSink {
+            config: super::SqlConnectorConfig {
+                url: url.clone(),
+                table: "rksink".to_string(),
+                fields: vec!["eid".to_string(), "temp".to_string()],
+                ..Default::default()
+            },
+        };
+        let mut data = HashMap::new();
+        data.insert("eid".to_string(), json!("row-pg1"));
+        data.insert("temp".to_string(), json!(33.5));
+        sink.insert_record(&StreamRecord::new(data)).await.unwrap();
+        // REAL column holds a real number, not text.
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        let row: (String, f64) = sqlx::query_as("SELECT eid, temp FROM rksink WHERE eid='row-pg1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row, ("row-pg1".to_string(), 33.5));
+        let typeof_temp: String = sqlx::query_scalar("SELECT typeof(temp) FROM rksink")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(typeof_temp, "real");
+        drop(pool);
+        // Polling source decodes typed rows.
+        let mut src = super::SqlSource::new(
+            super::SqlConnectorConfig {
+                url,
+                table: "rksink".to_string(),
+                ..Default::default()
+            },
+            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+        );
+        let rows = src.poll_once().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].data.get("temp"), Some(&json!(33.5)));
+        assert!(rows[0].data.get("temp").unwrap().is_number());
+        // Point lookup decodes typed values too.
+        let hit = super::sql_lookup_key(&src.config.url, "rksink", "eid", "row-pg1")
+            .await
+            .unwrap()
+            .expect("lookup hits");
+        assert_eq!(hit.get("temp"), Some(&json!(33.5)));
+        assert!(hit.get("temp").unwrap().is_number());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_sink_omits_null_columns() {
+        // Null/missing columns are omitted from the INSERT (database
+        // defaults apply) instead of binding a typed NULL.
+        let url = sqlite_file_url("sinknulls");
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE rknull(eid TEXT PRIMARY KEY, temp REAL NULL, flag INTEGER NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+        let sink = super::SqlSink {
+            config: super::SqlConnectorConfig {
+                url: url.clone(),
+                table: "rknull".to_string(),
+                fields: vec!["eid".to_string(), "temp".to_string(), "flag".to_string()],
+                ..Default::default()
+            },
+        };
+        let mut all_null = HashMap::new();
+        all_null.insert("eid".to_string(), json!("n1"));
+        all_null.insert("temp".to_string(), serde_json::Value::Null);
+        all_null.insert("flag".to_string(), serde_json::Value::Null);
+        sink.insert_record(&StreamRecord::new(all_null)).await.unwrap();
+        let mut mixed = HashMap::new();
+        mixed.insert("eid".to_string(), json!("n2"));
+        mixed.insert("temp".to_string(), json!(21));
+        mixed.insert("flag".to_string(), json!(true));
+        sink.insert_record(&StreamRecord::new(mixed)).await.unwrap();
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        let rows: Vec<(String, Option<f64>, Option<i64>)> =
+            sqlx::query_as("SELECT eid, temp, flag FROM rknull ORDER BY eid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("n1".to_string(), None, None),
+                ("n2".to_string(), Some(21.0), Some(1)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_lookup_typed_values() {
+        let url = sqlite_file_url("lookuptyped");
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE rklook(id INTEGER PRIMARY KEY, name TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO rklook VALUES (1, 'one'), (2, 'two')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+        let hit = super::sql_lookup_key(&url, "rklook", "id", "1")
+            .await
+            .unwrap()
+            .expect("lookup hits");
+        assert_eq!(hit.get("id"), Some(&json!(1)));
+        assert!(hit.get("id").unwrap().is_number());
+        assert_eq!(hit.get("name"), Some(&json!("one")));
+    }
+
+    fn src_ids(rows: &[super::StreamRecord]) -> Vec<i64> {
+        let mut ids: Vec<i64> = rows
+            .iter()
+            .filter_map(|r| r.data.get("id").and_then(|v| v.as_i64()))
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_source_advances_index_across_polls() {
+        // Incremental polling: each poll emits only rows newer than the
+        // tracked index (last row wins, ORDER BY .. ASC pagination).
+        let url = sqlite_file_url("srcindex");
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE rksrc(id INTEGER PRIMARY KEY, val INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO rksrc VALUES (1,10),(2,20),(3,30)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+        let mut src = super::SqlSource::new(
+            super::SqlConnectorConfig {
+                url: url.clone(),
+                interval: 100,
+                internal_sql_query_cfg: Some(super::InternalSqlQueryCfg {
+                    table: "rksrc".to_string(),
+                    limit: 10,
+                    index_fields: vec![super::IndexFieldCfg {
+                        index_field: "id".to_string(),
+                        index_value: json!(0),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+        );
+        assert_eq!(src_ids(&src.poll_once().await.unwrap()), vec![1, 2, 3]);
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("INSERT INTO rksrc VALUES (4,40),(5,50)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+        assert_eq!(src_ids(&src.poll_once().await.unwrap()), vec![4, 5]);
+        assert!(src.poll_once().await.unwrap().is_empty());
+        // Template variant with the same index contract.
+        let mut tsrc = super::SqlSource::new(
+            super::SqlConnectorConfig {
+                url,
+                interval: 100,
+                template_sql_query_cfg: Some(super::TemplateSqlQueryCfg {
+                    template_sql: "select * from rksrc where id > {{.id}}".to_string(),
+                    index_fields: vec![super::IndexFieldCfg {
+                        index_field: "id".to_string(),
+                        index_value: json!(3),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+        );
+        assert_eq!(src_ids(&tsrc.poll_once().await.unwrap()), vec![4, 5]);
     }
 
     #[test]

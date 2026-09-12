@@ -1,4 +1,23 @@
-# Release Notes - rekuiper v0.423-beta
+# Release Notes - rekuiper v0.424-beta
+
+`rekuiper` v0.424-beta fixes every documented compatibility defect found in the
+0.423 evaluation against official LF Edge eKuiper 2.4.1: PostgreSQL float
+sinks, SQL polling sources and lookup joins, windowed stream-stream joins,
+array index/slice syntax, `json_path_query` wildcards, ruletest SSE on the
+documented port 10081 with lossless replay, process-restart delivery resume,
+CLI parity (`describe`/`-f`/`export`/`import`/`gettopo`/`validate`), and the
+Docker-default `restIp`. See CHANGELOG for the per-defect list.
+
+Built by **[I-Dacs Labs](https://i-dacs.com)**. Released under the permissive
+**MIT License** (and dual Apache-2.0).
+
+- Docker image: `ankurkrp/rekuiper:0.424-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.424-beta`)
+- Precompiled binary targets: Linux x86_64, Windows x86_64, macOS x86_64 & Apple Silicon aarch64.
+
+---
+
+# Release Notes - rekuiper v0.423-beta (history)
 
 `rekuiper` v0.423-beta delivers complete, verified black-box compatibility parity with LF Edge eKuiper. Built by **[I-Dacs Labs](https://i-dacs.com)**, this release resolves dynamic rule activation on start/restart, supports nested `{ "content": "..." }` and stringified rule map imports for both ruleset and configuration endpoints, and achieves clean zero-defect pass parity against upstream eKuiper.
 

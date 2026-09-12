@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.424.0-beta] - 2026-09-12
+
+### Fixed (documented parity defects, each proven against official eKuiper 2.4.1)
+- **PostgreSQL sink binds FLOAT as REAL (`D-PG1`)**: `SqlSink` now binds typed parameters (int/float/bool/text/null) instead of stringifying every value, so `double precision` columns accept float writes.
+- **SQL source / lookup accept documented plugin config (`D-PG2`, `D-PG3`)**: `SqlConnectorConfig` accepts the documented `dburl` + `templateSqlQueryCfg` / `internalSqlQueryCfg` shape (with `{{.field}}` rendering and TABLE→DATASOURCE→name fallback); polling sources emit rows and lookup joins resolve instead of silently yielding zero. SQLite lookups decode type-preserving values.
+- **Windowed stream-stream JOINs (`D-JOIN`)**: count/tumbling/hopping/sliding windows fan in every joined stream (sources bootstrapped per rule), match `ON` conditions over namespaced rows (FROM/JOIN `AS` aliases supported), and project matches — including LEFT/RIGHT/FULL/CROSS preservation and per-row output for plain SELECTs.
+- **Array index/slice syntax (`D-ARR`)**: new `Expr::Index`/`Expr::Slice` with postfix `a[0]`, `a[-1]`, `a[l:h]`, `a[:h]`, `a[l:]`, `a[:]` (0-based, end-exclusive, clamped) per the JSON-expressions doc.
+- **`json_path_query` wildcards (`D-JSONPATH`)**: `$` root + `[*]` fan-out return match arrays; scalar/pointer behavior unchanged.
+- **Ruletest SSE on documented port 10081 (`D-SSE`)**: sessions report the configured `httpServerPort` (default 10081, served on `httpServerIp:httpServerPort` plus the main router's `/test/:id`); paced `interval`/`loop` replay with 10-minute cap; history buffering so late subscribers lose nothing; unknown sessions 404.
+- **Process-restart delivery resume (`D-RESTART`)**: connection/source/sink configs persist in KV and reload before rule restore, so resumed rules resolve their CONF_KEYs instead of falling back to loopback defaults.
+- **CLI parity (`D-CLI`)**: `describe rule/script/service/schema/plugin`, `create table/script/schema/service/plugin` plus `-f` file forms for stream/table/rule, `gettopo`/`validate` rule, `export/import` ruleset/data, bare `getstatus import`; unknown entities exit non-zero.
+- **Docker default `restIp` (`D-RESTIP`)**: shipped `etc/kuiper.yaml` binds `0.0.0.0` like the documented default, so mapped `-p 9081:9081` is reachable; `httpServerIp`/`httpServerPort` settings added (env-overridable).
+
 ## [0.423.0-beta] - 2026-09-11
 
 ### Highlights

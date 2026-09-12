@@ -176,6 +176,21 @@ fn test_join_syntax_variants() {
     assert_eq!(stmt.joins.len(), 2);
     assert_eq!(stmt.joins[0].target, "t");
     assert_eq!(stmt.joins[1].target, "u");
+
+    // Documented alias shapes: FROM/JOIN targets accept AS and bare aliases.
+    let stmt = parse(
+        "SELECT a.id AS id FROM s AS a INNER JOIN t AS b ON a.id = b.id GROUP BY CountWindow(2)",
+    );
+    assert_eq!(stmt.from, "s");
+    assert_eq!(stmt.from_alias.as_deref(), Some("a"));
+    assert_eq!(stmt.joins[0].target, "t");
+    assert_eq!(stmt.joins[0].alias.as_deref(), Some("b"));
+    let stmt = parse("SELECT * FROM s a LEFT JOIN t b ON a.id = b.id");
+    assert_eq!(stmt.from_alias.as_deref(), Some("a"));
+    assert_eq!(stmt.joins[0].alias.as_deref(), Some("b"));
+    // Clause keywords never become aliases.
+    let stmt = parse("SELECT * FROM s WHERE s.id = 1");
+    assert_eq!(stmt.from_alias, None);
 }
 
 // ---------------------------------------------------------------------------

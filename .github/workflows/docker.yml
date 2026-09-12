@@ -33,5 +33,5 @@ jobs:
           file: ./deploy/docker/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.423-beta
+            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.424-beta
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:latest

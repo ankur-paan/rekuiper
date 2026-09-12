@@ -34,6 +34,22 @@ pub enum Expr {
         parent: Box<Expr>,
         field: String,
     },
+    /// Postfix index: `arr[0]`, `arr[-1]`, `obj["k"]`. Zero-based for
+    /// arrays (negative counts back from the end); a string index on an
+    /// object is a field lookup. Mirrors
+    /// https://ekuiper.org/docs/en/latest/sqls/json_expr.html#index-expression.
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// Postfix slice: `arr[from:to)` (end-exclusive, negatives from the
+    /// end, omitted bound means array start/end). Mirrors
+    /// https://ekuiper.org/docs/en/latest/sqls/json_expr.html#slicing.
+    Slice {
+        base: Box<Expr>,
+        lo: Option<Box<Expr>>,
+        hi: Option<Box<Expr>>,
+    },
     Call {
         name: String,
         args: Vec<Expr>,
@@ -129,6 +145,9 @@ pub enum JoinType {
 pub struct JoinClause {
     pub join_type: JoinType,
     pub target: String,
+    /// Optional `AS alias` (or bare alias) for the join target; qualified
+    /// references may use either the target name or the alias.
+    pub alias: Option<String>,
     pub on: Option<Expr>,
 }
 
@@ -144,6 +163,8 @@ pub struct SelectStmt {
     /// Output alias per field (`None` when the field has no `AS alias`).
     pub field_aliases: Vec<Option<String>>,
     pub from: String,
+    /// Optional `AS alias` (or bare alias) for the FROM source.
+    pub from_alias: Option<String>,
     pub joins: Vec<JoinClause>,
     pub where_clause: Option<Expr>,
     pub group_by: Vec<Expr>,

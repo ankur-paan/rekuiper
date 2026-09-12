@@ -19,6 +19,14 @@ pub struct RuleState {
 
 pub struct Evaluator;
 
+/// One compiled step of a dot-notation JSON path.
+#[derive(Debug, Clone, PartialEq)]
+enum JsonPathStep {
+    Field(String),
+    Index(usize),
+    Wildcard,
+}
+
 impl Evaluator {
     /// Copy of a statement with any trailing `UNION` detached, so a single
     /// branch can be evaluated without recursing into the set operation.
@@ -211,7 +219,10 @@ impl Evaluator {
         Some(output)
     }
 
-    fn is_aggregate_call(name: &str) -> bool {
+    /// True for window/batch aggregate function names (`count`, `avg`, …).
+    /// Used by the server to decide between per-row projection and batch
+    /// aggregation for windowed JOIN outputs.
+    pub fn is_aggregate_call(name: &str) -> bool {
         matches!(
             name.to_ascii_lowercase().as_str(),
             "count"
@@ -298,6 +309,10 @@ impl Evaluator {
                     None => Value::Null,
                 }
             }
+            Expr::Index { .. } | Expr::Slice { .. } => match records.first() {
+                Some(rec) => Self::eval_val(expr, rec),
+                None => Value::Null,
+            },
             Expr::Call { name, args } => {
                 if Self::is_aggregate_call(name) {
                     return Self::eval_aggregate_call(name, args, records);
@@ -555,6 +570,21 @@ impl Evaluator {
                     Value::Object(map) => map.get(field).cloned().unwrap_or(Value::Null),
                     _ => Value::Null,
                 }
+            }
+            Expr::Index { base, index } => {
+                let b = Self::eval_stateful_expr(base, record, state);
+                let i = Self::eval_stateful_expr(index, record, state);
+                Self::index_value(&b, &i)
+            }
+            Expr::Slice { base, lo, hi } => {
+                let b = Self::eval_stateful_expr(base, record, state);
+                let l = lo
+                    .as_ref()
+                    .map(|e| Self::eval_stateful_expr(e, record, state));
+                let h = hi
+                    .as_ref()
+                    .map(|e| Self::eval_stateful_expr(e, record, state));
+                Self::slice_value(&b, l.as_ref(), h.as_ref())
             }
             Expr::BinaryOp { left, op, right } => {
                 let l = Self::eval_stateful_expr(left, record, state);
@@ -1461,6 +1491,8 @@ impl Evaluator {
                     format!("{}.{}", parent_name, field)
                 }
             }
+            Expr::Index { base, .. } => Self::column_name(base, idx),
+            Expr::Slice { base, .. } => Self::column_name(base, idx),
             Expr::Literal(v) => match v {
                 Value::Null => "NULL".to_string(),
                 Value::Bool(b) => b.to_string(),
@@ -1557,6 +1589,8 @@ impl Evaluator {
     pub fn infer_expr_type(expr: &Expr) -> &'static str {
         match expr {
             Expr::Wildcard | Expr::Identifier(_) | Expr::FieldAccess { .. } => "any",
+            Expr::Index { .. } => "any",
+            Expr::Slice { .. } => "array",
             Expr::Literal(val) => match val {
                 Value::Bool(_) => "boolean",
                 Value::Number(n) => {
@@ -1713,6 +1747,17 @@ impl Evaluator {
                     Value::Object(map) => map.get(field).cloned().unwrap_or(Value::Null),
                     _ => Value::Null,
                 }
+            }
+            Expr::Index { base, index } => {
+                let b = Self::eval_val(base, record);
+                let i = Self::eval_val(index, record);
+                Self::index_value(&b, &i)
+            }
+            Expr::Slice { base, lo, hi } => {
+                let b = Self::eval_val(base, record);
+                let l = lo.as_ref().map(|e| Self::eval_val(e, record));
+                let h = hi.as_ref().map(|e| Self::eval_val(e, record));
+                Self::slice_value(&b, l.as_ref(), h.as_ref())
             }
             Expr::BinaryOp { left, op, right } => {
                 let l = Self::eval_val(left, record);
@@ -2380,6 +2425,78 @@ impl Evaluator {
             Value::Bool(b) => b.to_string(),
             Value::Array(_) | Value::Object(_) => serde_json::to_string(v).unwrap_or_default(),
         }
+    }
+
+    /// Normalize a bracket bound to an integer offset. Numbers truncate
+    /// toward zero; numeric strings parse; anything else is invalid.
+    fn as_index_i64(v: &Value) -> Option<i64> {
+        match v {
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Some(i)
+                } else if let Some(u) = n.as_u64() {
+                    i64::try_from(u).ok()
+                } else {
+                    n.as_f64()
+                        .filter(|f| f.is_finite())
+                        .map(|f| f.trunc() as i64)
+                }
+            }
+            Value::String(s) => s.trim().parse::<i64>().ok(),
+            _ => None,
+        }
+    }
+
+    /// Postfix index evaluation (0-based; negative counts back from the
+    /// end; string keys look up object fields). Out-of-range and
+    /// type mismatches yield Null.
+    fn index_value(base: &Value, index: &Value) -> Value {
+        match base {
+            Value::Array(arr) => {
+                let Some(i) = Self::as_index_i64(index) else {
+                    return Value::Null;
+                };
+                let len = arr.len() as i64;
+                let pos = if i >= 0 { i } else { len + i };
+                if pos < 0 || pos >= len {
+                    return Value::Null;
+                }
+                arr[pos as usize].clone()
+            }
+            Value::Object(map) => match index {
+                Value::String(k) => map.get(k).cloned().unwrap_or(Value::Null),
+                _ => Value::Null,
+            },
+            _ => Value::Null,
+        }
+    }
+
+    /// Postfix slice evaluation: `base[lo:hi)` with end-exclusive `hi`,
+    /// negatives from the end, omitted bounds meaning array start/end.
+    /// Bounds clamp into range; an empty/inverted range yields `[]`.
+    fn slice_value(base: &Value, lo: Option<&Value>, hi: Option<&Value>) -> Value {
+        let Value::Array(arr) = base else {
+            return Value::Null;
+        };
+        let len = arr.len() as i64;
+        let norm = |v: Option<&Value>, default: i64| -> Option<i64> {
+            match v {
+                None => Some(default),
+                Some(x) => {
+                    let i = Self::as_index_i64(x)?;
+                    Some(if i >= 0 { i } else { len + i })
+                }
+            }
+        };
+        let (Some(mut l), Some(mut h)) = (norm(lo, 0), norm(hi, len)) else {
+            return Value::Null;
+        };
+        l = l.clamp(0, len);
+        h = h.clamp(0, len);
+        if l >= h {
+            return Value::Array(Vec::new());
+        }
+        Value::Array(arr[l as usize..h as usize].to_vec())
     }
 
     // ---------- math functions ----------
@@ -3757,6 +3874,91 @@ impl Evaluator {
 
     // ---------- JSON path functions ----------
 
+    /// Compile a dot-notation path (`$.a.b[0]`, `a.Group[*].last`) into
+    /// steps. A leading `$` root is identity. Returns `None` for malformed
+    /// bracket expressions (filters, quotes) — those simply never match.
+    fn compile_json_path(path: &str) -> Option<Vec<JsonPathStep>> {
+        let mut p = path.trim();
+        if p.is_empty() {
+            return Some(Vec::new());
+        }
+        p = p.strip_prefix('$').unwrap_or(p);
+        p = p.strip_prefix('.').unwrap_or(p);
+        if p.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut steps = Vec::new();
+        for seg in p.split('.') {
+            if seg.is_empty() {
+                return None;
+            }
+            let (name, mut rest) = match seg.find('[') {
+                None => (seg, ""),
+                Some(pos) => seg.split_at(pos),
+            };
+            // A bare numeric segment also indexes arrays.
+            if !name.is_empty() {
+                steps.push(JsonPathStep::Field(name.to_string()));
+            }
+            while let Some(inner) = rest.strip_prefix('[') {
+                let end = inner.find(']')?;
+                let token = &inner[..end];
+                if token == "*" {
+                    steps.push(JsonPathStep::Wildcard);
+                } else if let Ok(i) = token.parse::<usize>() {
+                    steps.push(JsonPathStep::Index(i));
+                } else {
+                    return None;
+                }
+                rest = &inner[end + 1..];
+            }
+            if !rest.is_empty() {
+                return None;
+            }
+        }
+        Some(steps)
+    }
+
+    /// Collect every value a compiled path selects. `[*]` fans out over
+    /// array elements (objects yield Null for a wildcard step).
+    fn json_collect<'v>(val: &'v Value, steps: &[JsonPathStep], out: &mut Vec<&'v Value>) {
+        if steps.is_empty() {
+            out.push(val);
+            return;
+        }
+        match &steps[0] {
+            JsonPathStep::Field(name) => match val {
+                Value::Object(map) => {
+                    if let Some(next) = map.get(name) {
+                        Self::json_collect(next, &steps[1..], out);
+                    }
+                }
+                Value::Array(arr) => {
+                    if let Ok(i) = name.parse::<usize>() {
+                        if let Some(next) = arr.get(i) {
+                            Self::json_collect(next, &steps[1..], out);
+                        }
+                    }
+                }
+                _ => {}
+            },
+            JsonPathStep::Index(i) => {
+                if let Value::Array(arr) = val {
+                    if let Some(next) = arr.get(*i) {
+                        Self::json_collect(next, &steps[1..], out);
+                    }
+                }
+            }
+            JsonPathStep::Wildcard => {
+                if let Value::Array(arr) = val {
+                    for next in arr {
+                        Self::json_collect(next, &steps[1..], out);
+                    }
+                }
+            }
+        }
+    }
+
     /// Split a dot-notation segment like `a[0][1]` into its field name and
     /// index list. Malformed brackets fall back to the literal segment.
     fn split_path_segment(seg: &str) -> (&str, Vec<usize>) {
@@ -3835,9 +4037,23 @@ impl Evaluator {
         let Some(path) = args[1].as_str() else {
             return Value::Null;
         };
-        Self::json_resolve_path(&args[0], path)
-            .cloned()
-            .unwrap_or(Value::Null)
+        if path.trim().starts_with('/') {
+            return Self::json_resolve_path(&args[0], path)
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
+        let Some(steps) = Self::compile_json_path(path) else {
+            return Value::Null;
+        };
+        let mut out: Vec<&Value> = Vec::new();
+        Self::json_collect(&args[0], &steps, &mut out);
+        if out.is_empty() {
+            return Value::Null;
+        }
+        if steps.iter().any(|s| matches!(s, JsonPathStep::Wildcard)) {
+            return Value::Array(out.into_iter().cloned().collect());
+        }
+        out.into_iter().next().cloned().unwrap_or(Value::Null)
     }
 
     fn func_json_path_query_first(args: &[Value]) -> Value {
@@ -3847,7 +4063,20 @@ impl Evaluator {
         let Some(path) = args[1].as_str() else {
             return Value::Null;
         };
-        match Self::json_resolve_path(&args[0], path) {
+        if path.trim().starts_with('/') {
+            return match Self::json_resolve_path(&args[0], path) {
+                Some(Value::Array(arr)) => arr.first().cloned().unwrap_or(Value::Null),
+                Some(v) => v.clone(),
+                None => Value::Null,
+            };
+        }
+        let Some(steps) = Self::compile_json_path(path) else {
+            return Value::Null;
+        };
+        let mut out: Vec<&Value> = Vec::new();
+        Self::json_collect(&args[0], &steps, &mut out);
+        match out.into_iter().next() {
+            // Arrays collapse to their first element; scalars pass through.
             Some(Value::Array(arr)) => arr.first().cloned().unwrap_or(Value::Null),
             Some(v) => v.clone(),
             None => Value::Null,
@@ -3861,7 +4090,15 @@ impl Evaluator {
         let Some(path) = args[1].as_str() else {
             return Value::Bool(false);
         };
-        Value::Bool(Self::json_resolve_path(&args[0], path).is_some())
+        if path.trim().starts_with('/') {
+            return Value::Bool(Self::json_resolve_path(&args[0], path).is_some());
+        }
+        let Some(steps) = Self::compile_json_path(path) else {
+            return Value::Bool(false);
+        };
+        let mut out: Vec<&Value> = Vec::new();
+        Self::json_collect(&args[0], &steps, &mut out);
+        Value::Bool(!out.is_empty())
     }
 
     fn func_json_map(args: &[Value]) -> Value {

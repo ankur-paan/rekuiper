@@ -7,7 +7,10 @@ use rekuiper_core::{
     PluginManager, RuleManager, SchemaManager, SqliteKvStore, StreamBus, StreamManager,
     TableManager,
 };
-use routes::{create_router, prometheus_metrics_handler, restore_running_rules, AppState};
+use routes::{
+    create_router, load_config_maps, prometheus_metrics_handler, restore_running_rules,
+    test_sse_router, AppState,
+};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -63,9 +66,40 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         services: routes::create_default_services(),
         js_udfs: routes::create_default_js_udfs(),
         latest_import_status: Arc::new(RwLock::new(routes::default_import_status())),
+        kv: Some(kv.clone()),
     };
 
+    // Restored connection/source/sink configs must precede rule restore so
+    // resumed rules resolve their CONF_KEYs (brokers, DB URLs) instead of
+    // falling back to loopback defaults with silent zero-delivery.
+    load_config_maps(&state).await;
     restore_running_rules(&state).await;
+
+    // Dedicated ruletest SSE listener serving the documented
+    // `http://<httpServerIp>:<httpServerPort>/test/:id` endpoint. A bind
+    // failure only warns (the main router still serves `/test/:id`); the
+    // reported ruletest port always names this configured endpoint.
+    {
+        let sse_state = state.clone();
+        let sse_ip = config.basic.http_server_ip.clone();
+        let sse_port = config.basic.http_server_port;
+        tokio::spawn(async move {
+            let addr: SocketAddr = format!("{}:{}", sse_ip, sse_port)
+                .parse()
+                .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], sse_port)));
+            match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    tracing::info!("Serving ruletest SSE on port http://{}/test", addr);
+                    if let Err(e) = axum::serve(listener, test_sse_router(sse_state)).await {
+                        tracing::warn!("Ruletest SSE server error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to bind ruletest SSE port {}: {}", sse_port, e);
+                }
+            }
+        });
+    }
 
     let app = create_router(state.clone())
         .layer(CorsLayer::permissive())

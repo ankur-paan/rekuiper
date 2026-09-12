@@ -293,6 +293,9 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| anyhow::anyhow!("Expected stream name after FROM"))?;
         self.skip_whitespace();
         self.pos += from.len();
+        // Optional source alias: `FROM s AS a` or `FROM s a`. Clause
+        // keywords never count as aliases.
+        let from_alias = self.parse_optional_alias()?;
 
         // Optional JOIN clauses: [LEFT|RIGHT|FULL|CROSS|INNER] [OUTER] JOIN
         // <target> [ON <condition>], one or more in sequence.
@@ -352,12 +355,14 @@ impl<'a> Parser<'a> {
                 None => bail!("Expected join target after JOIN"),
             };
             let mut on = None;
+            let alias = self.parse_optional_alias()?;
             if self.match_keyword("ON") {
                 on = Some(self.parse_expr()?);
             }
             joins.push(JoinClause {
                 join_type,
                 target,
+                alias,
                 on,
             });
         }
@@ -458,6 +463,7 @@ impl<'a> Parser<'a> {
             fields,
             field_aliases,
             from,
+            from_alias,
             joins,
             where_clause,
             group_by,
@@ -1178,12 +1184,124 @@ impl<'a> Parser<'a> {
                         parent: Box::new(expr),
                         field,
                     };
+                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('[') {
+                    // Postfix index/slice: `a[0]`, `a[-1]`, `a[l:h]`,
+                    // `a[:h]`, `a[l:]`, `a[:]`. Bounds are expressions
+                    // (e.g. `children[x+1:y]`), mirroring eKuiper slicing.
+                    self.pos += 1;
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
+                        self.pos += 1;
+                        self.skip_whitespace();
+                        let hi = if self.pos < self.input.len()
+                            && self.input[self.pos..].starts_with(']')
+                        {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
+                        self.skip_whitespace();
+                        self.expect_char(']')?;
+                        expr = Expr::Slice {
+                            base: Box::new(expr),
+                            lo: None,
+                            hi,
+                        };
+                    } else {
+                        let first = self.parse_expr()?;
+                        self.skip_whitespace();
+                        if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
+                            self.pos += 1;
+                            self.skip_whitespace();
+                            let hi = if self.pos < self.input.len()
+                                && self.input[self.pos..].starts_with(']')
+                            {
+                                None
+                            } else {
+                                Some(Box::new(self.parse_expr()?))
+                            };
+                            self.skip_whitespace();
+                            self.expect_char(']')?;
+                            expr = Expr::Slice {
+                                base: Box::new(expr),
+                                lo: Some(Box::new(first)),
+                                hi,
+                            };
+                        } else {
+                            self.expect_char(']')?;
+                            expr = Expr::Index {
+                                base: Box::new(expr),
+                                index: Box::new(first),
+                            };
+                        }
+                    }
                 } else {
                     break;
                 }
             }
             Ok(expr)
         }
+    }
+
+    /// Optional source alias after FROM/JOIN targets: `AS a` or bare `a`.
+    /// Clause keywords never count as aliases.
+    fn parse_optional_alias(&mut self) -> Result<Option<String>> {
+        self.skip_whitespace();
+        if self.match_keyword("AS") {
+            self.skip_whitespace();
+            let name = self
+                .peek_word()
+                .ok_or_else(|| anyhow::anyhow!("Expected alias after AS"))?;
+            self.skip_whitespace();
+            self.pos += name.len();
+            return Ok(Some(name));
+        }
+        const RESERVED: &[&str] = &[
+            "WHERE",
+            "GROUP",
+            "ORDER",
+            "LIMIT",
+            "HAVING",
+            "JOIN",
+            "INNER",
+            "LEFT",
+            "RIGHT",
+            "FULL",
+            "CROSS",
+            "OUTER",
+            "ON",
+            "UNION",
+            "ALL",
+            "SELECT",
+            "FROM",
+            "AS",
+            "DESC",
+            "ASC",
+            "OVER",
+            "PARTITION",
+            "BY",
+            "BETWEEN",
+            "IN",
+            "LIKE",
+            "IS",
+            "NOT",
+            "NULL",
+            "AND",
+            "OR",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+        ];
+        if let Some(w) = self.peek_word() {
+            if !RESERVED.iter().any(|r| w.eq_ignore_ascii_case(r)) {
+                self.skip_whitespace();
+                self.pos += w.len();
+                return Ok(Some(w));
+            }
+        }
+        Ok(None)
     }
 
     /// Parse a CASE expression. Called after the `CASE` keyword is consumed.
