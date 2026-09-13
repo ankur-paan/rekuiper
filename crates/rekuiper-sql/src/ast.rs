@@ -118,6 +118,15 @@ pub enum WindowDef {
         size: usize,
         interval: Option<usize>,
     },
+    /// `SESSIONWINDOW(unit, maxDuration, timeout)`, eKuiper argument order:
+    /// the window opens at the first event, extends while events arrive
+    /// within `timeout`, and is cut at a natural-time `max_duration` check
+    /// once it has lasted at least `max_duration`.
+    Session {
+        unit: TimeUnit,
+        max_duration: u64,
+        timeout: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

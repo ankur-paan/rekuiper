@@ -2818,9 +2818,7 @@ async fn test_hopping_window_overlapping_execution() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    async fn recv_output(
-        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
-    ) -> serde_json::Value {
+    async fn recv_output(rx: &mut rekuiper_core::StreamReceiver) -> serde_json::Value {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timed out waiting for window output")
@@ -2929,9 +2927,7 @@ async fn test_sliding_window_event_triggered_execution() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    async fn recv_output(
-        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
-    ) -> serde_json::Value {
+    async fn recv_output(rx: &mut rekuiper_core::StreamReceiver) -> serde_json::Value {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timed out waiting for window output")
@@ -3030,9 +3026,7 @@ async fn test_count_window_hopping_overlap() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    async fn recv_output(
-        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
-    ) -> serde_json::Value {
+    async fn recv_output(rx: &mut rekuiper_core::StreamReceiver) -> serde_json::Value {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timed out waiting for window output")
@@ -3160,9 +3154,7 @@ async fn test_event_time_watermark_and_late_tolerance() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    async fn recv_output(
-        rx: &mut tokio::sync::broadcast::Receiver<rekuiper_core::StreamRecord>,
-    ) -> serde_json::Value {
+    async fn recv_output(rx: &mut rekuiper_core::StreamReceiver) -> serde_json::Value {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timed out waiting for window output")

@@ -1,3 +1,4 @@
+use crate::sink_cache::{self, CacheConfig, ResendPriority, SinkCache};
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -18,13 +19,16 @@ use rekuiper_connectors::{
     SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
-    model::{compile_graph_to_sql_and_actions, SchemaDefinition, StreamField, StreamRecord},
-    KvStore, PluginDefinition, PluginManager, RuleDefinition, RuleManager, SchemaManager,
-    StreamBus, StreamDefinition, StreamManager, TableDefinition, TableManager,
+    model::{
+        compile_graph_to_sql_and_actions, RuleStatus, SchemaDefinition, StreamField, StreamRecord,
+    },
+    KvStore, PluginDefinition, PluginManager, RuleCounters, RuleDefinition, RuleManager,
+    SchemaManager, StreamBus, StreamDefinition, StreamManager, StreamReceiver, TableDefinition,
+    TableManager, MAX_HTTP_BATCH_RECORDS,
 };
 use rekuiper_sql::{
-    builtin_function_metadata, is_builtin_function, Evaluator, Expr, JoinClause, JoinType, Parser,
-    RuleState, SelectStmt, StreamColumn, TimeUnit, WindowDef,
+    builtin_function_metadata, is_builtin_function, Evaluator, Expr, IncrementalWindow, JoinClause,
+    JoinType, Parser, RuleState, SelectStmt, StreamColumn, TimeUnit, WindowDef,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1207,8 +1211,18 @@ async fn update_stream(
 
 /// HTTP push source following the eKuiper REST API.
 ///
-/// Accepts either a single JSON object or an array of JSON objects and
-/// publishes each one to the stream bus.
+/// Bounded lossless admission: the whole request is decoded and validated
+/// BEFORE any record is admitted; the stream handle is resolved once; then
+/// the batch is admitted with reserve-then-commit, accept-once semantics
+/// (`StreamBus::publish_batch`): records stay in order and contiguous on
+/// every subscriber, and the handler awaits downstream capacity. A `2xx`
+/// means accepted into the in-memory pipeline, not durable delivery.
+/// Batches larger than `MAX_HTTP_BATCH_RECORDS` are rejected with `413` and
+/// malformed batches with `400`, both before admission. A `503` is returned
+/// only when every subscriber closed before any record was committed, so
+/// every non-2xx response admitted zero records and is safe to retry. There
+/// is no timeout-based partial failure: overload manifests as slower `2xx`
+/// responses, never silent loss with success acknowledgements.
 async fn push_stream_data(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -1230,6 +1244,22 @@ async fn push_stream_data(
         }
     };
 
+    if objects.len() > MAX_HTTP_BATCH_RECORDS {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Batch of {} records exceeds limit of {}",
+                objects.len(),
+                MAX_HTTP_BATCH_RECORDS
+            ),
+        )
+            .into_response();
+    }
+
+    // Validate the complete batch before admitting anything: every item must
+    // be a JSON object. A 400 here admits zero records, so a client retry
+    // cannot duplicate a silently admitted prefix.
+    let mut records = Vec::with_capacity(objects.len());
     for item in objects {
         let Value::Object(map) = item else {
             return (
@@ -1239,12 +1269,25 @@ async fn push_stream_data(
                 .into_response();
         };
         let data: HashMap<String, Value> = map.into_iter().collect();
-        let record = rekuiper_core::model::StreamRecord::new(data);
-        // No subscribers (e.g. no rules yet) is fine for ingestion.
-        let _ = state.stream_bus.publish(&name, record);
+        records.push(rekuiper_core::model::StreamRecord::new(data));
     }
 
-    (StatusCode::OK, "Data ingested successfully.\n").into_response()
+    // Resolve the stream handle once per request (no per-row global locks).
+    let sender = state.stream_bus.get_or_create(&name);
+    if records.is_empty() {
+        return (StatusCode::OK, "Data ingested successfully.\n").into_response();
+    }
+    // Backpressure reaches HTTP here: await capacity on every subscriber.
+    // No subscribers (e.g. no rules yet) is fine for ingestion.
+    match sender.send_batch(records).await {
+        Ok(_) => (StatusCode::OK, "Data ingested successfully.\n").into_response(),
+        Err(rekuiper_core::PublishError::Closed) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Stream subscribers closed before admission; no records were admitted\n",
+        )
+            .into_response(),
+        Err(_) => (StatusCode::OK, "Data ingested successfully.\n").into_response(),
+    }
 }
 
 async fn list_tables(State(state): State<AppState>) -> impl IntoResponse {
@@ -1553,6 +1596,7 @@ async fn create_rule(
 fn resolve_mqtt_source(
     stream_manager: &StreamManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    schemas: &SchemaManager,
     stream_name: &str,
     rule_id: &str,
 ) -> Option<MqttConfig> {
@@ -1569,6 +1613,11 @@ fn resolve_mqtt_source(
         qos: 0,
         username: None,
         password: None,
+        protocol_version: None,
+        clean_session: None,
+        keep_alive: None,
+        format: rekuiper_connectors::PayloadFormat::Json,
+        attach_meta: false,
     };
     // CONF_KEY lookup is case-insensitive (`CONF_KEY`, `conf_key`,
     // `confKey`): SQL definitions and imported/JSON definitions disagree on
@@ -1668,20 +1717,104 @@ fn resolve_mqtt_source(
             }
         }
     }
+    config.format = resolve_payload_format(schemas, &def, rule_id)?;
     Some(config)
 }
 
+/// Payload decoding for a message source from the stream `FORMAT` (eKuiper
+/// names: json, binary, delimited, protobuf with `SCHEMAID`). A protobuf
+/// stream whose schema cannot be resolved yields `None` so the stream fails
+/// loudly instead of decoding garbage; unknown formats fall back to JSON.
+fn resolve_payload_format(
+    schemas: &SchemaManager,
+    def: &rekuiper_core::model::StreamDefinition,
+    rule_id: &str,
+) -> Option<rekuiper_connectors::PayloadFormat> {
+    use rekuiper_connectors::{DelimitedCodec, PayloadFormat};
+    let opt = |name: &str| {
+        def.options
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.trim())
+    };
+    let format = opt("FORMAT").unwrap_or("").to_ascii_lowercase();
+    match format.as_str() {
+        "" | "json" => Some(PayloadFormat::Json),
+        "binary" => Some(PayloadFormat::Binary),
+        "delimited" => {
+            let delimiter = opt("DELIMITER")
+                .filter(|d| !d.is_empty())
+                .map(DelimitedCodec::delimiter_from_name)
+                .unwrap_or(',');
+            let headers = def.stream_fields.iter().map(|f| f.name.clone()).collect();
+            Some(PayloadFormat::Delimited(DelimitedCodec::new(
+                delimiter, headers,
+            )))
+        }
+        "protobuf" => match resolve_proto_message(schemas, opt("SCHEMAID").unwrap_or("")) {
+            Ok(message) => Some(PayloadFormat::Protobuf(Arc::new(message))),
+            Err(e) => {
+                tracing::warn!("[RULE {}] stream '{}': {}", rule_id, def.name, e);
+                None
+            }
+        },
+        other => {
+            tracing::warn!(
+                "[RULE {}] stream '{}': FORMAT '{}' is not supported for this source; decoding as JSON",
+                rule_id,
+                def.name,
+                other
+            );
+            Some(PayloadFormat::Json)
+        }
+    }
+}
+
+/// Resolve `SCHEMAID` (`<schema>.<Message>`) against registered protobuf
+/// schemas (inline content, else the schema file).
+fn resolve_proto_message(
+    schemas: &SchemaManager,
+    schema_id: &str,
+) -> Result<rekuiper_connectors::ProtoMessage, String> {
+    let (schema, message) = schema_id.split_once('.').ok_or_else(|| {
+        format!(
+            "protobuf SCHEMAID '{}' must be <schema>.<message>",
+            schema_id
+        )
+    })?;
+    let def = schemas
+        .get_schema("protobuf", schema)
+        .ok_or_else(|| format!("protobuf schema '{}' is not registered", schema))?;
+    let text = match (&def.content, &def.file) {
+        (Some(content), _) if !content.trim().is_empty() => content.clone(),
+        (_, Some(path)) => std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read protobuf schema file '{}': {}", path, e))?,
+        _ => return Err(format!("protobuf schema '{}' has no content", schema)),
+    };
+    rekuiper_connectors::parse_proto(&text)?
+        .remove(message)
+        .ok_or_else(|| {
+            format!(
+                "message '{}' not found in protobuf schema '{}'",
+                message, schema
+            )
+        })
+}
+
 /// Start source producers for one stream (MQTT/file/HTTP-pull/WebSocket/
-/// RedisSub/Kafka/SQL/simulator, whichever its TYPE declares).
-fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str) {
+/// RedisSub/Kafka/SQL/simulator, whichever its TYPE declares). `needs_meta`
+/// asks message sources to attach per-message metadata for `meta()`.
+fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, needs_meta: bool) {
     // MQTT is the default streaming source: typeless streams and TYPE="mqtt"
     // subscribe to the broker topic and feed the rule pipeline.
-    if let Some(config) = resolve_mqtt_source(
+    if let Some(mut config) = resolve_mqtt_source(
         &state.stream_manager,
         &state.source_configs,
+        &state.schema_manager,
         stream_name,
         rule_id,
     ) {
+        config.attach_meta = needs_meta;
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         state
@@ -1835,7 +1968,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str) 
                                     SimulatorSource::new(conf).run(tx).await
                                 });
                                 while let Some(record) = rx.recv().await {
-                                    let _ = bus.publish(&stream_name, record);
+                                    // Backpressure reaches the simulator bridge:
+                                    // await subscriber capacity (lossless).
+                                    let _ = bus.publish_async(&stream_name, record).await;
                                 }
                                 let _ = sim_handle.await;
                             });
@@ -1859,11 +1994,16 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str) 
 /// stream (stream-stream joins fan in both sides; table targets resolve
 /// per-row through lookups and need no producer).
 fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
-    bootstrap_stream_sources(state, rule_id, &select_stmt.from);
+    // Metadata costs an allocation per message: attach it only for rules
+    // that read it.
+    let needs_meta = stmt_called_functions(select_stmt)
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case("meta") || f.eq_ignore_ascii_case("mqtt"));
+    bootstrap_stream_sources(state, rule_id, &select_stmt.from, needs_meta);
     for join in &select_stmt.joins {
         if state.table_manager.get_table(&join.target).is_none() && join.target != select_stmt.from
         {
-            bootstrap_stream_sources(state, rule_id, &join.target);
+            bootstrap_stream_sources(state, rule_id, &join.target, needs_meta);
         }
     }
 }
@@ -2261,6 +2401,263 @@ fn resolve_source_topic(stream_manager: &StreamManager, stream_name: &str) -> St
     stream_name.to_string()
 }
 
+/// One sink action parsed once at rule start (never per record).
+#[derive(Debug, Clone)]
+enum PreparedAction {
+    Log,
+    Nop,
+    File {
+        path: std::path::PathBuf,
+        template: Option<String>,
+        delimited: bool,
+        has_header: bool,
+        delimiter: String,
+    },
+    Rest {
+        url: String,
+        template: Option<String>,
+    },
+    Mqtt {
+        config: Box<MqttConfig>,
+        template: Option<String>,
+    },
+    WebSocket {
+        url: String,
+        template: Option<String>,
+    },
+    Redis {
+        config: Box<RedisSinkConfig>,
+    },
+    Kafka {
+        config: Box<KafkaConfig>,
+    },
+    Sql {
+        config: Box<SqlConnectorConfig>,
+    },
+    Memory {
+        topic: String,
+    },
+    Unknown {
+        kind: String,
+    },
+}
+
+fn prepare_actions(actions: &[HashMap<String, Value>]) -> Vec<PreparedAction> {
+    let mut out = Vec::new();
+    for action in actions {
+        for (kind, opts) in action {
+            match kind.as_str() {
+                "log" => out.push(PreparedAction::Log),
+                "nop" => out.push(PreparedAction::Nop),
+                "file" => match serde_json::from_value::<FileSink>(opts.clone()) {
+                    Ok(sink) => {
+                        let delimited = sink
+                            .format
+                            .as_deref()
+                            .is_some_and(|f| f.eq_ignore_ascii_case("delimited"))
+                            || sink
+                                .file_type
+                                .as_deref()
+                                .is_some_and(|t| t.eq_ignore_ascii_case("csv"));
+                        out.push(PreparedAction::File {
+                            path: sink.path.clone(),
+                            template: action_template(opts).map(|s| s.to_string()),
+                            delimited,
+                            has_header: sink.has_header,
+                            delimiter: sink
+                                .delimiter
+                                .clone()
+                                .filter(|d| !d.is_empty())
+                                .unwrap_or_else(|| ",".to_string()),
+                        });
+                    }
+                    Err(_) => out.push(PreparedAction::Unknown {
+                        kind: "file".to_string(),
+                    }),
+                },
+                "rest" | "http" => out.push(PreparedAction::Rest {
+                    url: opts
+                        .get("url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    template: action_template(opts).map(|s| s.to_string()),
+                }),
+                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
+                    Ok(config) => out.push(PreparedAction::Mqtt {
+                        config: Box::new(config),
+                        template: action_template(opts).map(|s| s.to_string()),
+                    }),
+                    Err(_) => out.push(PreparedAction::Unknown {
+                        kind: "mqtt".to_string(),
+                    }),
+                },
+                "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
+                    Ok(ws_cfg) => out.push(PreparedAction::WebSocket {
+                        url: ws_cfg.target_url(),
+                        template: action_template(opts).map(|s| s.to_string()),
+                    }),
+                    Err(_) => out.push(PreparedAction::Unknown {
+                        kind: "websocket".to_string(),
+                    }),
+                },
+                "redis" | "redispub" | "redisPub" => {
+                    match serde_json::from_value::<RedisSinkConfig>(opts.clone()) {
+                        Ok(config) => out.push(PreparedAction::Redis {
+                            config: Box::new(config),
+                        }),
+                        Err(_) => out.push(PreparedAction::Unknown {
+                            kind: "redis".to_string(),
+                        }),
+                    }
+                }
+                "kafka" => match serde_json::from_value::<KafkaConfig>(opts.clone()) {
+                    Ok(config) => out.push(PreparedAction::Kafka {
+                        config: Box::new(config),
+                    }),
+                    Err(_) => out.push(PreparedAction::Unknown {
+                        kind: "kafka".to_string(),
+                    }),
+                },
+                "sql" => match serde_json::from_value::<SqlConnectorConfig>(opts.clone()) {
+                    Ok(config) => out.push(PreparedAction::Sql {
+                        config: Box::new(config),
+                    }),
+                    Err(_) => out.push(PreparedAction::Unknown {
+                        kind: "sql".to_string(),
+                    }),
+                },
+                "memory" => out.push(PreparedAction::Memory {
+                    topic: opts
+                        .get("topic")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default")
+                        .to_string(),
+                }),
+                other => out.push(PreparedAction::Unknown {
+                    kind: other.to_string(),
+                }),
+            }
+        }
+    }
+    out
+}
+
+/// Bounded per-file batch writer owned by one rule's sink worker: directories
+/// are created once, one append handle is kept open per destination path, and
+/// serialized rows accumulate in a bounded buffer flushed by size, count, or
+/// time. `flush` writes buffered bytes (one `write_all` per file, so lines
+/// are never torn); it is NOT an fsync/durability commit. `shutdown` flushes
+/// remaining bytes; callers propagate I/O errors to rule exceptions.
+struct FileBatchWriter {
+    path: std::path::PathBuf,
+    file: Option<tokio::fs::File>,
+    buf: Vec<u8>,
+    pending: usize,
+    has_header_written: bool,
+}
+
+impl FileBatchWriter {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            file: None,
+            buf: Vec::new(),
+            pending: 0,
+            has_header_written: false,
+        }
+    }
+
+    async fn ensure_open(&mut self) -> std::io::Result<()> {
+        if self.file.is_none() {
+            if let Some(parent) = self.path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+            }
+            let file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .await?;
+            self.file = Some(file);
+        }
+        Ok(())
+    }
+
+    fn push_json(&mut self, data: &HashMap<String, Value>) {
+        if let Ok(mut line) = serde_json::to_string(data) {
+            line.push('\n');
+            self.buf.extend_from_slice(line.as_bytes());
+            self.pending += 1;
+        }
+    }
+
+    fn push_text(&mut self, text: &str) {
+        self.buf.extend_from_slice(text.as_bytes());
+        if !text.ends_with('\n') {
+            self.buf.push(b'\n');
+        }
+        self.pending += 1;
+    }
+
+    fn push_delimited(&mut self, data: &HashMap<String, Value>, delimiter: &str, header: bool) {
+        let mut keys: Vec<String> = data.keys().cloned().collect();
+        keys.sort();
+        if header && !self.has_header_written {
+            let h = keys.join(delimiter);
+            self.buf.extend_from_slice(h.as_bytes());
+            self.buf.push(b'\n');
+            self.has_header_written = true;
+        }
+        let row: String = keys
+            .iter()
+            .map(|k| csv_cell(data.get(k), delimiter))
+            .collect::<Vec<_>>()
+            .join(delimiter);
+        self.buf.extend_from_slice(row.as_bytes());
+        self.buf.push(b'\n');
+        self.pending += 1;
+    }
+
+    fn should_flush(&self) -> bool {
+        self.pending >= 100 || self.buf.len() >= 64 * 1024
+    }
+
+    async fn flush(&mut self) -> std::io::Result<()> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        self.ensure_open().await?;
+        use tokio::io::AsyncWriteExt;
+        if let Some(file) = self.file.as_mut() {
+            file.write_all(&self.buf).await?;
+            file.flush().await?;
+        }
+        self.buf.clear();
+        self.pending = 0;
+        Ok(())
+    }
+}
+
+/// Render one CSV cell (mirrors connector semantics): missing/null as empty,
+/// strings CSV-escaped, numbers/booleans plain, containers as compact JSON.
+fn csv_cell(value: Option<&Value>, delim: &str) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => {
+            if s.contains(delim) || s.contains(['"', '\n', '\r']) {
+                format!("\"{}\"", s.replace('"', "\"\""))
+            } else {
+                s.clone()
+            }
+        }
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(other) => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
 /// Subscribe to the rule's source stream and spawn its window-aware
 /// execution task, registering the join handle on the rule manager.
 #[allow(clippy::too_many_arguments)]
@@ -2286,14 +2683,13 @@ fn spawn_rule_task(
         trace_manager.start_trace(&rule_id, "always".to_string());
     }
     let rx = stream_bus.subscribe(&resolve_source_topic(stream_manager, &select_stmt.from));
-    let rule_mgr = rule_manager.clone();
     let window = select_stmt.window.clone();
     let tables = table_manager.clone();
     let confs = source_configs.clone();
     // Stream-stream joins fan in every joined stream: subscribe each join
     // target that is a stream (not a table) so windowed rules see both
     // sides. Table targets resolve per-row through lookups instead.
-    let mut join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)> = Vec::new();
+    let mut join_rxs: Vec<(String, StreamReceiver)> = Vec::new();
     for join in &select_stmt.joins {
         if table_manager.get_table(&join.target).is_none()
             && join.target != select_stmt.from
@@ -2320,29 +2716,138 @@ fn spawn_rule_task(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(buffer_len);
-    let sink_actions = actions;
+    let prepared = prepare_actions(&actions);
+    let cache_configs = action_cache_configs(&actions);
     let sink_rule_id = rule_id.clone();
     let sink_rule_mgr = rule_manager.clone();
     let sink_stream_bus = stream_bus.clone();
     let sink_http_client = http_client.clone();
     let sink_trace_mgr = trace_manager.clone();
+    let sink_counters = rule_manager
+        .rule_counters(&rule_id)
+        .unwrap_or_else(|| Arc::new(RuleCounters::default()));
     tokio::spawn(async move {
-        while let Some(output_record) = sink_rx.recv().await {
-            maybe_trace_record(
-                &sink_trace_mgr,
-                &sink_rule_id,
-                &output_record.data,
-                Some(&output_record.data),
-            );
-            dispatch_rule_actions(
-                &sink_actions,
-                &output_record,
-                &sink_rule_id,
-                &sink_rule_mgr,
-                &sink_stream_bus,
-                &sink_http_client,
-            )
-            .await;
+        use std::collections::HashMap as Map;
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut files: Map<std::path::PathBuf, FileBatchWriter> = Map::new();
+        // Per-action runtimes: persistent connections plus the offline cache
+        // (pages left by a previous run are adopted and resent first).
+        let cache_root = std::path::Path::new(SINK_CACHE_ROOT);
+        let mut runtimes: Vec<ActionRuntime> = prepared
+            .into_iter()
+            .zip(cache_configs)
+            .enumerate()
+            .map(|(idx, (action, cache_cfg))| {
+                let cache = cache_cfg.map(|cfg| {
+                    SinkCache::open(cfg, sink_cache::cache_dir(cache_root, &sink_rule_id, idx))
+                });
+                ActionRuntime::new(action, cache)
+            })
+            .collect();
+        let mut ticker = tokio::time::interval(SINK_TICK);
+        // First tick fires immediately; consume it so time-flushes align.
+        ticker.tick().await;
+        let mut pending_records: u64 = 0;
+        let mut last_live = tokio::time::Instant::now();
+        loop {
+            tokio::select! {
+                rec = sink_rx.recv() => {
+                    let Some(output_record) = rec else {
+                        // Rule end/cancel/update/delete/shutdown: drain, flush
+                        // every file destination, persist caches, then exit.
+                        // Errors propagate to exceptions before exit.
+                        for writer in files.values_mut() {
+                            if let Err(e) = writer.flush().await {
+                                tracing::warn!(
+                                    "[RULE {}] file flush on shutdown failed: {}",
+                                    sink_rule_id, e
+                                );
+                                sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
+                                sink_rule_mgr.inc_sink_failed(&sink_rule_id, pending_records);
+                                pending_records = 0;
+                            }
+                        }
+                        for rt in std::mem::take(&mut runtimes) {
+                            if let Some(cache) = rt.cache {
+                                if !cache.is_empty() && !cache.config().clean_at_stop {
+                                    tracing::info!(
+                                        "[RULE {}] persisting {} cached sink records for resend",
+                                        sink_rule_id,
+                                        cache.len()
+                                    );
+                                }
+                                cache.close();
+                            }
+                        }
+                        break;
+                    };
+                    last_live = tokio::time::Instant::now();
+                    pending_records += 1;
+                    maybe_trace_record(
+                        &sink_trace_mgr,
+                        &sink_rule_id,
+                        &output_record.data,
+                        Some(&output_record.data),
+                    );
+                    let ctx = SinkContext {
+                        rule_id: &sink_rule_id,
+                        rule_mgr: &sink_rule_mgr,
+                        stream_bus: &sink_stream_bus,
+                        http_client: &sink_http_client,
+                    };
+                    match deliver_record(&mut runtimes, &output_record, &ctx, &mut files).await {
+                        Delivery::Delivered => {
+                            sink_counters.sink_out.fetch_add(1, Relaxed);
+                        }
+                        // Counted as delivered when the resend succeeds.
+                        Delivery::Cached => {}
+                        Delivery::Failed => sink_rule_mgr.inc_sink_failed(&sink_rule_id, 1),
+                    }
+                    pending_records = pending_records.saturating_sub(1);
+                    let need_flush = files.values().any(|w| w.should_flush());
+                    if need_flush {
+                        for writer in files.values_mut() {
+                            if let Err(e) = writer.flush().await {
+                                tracing::warn!(
+                                    "[RULE {}] file batch flush failed: {}",
+                                    sink_rule_id, e
+                                );
+                                sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
+                            }
+                        }
+                    }
+                }
+                _ = ticker.tick() => {
+                    let mut any_error = false;
+                    for writer in files.values_mut() {
+                        if writer.pending > 0 {
+                            if let Err(e) = writer.flush().await {
+                                tracing::warn!(
+                                    "[RULE {}] file timed flush failed: {}",
+                                    sink_rule_id, e
+                                );
+                                any_error = true;
+                            }
+                        }
+                    }
+                    if any_error {
+                        sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
+                    }
+                    let ctx = SinkContext {
+                        rule_id: &sink_rule_id,
+                        rule_mgr: &sink_rule_mgr,
+                        stream_bus: &sink_stream_bus,
+                        http_client: &sink_http_client,
+                    };
+                    let live_recent = last_live.elapsed() < SINK_TICK * 2;
+                    for rt in runtimes.iter_mut() {
+                        let resent = resend_cached(rt, live_recent, &ctx, &mut files).await;
+                        if resent > 0 {
+                            sink_counters.sink_out.fetch_add(resent, Relaxed);
+                        }
+                    }
+                }
+            }
         }
     });
 
@@ -2370,9 +2875,19 @@ fn spawn_rule_task(
             }),
     };
 
+    // Hot-path handles cloned once: rule loops bump lock-free atomics and
+    // read the running flag without touching the global rules map per event.
+    let loop_counters = rule_manager
+        .rule_counters(&rule_id)
+        .unwrap_or_else(|| Arc::new(RuleCounters::default()));
+    let loop_running = rule_manager
+        .rule_status_handle(&rule_id)
+        .unwrap_or_else(|| Arc::new(RwLock::new(RuleStatus::default())));
+
     let handle = match window {
         None => tokio::spawn(run_stateless_rule(
-            rule_mgr,
+            loop_counters,
+            loop_running,
             rule_id.clone(),
             select_stmt,
             rx,
@@ -2382,7 +2897,8 @@ fn spawn_rule_task(
             send_error,
         )),
         Some(WindowDef::Count { size, interval }) => tokio::spawn(run_count_window_rule(
-            rule_mgr,
+            loop_counters,
+            loop_running,
             rule_id.clone(),
             select_stmt,
             rx,
@@ -2397,7 +2913,8 @@ fn spawn_rule_task(
         Some(WindowDef::TumblingTime { unit, length }) => {
             let duration = tumbling_window_duration(&unit, length);
             tokio::spawn(run_tumbling_window_rule(
-                rule_mgr,
+                loop_counters,
+                loop_running,
                 rule_id.clone(),
                 select_stmt,
                 rx,
@@ -2418,7 +2935,8 @@ fn spawn_rule_task(
             let window_length = tumbling_window_duration(&unit, length);
             let hop_interval = tumbling_window_duration(&unit, interval);
             tokio::spawn(run_hopping_window_rule(
-                rule_mgr,
+                loop_counters,
+                loop_running,
                 rule_id.clone(),
                 select_stmt,
                 rx,
@@ -2439,7 +2957,8 @@ fn spawn_rule_task(
             let window_length = tumbling_window_duration(&unit, length);
             let delay_dur = delay.map(|d| tumbling_window_duration(&unit, d));
             tokio::spawn(run_sliding_window_rule(
-                rule_mgr,
+                loop_counters,
+                loop_running,
                 rule_id.clone(),
                 select_stmt,
                 rx,
@@ -2453,16 +2972,44 @@ fn spawn_rule_task(
                 confs.clone(),
             ))
         }
+        Some(WindowDef::Session {
+            unit,
+            max_duration,
+            timeout,
+        }) => {
+            if event_time.enabled {
+                tracing::warn!(
+                    "[RULE {}] SESSIONWINDOW runs on processing time; event-time options are ignored",
+                    rule_id
+                );
+            }
+            tokio::spawn(run_session_window_rule(
+                loop_counters,
+                loop_running,
+                rule_id.clone(),
+                select_stmt,
+                rx,
+                tumbling_window_duration(&unit, max_duration),
+                tumbling_window_duration(&unit, timeout),
+                sink_tx,
+                send_error,
+                join_rxs,
+                tables.clone(),
+                confs.clone(),
+            ))
+        }
     };
     rule_manager.set_rule_handle(&rule_id, handle);
 }
 
-fn is_rule_running(rule_mgr: &RuleManager, rule_id: &str) -> bool {
-    match rule_mgr.get_rule_status(rule_id) {
-        Some(status) => status.status == "running",
-        // Rule deleted mid-flight: stop processing.
-        None => false,
-    }
+/// Lifecycle gate for rule loops. The status handle is cloned once at spawn;
+/// the hot path takes no global map locks. Stop/delete/update abort the rule
+/// task handle (receiver dropped, bus purges the dead subscriber, the sink
+/// worker flushes on channel close); this check is a stale-status guard for
+/// abort races: a non-running status drains input without emitting so a
+/// lingering task cannot emit after stop.
+fn is_rule_running(status: &Arc<RwLock<RuleStatus>>) -> bool {
+    status.read().status == "running"
 }
 
 /// Extracts an upstream error message when the record carries an `error` or
@@ -2484,7 +3031,7 @@ fn check_record_error(data: &HashMap<String, Value>) -> Option<String> {
 /// `continue` without normal projection or window-buffer insertion, mirroring
 /// eKuiper semantics where the error event bypasses window aggregation.
 async fn handle_error_record(
-    rule_mgr: &RuleManager,
+    counters: &RuleCounters,
     rule_id: &str,
     send_error: bool,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
@@ -2493,13 +3040,12 @@ async fn handle_error_record(
     let Some(err_msg) = check_record_error(&record.data) else {
         return false;
     };
-    rule_mgr.inc_exceptions(rule_id, 1);
+    counters.inc_exceptions(1);
     if send_error {
         let mut err_data = HashMap::new();
         err_data.insert("error".to_string(), Value::String(err_msg));
         err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
-        enqueue_sink_record(sink, StreamRecord::new(err_data)).await;
-        rule_mgr.inc_sink_records(rule_id, 1);
+        enqueue_sink_record(counters, sink, StreamRecord::new(err_data)).await;
     }
     true
 }
@@ -2559,7 +3105,367 @@ fn record_template_map(data: &HashMap<String, Value>) -> serde_json::Map<String,
     data.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-async fn dispatch_rule_actions(
+/// Where persisted sink caches live (relative to the working directory, like
+/// `data/sqliteKV.db`): `data/cache/sink/<rule>/<action index>/`.
+const SINK_CACHE_ROOT: &str = "data/cache/sink";
+/// Most cached records resent per sink worker tick (keeps live data moving).
+const RESEND_BATCH_MAX: u64 = 4096;
+/// Pause before probing a destination again after a failed resend.
+const RESEND_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+/// Sink worker tick (file time-flush and cache resend cadence).
+const SINK_TICK: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Cache options per prepared action, in `prepare_actions` order.
+fn action_cache_configs(actions: &[HashMap<String, Value>]) -> Vec<Option<CacheConfig>> {
+    let mut out = Vec::new();
+    for action in actions {
+        for opts in action.values() {
+            out.push(
+                opts.as_object()
+                    .map(|o| o.clone().into_iter().collect::<HashMap<String, Value>>())
+                    .and_then(|o| CacheConfig::from_action(&o)),
+            );
+        }
+    }
+    out
+}
+
+/// Per-action sink state that lives as long as the rule's sink worker:
+/// persistent connections and the offline cache.
+struct ActionRuntime {
+    action: PreparedAction,
+    mqtt: Option<MqttSink>,
+    cache: Option<SinkCache>,
+    /// Earliest time the next resend may be attempted.
+    retry_at: tokio::time::Instant,
+    last_warn: Option<std::time::Instant>,
+    reported_dropped: u64,
+}
+
+impl ActionRuntime {
+    fn new(action: PreparedAction, cache: Option<SinkCache>) -> Self {
+        Self {
+            action,
+            mqtt: None,
+            cache,
+            retry_at: tokio::time::Instant::now(),
+            last_warn: None,
+            reported_dropped: 0,
+        }
+    }
+}
+
+/// Shared handles for sending one record.
+struct SinkContext<'a> {
+    rule_id: &'a str,
+    rule_mgr: &'a RuleManager,
+    stream_bus: &'a StreamBus,
+    http_client: &'a reqwest::Client,
+}
+
+/// Why an action did not deliver a record.
+enum SendError {
+    /// Destination unreachable (network, broker, database): cacheable.
+    Retry(String),
+    /// The record can never be delivered as configured.
+    Permanent(String),
+    /// Dropped by policy and already accounted by the action.
+    Dropped,
+}
+
+/// Outcome of one record across all actions (ordered by severity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Delivery {
+    Delivered,
+    Cached,
+    Failed,
+}
+
+/// Send one record through one action. File actions buffer into the rule's
+/// `FileBatchWriter`s (bounded, flushed by size/time/shutdown); `memory`
+/// feedback uses non-blocking all-or-nothing publish and counts drops
+/// instead of deadlocking against the rule's own input queue. `destination`
+/// overrides the MQTT topic / REST URL (cache `resendDestination`).
+async fn send_action(
+    rt: &mut ActionRuntime,
+    output: &StreamRecord,
+    destination: Option<&str>,
+    ctx: &SinkContext<'_>,
+    files: &mut std::collections::HashMap<std::path::PathBuf, FileBatchWriter>,
+) -> Result<(), SendError> {
+    match &rt.action {
+        PreparedAction::Log => {
+            tracing::info!("[RULE {}] Matched record: {:?}", ctx.rule_id, output.data);
+            Ok(())
+        }
+        PreparedAction::Nop => Ok(()),
+        PreparedAction::File {
+            path,
+            template,
+            delimited,
+            has_header,
+            delimiter,
+        } => {
+            let writer = files
+                .entry(path.clone())
+                .or_insert_with(|| FileBatchWriter::new(path.clone()));
+            if *delimited {
+                writer.push_delimited(&output.data, delimiter, *has_header);
+            } else if let Some(tpl) = template {
+                writer.push_text(&apply_data_template(
+                    tpl,
+                    &record_template_map(&output.data),
+                ));
+            } else {
+                writer.push_json(&output.data);
+            }
+            Ok(())
+        }
+        PreparedAction::Rest { url, template } => {
+            let url = destination.unwrap_or(url);
+            if url.is_empty() {
+                return Err(SendError::Permanent("rest action missing url".to_string()));
+            }
+            let res = match template {
+                Some(tpl) => {
+                    ctx.http_client
+                        .post(url)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(apply_data_template(tpl, &record_template_map(&output.data)))
+                        .send()
+                        .await
+                }
+                None => ctx.http_client.post(url).json(&output.data).send().await,
+            };
+            res.map(|_| ())
+                .map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
+        }
+        PreparedAction::Mqtt { config, template } => {
+            if rt.mqtt.is_none() {
+                let sink = MqttSink::new((**config).clone()).map_err(|e| {
+                    SendError::Permanent(format!("mqtt action configuration invalid: {}", e))
+                })?;
+                rt.mqtt = Some(sink);
+            }
+            let Some(sink) = rt.mqtt.as_ref() else {
+                return Err(SendError::Permanent("mqtt sink unavailable".to_string()));
+            };
+            let payload = match template {
+                Some(tpl) => {
+                    apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
+                }
+                None => serde_json::to_vec(&output.data)
+                    .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?,
+            };
+            sink.send_raw_to(destination.unwrap_or(&config.topic), payload)
+                .await
+                .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
+        }
+        PreparedAction::WebSocket { url, template } => {
+            let sink = WebSocketSink { url: url.clone() };
+            let res = match template {
+                Some(tpl) => {
+                    sink.send_text(&apply_data_template(
+                        tpl,
+                        &record_template_map(&output.data),
+                    ))
+                    .await
+                }
+                None => sink.send(output).await,
+            };
+            res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
+        }
+        PreparedAction::Redis { config } => {
+            let sink = RedisSink {
+                config: (**config).clone(),
+            };
+            sink.send(output)
+                .await
+                .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
+        }
+        PreparedAction::Kafka { config } => {
+            let sink = KafkaSink {
+                config: (**config).clone(),
+            };
+            sink.send(output)
+                .await
+                .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
+        }
+        PreparedAction::Sql { config } => {
+            let sink = SqlSink {
+                config: (**config).clone(),
+            };
+            sink.insert_record(output)
+                .await
+                .map_err(|e| SendError::Retry(format!("sql action failed: {}", e)))
+        }
+        PreparedAction::Memory { topic } => match ctx.stream_bus.try_publish(topic, output.clone())
+        {
+            Ok(_) => Ok(()),
+            // Produced data with nobody listening: not an error.
+            Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
+            Err(rekuiper_core::PublishError::Full) => {
+                tracing::warn!(
+                    "[RULE {}] memory feedback queue full, dropping record",
+                    ctx.rule_id
+                );
+                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+                Err(SendError::Dropped)
+            }
+            Err(rekuiper_core::PublishError::Closed) => {
+                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                Err(SendError::Dropped)
+            }
+        },
+        PreparedAction::Unknown { kind } => {
+            tracing::debug!("[RULE {}] unknown action '{}', ignoring", ctx.rule_id, kind);
+            Ok(())
+        }
+    }
+}
+
+/// Count a failed send as an exception; log at most once per second per
+/// action so an outage at high rates cannot flood the log.
+fn report_send_error(rt: &mut ActionRuntime, ctx: &SinkContext<'_>, err: &SendError, cached: bool) {
+    let msg = match err {
+        SendError::Retry(m) | SendError::Permanent(m) => m,
+        SendError::Dropped => return,
+    };
+    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+    let now = std::time::Instant::now();
+    if rt
+        .last_warn
+        .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_secs(1))
+    {
+        rt.last_warn = Some(now);
+        match &rt.cache {
+            Some(cache) if cached => tracing::warn!(
+                "[RULE {}] {} (cached for resend, {} records pending)",
+                ctx.rule_id,
+                msg,
+                cache.len()
+            ),
+            _ => tracing::warn!("[RULE {}] {}", ctx.rule_id, msg),
+        }
+    }
+}
+
+/// Publish records the cache had to drop into the rule's `dropped` counter.
+fn sync_cache_drops(rt: &mut ActionRuntime, ctx: &SinkContext<'_>) {
+    if let Some(cache) = &rt.cache {
+        let new = cache.dropped.saturating_sub(rt.reported_dropped);
+        if new > 0 {
+            ctx.rule_mgr.inc_dropped(ctx.rule_id, new);
+            rt.reported_dropped = cache.dropped;
+        }
+    }
+}
+
+/// Send one output record through every action, caching recoverable
+/// failures for actions with `enableCache`.
+async fn deliver_record(
+    runtimes: &mut [ActionRuntime],
+    output: &StreamRecord,
+    ctx: &SinkContext<'_>,
+    files: &mut std::collections::HashMap<std::path::PathBuf, FileBatchWriter>,
+) -> Delivery {
+    let mut delivery = Delivery::Delivered;
+    for rt in runtimes.iter_mut() {
+        // Cache-first priority: while anything is cached, live data queues
+        // behind it so the destination sees strict arrival order.
+        if let Some(cache) = rt.cache.as_mut() {
+            if cache.config().priority == ResendPriority::CacheFirst && !cache.is_empty() {
+                cache.push(output.clone());
+                sync_cache_drops(rt, ctx);
+                delivery = delivery.max(Delivery::Cached);
+                continue;
+            }
+        }
+        if let Err(err) = send_action(rt, output, None, ctx, files).await {
+            let cacheable = matches!(err, SendError::Retry(_)) && rt.cache.is_some();
+            if let (true, Some(cache)) = (cacheable, rt.cache.as_mut()) {
+                cache.push(output.clone());
+            }
+            report_send_error(rt, ctx, &err, cacheable);
+            if cacheable {
+                sync_cache_drops(rt, ctx);
+                delivery = delivery.max(Delivery::Cached);
+            } else {
+                delivery = Delivery::Failed;
+            }
+        }
+    }
+    delivery
+}
+
+/// Resend cached records for one action, oldest first, paced by
+/// `resendInterval`. Stops at the first failure and backs off before
+/// probing the destination again. Returns the number of records delivered.
+async fn resend_cached(
+    rt: &mut ActionRuntime,
+    live_recent: bool,
+    ctx: &SinkContext<'_>,
+    files: &mut std::collections::HashMap<std::path::PathBuf, FileBatchWriter>,
+) -> u64 {
+    let Some(cfg) = rt
+        .cache
+        .as_ref()
+        .filter(|c| !c.is_empty())
+        .map(|c| c.config().clone())
+    else {
+        return 0;
+    };
+    if cfg.priority == ResendPriority::LiveFirst && live_recent {
+        return 0;
+    }
+    let mut sent = 0u64;
+    while sent < RESEND_BATCH_MAX {
+        let now = tokio::time::Instant::now();
+        if now < rt.retry_at {
+            break;
+        }
+        let Some(copy) = rt
+            .cache
+            .as_mut()
+            .and_then(|c| c.front())
+            .map(|r| sink_cache::resend_copy(&cfg, r))
+        else {
+            break;
+        };
+        match send_action(rt, &copy, cfg.destination.as_deref(), ctx, files).await {
+            Ok(()) => {
+                if let Some(cache) = rt.cache.as_mut() {
+                    cache.pop_front();
+                }
+                sent += 1;
+                if !cfg.resend_interval.is_zero() {
+                    // Pace from the previous slot so sub-tick intervals still
+                    // resend several records per tick.
+                    let floor = now.checked_sub(SINK_TICK).unwrap_or(now);
+                    rt.retry_at = rt.retry_at.max(floor) + cfg.resend_interval;
+                }
+            }
+            Err(err @ SendError::Retry(_)) => {
+                report_send_error(rt, ctx, &err, true);
+                rt.retry_at = now + cfg.resend_interval.max(RESEND_RETRY_BACKOFF);
+                break;
+            }
+            Err(err) => {
+                // Undeliverable as configured: drop it rather than block the queue.
+                report_send_error(rt, ctx, &err, false);
+                if let Some(cache) = rt.cache.as_mut() {
+                    cache.pop_front();
+                }
+                ctx.rule_mgr.inc_sink_failed(ctx.rule_id, 1);
+            }
+        }
+    }
+    sent
+}
+
+#[allow(dead_code)]
+async fn dispatch_rule_actions_legacy(
     actions: &[HashMap<String, Value>],
     output: &StreamRecord,
     rule_id: &str,
@@ -3132,16 +4038,38 @@ async fn apply_lookup_joins(
     Some(combined)
 }
 
-/// Enqueue an output record for the background sink worker without blocking
-/// the evaluation loop: fast path is a lock-free `try_send`, falling back to
-/// an awaiting send only while the bounded queue is under backpressure.
+/// Enqueue an output record for the background sink worker. Fast path is a
+/// lock-free `try_send`; under backpressure the evaluation loop awaits
+/// capacity (bounded memory, no loss). Records enqueue (not completion) here;
+/// the sink worker increments `sink_out` only after the actual operation.
+/// Closed queues propagate as `false` (rule shutting down). High-water depth
+/// and blocked time are accounted on the rule counters.
 async fn enqueue_sink_record(
+    counters: &RuleCounters,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
     output_record: StreamRecord,
-) {
-    if let Err(tokio::sync::mpsc::error::TrySendError::Full(rec)) = sink.try_send(output_record) {
-        // Queue under backpressure: await send
-        let _ = sink.send(rec).await;
+) -> bool {
+    let depth = sink.max_capacity().saturating_sub(sink.capacity());
+    counters.observe_high_water(depth);
+    match sink.try_send(output_record) {
+        Ok(()) => {
+            counters.inc_enqueued(1);
+            true
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(rec)) => {
+            let depth = sink.max_capacity().saturating_sub(sink.capacity());
+            counters.observe_high_water(depth);
+            let start = std::time::Instant::now();
+            match sink.send(rec).await {
+                Ok(()) => {
+                    counters.add_blocked_micros(start.elapsed().as_micros() as u64);
+                    counters.inc_enqueued(1);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
     }
 }
 
@@ -3173,43 +4101,6 @@ struct TaggedRow {
 /// Upper bound on join fan-out per window trigger: windows are bounded
 /// buffers, and an unbounded cross product could exhaust memory.
 const MAX_JOIN_FANOUT: usize = 10_000;
-
-fn has_agg_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Call { name, args } => {
-            Evaluator::is_aggregate_call(name) || args.iter().any(has_agg_expr)
-        }
-        Expr::BinaryOp { left, right, .. } => has_agg_expr(left) || has_agg_expr(right),
-        Expr::UnaryOp { expr, .. } => has_agg_expr(expr),
-        Expr::Between {
-            expr, low, high, ..
-        } => has_agg_expr(expr) || has_agg_expr(low) || has_agg_expr(high),
-        Expr::InList { expr, list, .. } => has_agg_expr(expr) || list.iter().any(has_agg_expr),
-        Expr::IsNull { expr, .. } => has_agg_expr(expr),
-        Expr::FieldAccess { parent, .. } => has_agg_expr(parent),
-        Expr::Index { base, index } => has_agg_expr(base) || has_agg_expr(index),
-        Expr::Slice { base, lo, hi } => {
-            has_agg_expr(base)
-                || lo.as_ref().is_some_and(|e| has_agg_expr(e))
-                || hi.as_ref().is_some_and(|e| has_agg_expr(e))
-        }
-        Expr::Case {
-            operand,
-            when_clauses,
-            else_clause,
-        } => {
-            operand.as_ref().is_some_and(|e| has_agg_expr(e))
-                || when_clauses
-                    .iter()
-                    .any(|(w, t)| has_agg_expr(w) || has_agg_expr(t))
-                || else_clause.as_ref().is_some_and(|e| has_agg_expr(e))
-        }
-        Expr::Over { call, partition_by } => {
-            has_agg_expr(call) || partition_by.as_ref().is_some_and(|e| has_agg_expr(e))
-        }
-        Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => false,
-    }
-}
 
 /// Evaluate one windowed batch for a rule with JOIN clauses.
 ///
@@ -3379,25 +4270,17 @@ async fn eval_window_join_batch(
             return Vec::new();
         }
     }
-    let aggregate = select_stmt.fields.iter().any(has_agg_expr)
-        || select_stmt.having.as_ref().is_some_and(has_agg_expr);
-    if aggregate {
-        return Evaluator::eval_aggregate(select_stmt, &combined_rows)
-            .into_iter()
-            .collect();
-    }
-    combined_rows
-        .iter()
-        .filter_map(|row| Evaluator::eval_select(select_stmt, row))
-        .collect()
+    // WHERE over the joined rows, then GROUP BY / HAVING / ORDER BY / LIMIT.
+    Evaluator::eval_window(select_stmt, combined_rows)
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_stateless_rule(
-    rule_mgr: RuleManager,
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
     rule_id: String,
     select_stmt: SelectStmt,
-    mut rx: broadcast::Receiver<StreamRecord>,
+    mut rx: StreamReceiver,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
@@ -3408,39 +4291,64 @@ async fn run_stateless_rule(
     // even for rows the WHERE filter later drops, mirroring eKuiper analytic
     // semantics); the input-row filter then decides emission.
     let rule_state = RuleState::default();
-    loop {
-        match rx.recv().await {
-            Ok(record) => {
-                if !is_rule_running(&rule_mgr, &rule_id) {
-                    continue;
-                }
-                rule_mgr.inc_source_records(&rule_id, 1);
-                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
-                    continue;
-                }
-                let Some(joined) =
-                    apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
-                        .await
-                else {
-                    // Inner join without a matching table row: drop the record.
-                    continue;
-                };
-                let output_opt =
-                    Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
-                let passes = match &select_stmt.where_clause {
-                    Some(cond) => Evaluator::eval_bool(cond, &joined),
-                    None => true,
-                };
-                if passes {
-                    if let Some(output) = output_opt {
-                        let output_record = StreamRecord::new(output);
-                        enqueue_sink_record(&sink, output_record).await;
-                        rule_mgr.inc_sink_records(&rule_id, 1);
+    // Stateless fast path: no table/stream joins, so skip the join machinery
+    // and borrow the input map instead of cloning the full record.
+    let has_joins = !select_stmt.joins.is_empty();
+    // Channel close (all bus senders dropped) ends the loop; there is no
+    // lossy Lagged path anymore — backpressure holds producers instead.
+    while let Some(record) = rx.recv().await {
+        if !is_rule_running(&running) {
+            continue;
+        }
+        counters.inc_source(1);
+        if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
+            continue;
+        }
+        if has_joins {
+            let Some(joined) =
+                apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
+                    .await
+            else {
+                // Inner join without a matching table row: drop the record.
+                counters.inc_filtered(1);
+                continue;
+            };
+            let output_opt = Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
+            let passes = match &select_stmt.where_clause {
+                Some(cond) => Evaluator::eval_bool(cond, &joined),
+                None => true,
+            };
+            if passes {
+                if let Some(output) = output_opt {
+                    let output_record = StreamRecord::new(output);
+                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+                        break;
                     }
+                } else {
+                    counters.inc_filtered(1);
                 }
+            } else {
+                counters.inc_filtered(1);
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+        } else {
+            let output_opt =
+                Evaluator::eval_select_stateful(&select_stmt, &record.data, &rule_state);
+            let passes = match &select_stmt.where_clause {
+                Some(cond) => Evaluator::eval_bool(cond, &record.data),
+                None => true,
+            };
+            if passes {
+                if let Some(output) = output_opt {
+                    let output_record = StreamRecord::new(output);
+                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+                        break;
+                    }
+                } else {
+                    counters.inc_filtered(1);
+                }
+            } else {
+                counters.inc_filtered(1);
+            }
         }
     }
 }
@@ -3449,54 +4357,148 @@ async fn run_stateless_rule(
 /// JOIN clauses resolve matches first (stream fan-in, table lookups, ON
 /// conditions) and project each match.
 async fn emit_window_batch(
-    rule_mgr: &RuleManager,
-    rule_id: &str,
+    counters: &RuleCounters,
     table_manager: &TableManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     select_stmt: &SelectStmt,
-    batch: &[TaggedRow],
+    batch: Vec<TaggedRow>,
+    prefiltered: bool,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
 ) {
     if batch.is_empty() {
         return;
     }
-    if select_stmt.joins.is_empty() {
-        let flat: Vec<HashMap<String, Value>> = batch.iter().map(|r| r.data.clone()).collect();
-        if let Some(output) = Evaluator::eval_aggregate(select_stmt, &flat) {
-            enqueue_sink_record(sink, StreamRecord::new(output)).await;
-            rule_mgr.inc_sink_records(rule_id, 1);
+    let outputs = if select_stmt.joins.is_empty() {
+        let rows: Vec<HashMap<String, Value>> = batch.into_iter().map(|r| r.data).collect();
+        if prefiltered {
+            Evaluator::eval_window_filtered(select_stmt, rows)
+        } else {
+            Evaluator::eval_window(select_stmt, rows)
         }
-        return;
+    } else {
+        eval_window_join_batch(table_manager, source_configs, select_stmt, &batch).await
+    };
+    emit_window_outputs(counters, sink, outputs).await;
+}
+
+/// Enqueue a window trigger's output rows in order (stops if the sink closed).
+async fn emit_window_outputs(
+    counters: &RuleCounters,
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    outputs: Vec<HashMap<String, Value>>,
+) {
+    for output in outputs {
+        if !enqueue_sink_record(counters, sink, StreamRecord::new(output)).await {
+            break;
+        }
     }
-    for output in eval_window_join_batch(table_manager, source_configs, select_stmt, batch).await {
-        enqueue_sink_record(sink, StreamRecord::new(output)).await;
-        rule_mgr.inc_sink_records(rule_id, 1);
+}
+
+/// Time-window ingest filter: without joins, `WHERE` is pushed below the
+/// window (as eKuiper's predicate push-down does), so rejected rows are
+/// never buffered. With joins it may reference joined columns and runs at
+/// trigger time instead.
+fn window_ingest_passes(select_stmt: &SelectStmt, data: &HashMap<String, Value>) -> bool {
+    !select_stmt.joins.is_empty() || Evaluator::passes_where(select_stmt, data)
+}
+
+/// Contents of one open time window: row-free accumulators when the
+/// projection allows it, otherwise the buffered rows.
+enum WindowRows {
+    Incremental(Box<IncrementalWindow>),
+    Buffered(Vec<TaggedRow>),
+}
+
+impl WindowRows {
+    fn new(select_stmt: &SelectStmt) -> Self {
+        match IncrementalWindow::try_new(select_stmt) {
+            Some(inc) => WindowRows::Incremental(Box::new(inc)),
+            None => WindowRows::Buffered(Vec::new()),
+        }
     }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            WindowRows::Incremental(inc) => inc.is_empty(),
+            WindowRows::Buffered(rows) => rows.is_empty(),
+        }
+    }
+
+    /// Adds one row; returns `false` when `WHERE` rejected it.
+    fn push(&mut self, select_stmt: &SelectStmt, tagged: TaggedRow) -> bool {
+        match self {
+            WindowRows::Incremental(inc) => inc.push(&tagged.data),
+            WindowRows::Buffered(rows) => {
+                if !window_ingest_passes(select_stmt, &tagged.data) {
+                    return false;
+                }
+                rows.push(tagged);
+                true
+            }
+        }
+    }
+
+    /// Closes the window and emits its output rows.
+    async fn emit(
+        &mut self,
+        counters: &RuleCounters,
+        table_manager: &TableManager,
+        source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+        select_stmt: &SelectStmt,
+        sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    ) {
+        match self {
+            WindowRows::Incremental(inc) => {
+                if !inc.is_empty() {
+                    emit_window_outputs(counters, sink, inc.take()).await;
+                }
+            }
+            WindowRows::Buffered(rows) => {
+                let batch = std::mem::take(rows);
+                emit_window_batch(
+                    counters,
+                    table_manager,
+                    source_configs,
+                    select_stmt,
+                    batch,
+                    true,
+                    sink,
+                )
+                .await;
+            }
+        }
+    }
+}
+
+/// Interval whose ticks fall on natural-time multiples of `period` (a 10 s
+/// window ends at :00, :10, :20 regardless of rule start, as in eKuiper).
+fn aligned_interval(period: std::time::Duration) -> tokio::time::Interval {
+    let period_ms = (period.as_millis() as i64).max(1);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let wait_ms = period_ms - now_ms.rem_euclid(period_ms);
+    let start = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms as u64);
+    let mut interval = tokio::time::interval_at(start, period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval
 }
 
 /// Spawn forwarders that tag rows from joined streams and feed the runner's
 /// local channel. Forwarders exit when the runner drops the channel or the
 /// source bus closes.
 fn spawn_join_forwarders(
-    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    join_rxs: Vec<(String, StreamReceiver)>,
 ) -> tokio::sync::mpsc::Receiver<TaggedRow> {
     let (join_tx, join_rx) = tokio::sync::mpsc::channel::<TaggedRow>(1024);
     for (source, mut jrx) in join_rxs {
         let jtx = join_tx.clone();
         tokio::spawn(async move {
-            loop {
-                match jrx.recv().await {
-                    Ok(record) => {
-                        let tagged = TaggedRow {
-                            source: source.clone(),
-                            data: record.data,
-                        };
-                        if jtx.send(tagged).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+            while let Some(record) = jrx.recv().await {
+                let tagged = TaggedRow {
+                    source: source.clone(),
+                    data: record.data,
+                };
+                if jtx.send(tagged).await.is_err() {
+                    break;
                 }
             }
         });
@@ -3507,15 +4509,16 @@ fn spawn_join_forwarders(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_count_window_rule(
-    rule_mgr: RuleManager,
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
     rule_id: String,
     select_stmt: SelectStmt,
-    mut rx: broadcast::Receiver<StreamRecord>,
+    mut rx: StreamReceiver,
     size: usize,
     interval: Option<usize>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     send_error: bool,
-    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
@@ -3532,12 +4535,12 @@ async fn run_count_window_rule(
         tokio::select! {
             res = rx.recv() => {
                 match res {
-            Ok(record) => {
-                if !is_rule_running(&rule_mgr, &rule_id) {
+            Some(record) => {
+                if !is_rule_running(&running) {
                     continue;
                 }
-                rule_mgr.inc_source_records(&rule_id, 1);
-                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
+                counters.inc_source(1);
+                if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
                 buffer.push(TaggedRow { source: from_source.clone(), data: record.data });
@@ -3545,10 +4548,15 @@ async fn run_count_window_rule(
                 if hop <= count {
                     // Standard count window (tumbling when hop == count, overlapping when hop < count)
                     if buffer.len() >= count {
-                        let batch = &buffer[0..count];
-                        emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, batch, &sink).await;
-                        // Discard only the oldest `hop` records; retain the rest for overlapping windows
-                        buffer.drain(0..hop.min(buffer.len()));
+                        let batch: Vec<TaggedRow> = if hop == count {
+                            buffer.drain(0..count).collect()
+                        } else {
+                            // Overlapping: discard only the oldest `hop` records.
+                            let batch = buffer[0..count].to_vec();
+                            buffer.drain(0..hop.min(buffer.len()));
+                            batch
+                        };
+                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
                     }
                 } else {
                     // Sparsely sampled count window with gap (hop > count)
@@ -3557,42 +4565,46 @@ async fn run_count_window_rule(
                     }
                     if events_since_trigger >= hop {
                         if !buffer.is_empty() {
-                            emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
+                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
                         }
                         events_since_trigger = 0;
                         buffer.clear();
                     }
                 }
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+            None => break,
                 }
             }
             jrec = join_rx.recv(), if joins_open => {
                 match jrec {
                     Some(tagged) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
+                        counters.inc_source(1);
                         let probe = StreamRecord::new(tagged.data.clone());
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
                         buffer.push(tagged);
                         events_since_trigger += 1;
                         if hop <= count {
                             if buffer.len() >= count {
-                                let batch = &buffer[0..count];
-                                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, batch, &sink).await;
-                                buffer.drain(0..hop.min(buffer.len()));
+                                let batch: Vec<TaggedRow> = if hop == count {
+                                    buffer.drain(0..count).collect()
+                                } else {
+                                    let batch = buffer[0..count].to_vec();
+                                    buffer.drain(0..hop.min(buffer.len()));
+                                    batch
+                                };
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
                             }
                         } else if events_since_trigger >= hop {
                             if buffer.len() > count {
                                 buffer.remove(0);
                             }
                             if !buffer.is_empty() {
-                                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
                             }
                             events_since_trigger = 0;
                             buffer.clear();
@@ -3627,20 +4639,22 @@ fn tumbling_window_duration(unit: &TimeUnit, length: u64) -> std::time::Duration
 
 #[allow(clippy::too_many_arguments)]
 async fn run_tumbling_window_rule(
-    rule_mgr: RuleManager,
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
     rule_id: String,
     select_stmt: SelectStmt,
-    mut rx: broadcast::Receiver<StreamRecord>,
+    mut rx: StreamReceiver,
     duration: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
     send_error: bool,
-    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
-    let mut ticker = tokio::time::interval(duration);
-    let mut buffer: Vec<TaggedRow> = Vec::new();
+    let mut ticker = aligned_interval(duration);
+    // Processing-time window contents (row-free when the projection allows).
+    let mut window = WindowRows::new(&select_stmt);
     // Event-time state: event-timestamped rows, the watermark, and the start
     // of the currently open event-time window (aligned to its length).
     let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
@@ -3666,34 +4680,41 @@ async fn run_tumbling_window_rule(
                     if window_start.is_none() {
                         window_start = Some(aligned);
                     }
-                    et_buffer.push((event_ts, tagged));
+                    // Rows rejected by WHERE still advance the watermark.
+                    if window_ingest_passes(&select_stmt, &tagged.data) {
+                        et_buffer.push((event_ts, tagged));
+                    }
                     // Close every window the watermark has passed.
                     while let Some(t0) = window_start {
                         let t_end = t0.saturating_add(window_millis);
                         if watermark < t_end {
                             break;
                         }
-                        let batch: Vec<TaggedRow> = et_buffer
-                            .iter()
-                            .filter(|(ts, _)| *ts >= t0 && *ts < t_end)
-                            .map(|(_, row)| row.clone())
+                        let (closed, open): (Vec<(i64, TaggedRow)>, Vec<(i64, TaggedRow)>) =
+                            std::mem::take(&mut et_buffer)
+                                .into_iter()
+                                .partition(|(ts, _)| *ts < t_end);
+                        et_buffer = open;
+                        let batch: Vec<TaggedRow> = closed
+                            .into_iter()
+                            .filter(|(ts, _)| *ts >= t0)
+                            .map(|(_, row)| row)
                             .collect();
-                        et_buffer.retain(|(ts, _)| *ts >= t_end);
                         window_start = Some(t_end);
                         emit_window_batch(
-                            &rule_mgr,
-                            &rule_id,
+                            &counters,
                             &table_manager,
                             &source_configs,
                             &select_stmt,
-                            &batch,
+                            batch,
+                            true,
                             &sink,
                         )
                         .await;
                     }
                 }
             } else {
-                buffer.push(tagged);
+                window.push(&select_stmt, tagged);
             }
         }};
     }
@@ -3701,31 +4722,30 @@ async fn run_tumbling_window_rule(
         tokio::select! {
             res = rx.recv() => {
                 match res {
-                    Ok(record) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                    Some(record) => {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record)
+                        counters.inc_source(1);
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &record)
                             .await
                         {
                             continue;
                         }
                         ingest!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    None => break,
                 }
             }
             jrec = join_rx.recv(), if joins_open => {
                 match jrec {
                     Some(tagged) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
+                        counters.inc_source(1);
                         let probe = StreamRecord::new(tagged.data.clone());
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
                         ingest!(tagged);
@@ -3740,11 +4760,101 @@ async fn run_tumbling_window_rule(
                     // Windows close on watermark advance, never on the clock.
                     continue;
                 }
-                if buffer.is_empty() {
+                if window.is_empty() {
                     continue;
                 }
-                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &buffer, &sink).await;
-                buffer.clear();
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+            }
+        }
+    }
+}
+
+/// SESSIONWINDOW over processing time (eKuiper semantics): a session opens
+/// at the first row that passes `WHERE`, closes `timeout` after the last
+/// such row, and is also cut at a natural-time `max_duration` check once it
+/// has lasted at least `max_duration`. Sessions are stream-wide; `GROUP BY`
+/// partitions rows inside a session.
+#[allow(clippy::too_many_arguments)]
+async fn run_session_window_rule(
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: StreamReceiver,
+    max_duration: std::time::Duration,
+    timeout: std::time::Duration,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    send_error: bool,
+    join_rxs: Vec<(String, StreamReceiver)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
+) {
+    let mut max_check = aligned_interval(max_duration);
+    let mut window = WindowRows::new(&select_stmt);
+    // When the open session started; `None` while no session is open.
+    let mut opened_at: Option<tokio::time::Instant> = None;
+    let idle = tokio::time::sleep(timeout);
+    tokio::pin!(idle);
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
+    macro_rules! ingest {
+        ($tagged:expr) => {{
+            if window.push(&select_stmt, $tagged) {
+                let now = tokio::time::Instant::now();
+                if opened_at.is_none() {
+                    opened_at = Some(now);
+                }
+                idle.as_mut().reset(now + timeout);
+            }
+        }};
+    }
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Some(record) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &record)
+                            .await
+                        {
+                            continue;
+                        }
+                        ingest!(TaggedRow { source: from_source.clone(), data: record.data });
+                    }
+                    None => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        ingest!(tagged);
+                    }
+                    None => {
+                        joins_open = false;
+                    }
+                }
+            }
+            _ = &mut idle, if opened_at.is_some() => {
+                opened_at = None;
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+            }
+            _ = max_check.tick() => {
+                if opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
+                    opened_at = None;
+                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                }
             }
         }
     }
@@ -3752,22 +4862,21 @@ async fn run_tumbling_window_rule(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_hopping_window_rule(
-    rule_mgr: RuleManager,
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
     rule_id: String,
     select_stmt: SelectStmt,
-    mut rx: broadcast::Receiver<StreamRecord>,
+    mut rx: StreamReceiver,
     length: std::time::Duration,
     hop: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     send_error: bool,
-    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
-    let mut ticker = tokio::time::interval(hop);
-    // Tokio's interval fires immediately on the first tick; consume it so the
-    // first window emission aligns with elapsed hop time.
-    ticker.tick().await;
+    // Hops end on natural-time multiples of the hop (eKuiper alignment).
+    let mut ticker = aligned_interval(hop);
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
     let from_source = select_stmt.from.clone();
     let mut join_rx = spawn_join_forwarders(join_rxs);
@@ -3776,31 +4885,32 @@ async fn run_hopping_window_rule(
         tokio::select! {
             res = rx.recv() => {
                 match res {
-                    Ok(record) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                    Some(record) => {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record)
+                        counters.inc_source(1);
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &record)
                             .await
                         {
                             continue;
                         }
-                        buffer.push((std::time::Instant::now(), TaggedRow { source: from_source.clone(), data: record.data }));
+                        if window_ingest_passes(&select_stmt, &record.data) {
+                            buffer.push((std::time::Instant::now(), TaggedRow { source: from_source.clone(), data: record.data }));
+                        }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    None => break,
                 }
             }
             jrec = join_rx.recv(), if joins_open => {
                 match jrec {
                     Some(tagged) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
+                        counters.inc_source(1);
                         let probe = StreamRecord::new(tagged.data.clone());
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
                         buffer.push((std::time::Instant::now(), tagged));
@@ -3819,7 +4929,7 @@ async fn run_hopping_window_rule(
                 }
                 let batch: Vec<TaggedRow> =
                     buffer.iter().map(|(_, row)| row.clone()).collect();
-                emit_window_batch(&rule_mgr, &rule_id, &table_manager, &source_configs, &select_stmt, &batch, &sink).await;
+                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, &sink).await;
             }
         }
     }
@@ -3827,16 +4937,17 @@ async fn run_hopping_window_rule(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_sliding_window_rule(
-    rule_mgr: RuleManager,
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
     rule_id: String,
     select_stmt: SelectStmt,
-    mut rx: broadcast::Receiver<StreamRecord>,
+    mut rx: StreamReceiver,
     length: std::time::Duration,
     delay: Option<std::time::Duration>,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
     event_time: EventTimeConfig,
     send_error: bool,
-    join_rxs: Vec<(String, broadcast::Receiver<StreamRecord>)>,
+    join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
@@ -3853,7 +4964,9 @@ async fn run_sliding_window_rule(
     macro_rules! ingest_slide {
         ($tagged:expr) => {{
             let tagged: TaggedRow = $tagged;
-            if event_time.enabled {
+            if !window_ingest_passes(&select_stmt, &tagged.data) {
+                // Filtered below the window: neither buffered nor a trigger.
+            } else if event_time.enabled {
                 let event_ts =
                     extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
                 if event_ts < watermark {
@@ -3870,12 +4983,12 @@ async fn run_sliding_window_rule(
                     let batch: Vec<TaggedRow> =
                         et_buffer.iter().map(|(_, row)| row.clone()).collect();
                     emit_window_batch(
-                        &rule_mgr,
-                        &rule_id,
+                        &counters,
                         &table_manager,
                         &source_configs,
                         &select_stmt,
-                        &batch,
+                        batch,
+                        true,
                         &sink,
                     )
                     .await;
@@ -3890,12 +5003,12 @@ async fn run_sliding_window_rule(
                     let batch: Vec<TaggedRow> =
                         buffer.iter().map(|(_, row)| row.clone()).collect();
                     emit_window_batch(
-                        &rule_mgr,
-                        &rule_id,
+                        &counters,
                         &table_manager,
                         &source_configs,
                         &select_stmt,
-                        &batch,
+                        batch,
+                        true,
                         &sink,
                     )
                     .await;
@@ -3907,12 +5020,12 @@ async fn run_sliding_window_rule(
         tokio::select! {
             res = rx.recv() => {
             match res {
-            Ok(record) => {
-                if !is_rule_running(&rule_mgr, &rule_id) {
+            Some(record) => {
+                if !is_rule_running(&running) {
                     continue;
                 }
-                rule_mgr.inc_source_records(&rule_id, 1);
-                if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &record).await {
+                counters.inc_source(1);
+                if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
                 // If delay is configured, wait for the delay duration before evaluating
@@ -3924,19 +5037,18 @@ async fn run_sliding_window_rule(
                 }
                 ingest_slide!(TaggedRow { source: from_source.clone(), data: record.data });
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+            None => break,
             }
             }
             jrec = join_rx.recv(), if joins_open => {
                 match jrec {
                     Some(tagged) => {
-                        if !is_rule_running(&rule_mgr, &rule_id) {
+                        if !is_rule_running(&running) {
                             continue;
                         }
-                        rule_mgr.inc_source_records(&rule_id, 1);
+                        counters.inc_source(1);
                         let probe = StreamRecord::new(tagged.data.clone());
-                        if handle_error_record(&rule_mgr, &rule_id, send_error, &sink, &probe).await {
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
                         if let Some(delay_dur) = delay {
@@ -4318,6 +5430,16 @@ fn window_to_string(window: &WindowDef) -> String {
             Some(i) => format!("COUNTWINDOW({}, {})", size, i),
             None => format!("COUNTWINDOW({})", size),
         },
+        WindowDef::Session {
+            unit,
+            max_duration,
+            timeout,
+        } => format!(
+            "SESSIONWINDOW({}, {}, {})",
+            time_unit_to_string(unit),
+            max_duration,
+            timeout
+        ),
     }
 }
 
@@ -7340,7 +8462,11 @@ async fn rule_cpu_usage(State(state): State<AppState>) -> impl IntoResponse {
     for rule in state.rule_manager.list_rules() {
         // Per-rule CPU accounting is unavailable: running rules share the
         // process measurement, stopped rules report zero.
-        let usage = if is_rule_running(&state.rule_manager, &rule.id) {
+        let usage = if state
+            .rule_manager
+            .get_rule_status(&rule.id)
+            .is_some_and(|s| s.status == "running")
+        {
             cpu
         } else {
             0.0
@@ -8105,7 +9231,8 @@ mod tests {
         let manager = test_stream_manager(&[("CONF_KEY", "remotekey")]).await;
         let configs =
             test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
-        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        let cfg =
+            resolve_mqtt_source(&manager, &configs, &SchemaManager::new(), "demo", "r1").unwrap();
         assert_eq!(cfg.server, "tcp://broker:1883");
         assert_eq!(cfg.topic, "demo");
     }
@@ -8117,7 +9244,8 @@ mod tests {
             test_stream_manager(&[("conf_key", "remotekey"), ("datasource", "sensors/#")]).await;
         let configs =
             test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
-        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        let cfg =
+            resolve_mqtt_source(&manager, &configs, &SchemaManager::new(), "demo", "r1").unwrap();
         assert_eq!(cfg.server, "tcp://broker:1883");
         assert_eq!(cfg.topic, "sensors/#");
     }
@@ -8129,7 +9257,8 @@ mod tests {
                 .await;
         let configs =
             test_source_configs(&[("mqtt/remotekey", json!({"server": "tcp://broker:1883"}))]);
-        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        let cfg =
+            resolve_mqtt_source(&manager, &configs, &SchemaManager::new(), "demo", "r1").unwrap();
         assert_eq!(cfg.server, "tcp://override:1883");
     }
 
@@ -8137,7 +9266,8 @@ mod tests {
     async fn resolve_mqtt_source_falls_back_to_loopback() {
         let manager = test_stream_manager(&[]).await;
         let configs = test_source_configs(&[]);
-        let cfg = resolve_mqtt_source(&manager, &configs, "demo", "r1").unwrap();
+        let cfg =
+            resolve_mqtt_source(&manager, &configs, &SchemaManager::new(), "demo", "r1").unwrap();
         assert_eq!(cfg.server, "tcp://127.0.0.1:1883");
         assert_eq!(cfg.topic, "demo");
     }

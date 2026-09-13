@@ -17,7 +17,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
 # Build release binaries in parallel
-RUN cargo build --release
+RUN cargo build --release -j2
 
 # ==============================================================================
 # Runtime Stage: Ultra-lightweight secure Alpine runtime

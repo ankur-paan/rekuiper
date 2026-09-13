@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use rekuiper_core::model::StreamRecord;
+use rekuiper_core::StreamSender;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -255,11 +256,11 @@ async fn append_text(path: &Path, bytes: &[u8]) -> Result<()> {
 /// decoding each line per the configured [`FileSourceConfig`] format.
 pub struct FileSource {
     pub config: FileSourceConfig,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl FileSource {
-    pub fn new(config: FileSourceConfig, tx: tokio::sync::broadcast::Sender<StreamRecord>) -> Self {
+    pub fn new(config: FileSourceConfig, tx: StreamSender) -> Self {
         Self { config, tx }
     }
 
@@ -329,8 +330,9 @@ pub struct MqttConfig {
     /// Topic to publish to / subscribe to.
     #[serde(default)]
     pub topic: String,
-    /// Client id (`clientId` in eKuiper JSON). Generated when absent.
-    #[serde(default)]
+    /// Client id (`clientid` in eKuiper source configs, `clientId` in
+    /// action JSON). Generated when absent.
+    #[serde(default, alias = "clientid")]
     pub client_id: Option<String>,
     /// MQTT QoS level (0, 1 or 2). Defaults to 0.
     #[serde(default)]
@@ -341,6 +343,44 @@ pub struct MqttConfig {
     /// Optional password.
     #[serde(default)]
     pub password: Option<String>,
+    /// eKuiper `protocolVersion` (`3.1` / `3.1.1`). Both are served by the
+    /// MQTT 3.1.1 wire protocol, which brokers accept for 3.1 clients.
+    #[serde(default)]
+    pub protocol_version: Option<String>,
+    /// Clean-session flag (default `true`). `false` with a fixed client id
+    /// lets the broker queue QoS 1/2 messages while a vehicle is offline.
+    #[serde(default)]
+    pub clean_session: Option<bool>,
+    /// Keep-alive interval in seconds (default 30).
+    #[serde(default)]
+    pub keep_alive: Option<u64>,
+    /// Source payload decoding (stream `FORMAT`); set by the stream resolver.
+    #[serde(skip)]
+    pub format: PayloadFormat,
+    /// Attach `__meta__` (topic, qos, messageId) to source rows; set when a
+    /// rule calls `meta()`/`mqtt()`, so other rules skip the allocation.
+    #[serde(skip)]
+    pub attach_meta: bool,
+}
+
+/// Largest MQTT packet accepted or sent (rumqttc defaults to 10 KiB, which
+/// would drop larger vehicle frames by disconnecting).
+const MQTT_MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
+
+/// How an MQTT stream decodes payloads (stream `FORMAT`, eKuiper names).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum PayloadFormat {
+    /// JSON object (one row) or array of objects (one row each).
+    #[default]
+    Json,
+    /// Whole payload in the single field `self` (eKuiper BINARY streams):
+    /// UTF-8 payloads (ESPHome states such as `23.5` or `ON`) as text,
+    /// other bytes as base64.
+    Binary,
+    /// Delimited text mapped onto the stream columns (or `col0`, `col1`, …).
+    Delimited(DelimitedCodec),
+    /// Protobuf message resolved from the stream `SCHEMAID`.
+    Protobuf(Arc<ProtoMessage>),
 }
 
 fn default_mqtt_server() -> String {
@@ -350,6 +390,16 @@ fn default_mqtt_server() -> String {
 impl MqttConfig {
     pub fn qos_level(&self) -> QoS {
         qos_from_u8(self.qos)
+    }
+
+    /// Subscription topics: `DATASOURCE` may list several, comma separated.
+    pub fn topics(&self) -> Vec<String> {
+        self.topic
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn effective_client_id(&self) -> String {
@@ -428,7 +478,21 @@ pub fn parse_mqtt_server_url(server: &str) -> Result<(String, u16)> {
 fn mqtt_options(config: &MqttConfig) -> Result<MqttOptions> {
     let (host, port) = parse_mqtt_server_url(&config.server)?;
     let mut opts = MqttOptions::new(config.effective_client_id(), host, port);
-    opts.set_keep_alive(std::time::Duration::from_secs(30));
+    opts.set_keep_alive(std::time::Duration::from_secs(
+        config.keep_alive.unwrap_or(30).max(5),
+    ));
+    opts.set_max_packet_size(MQTT_MAX_PACKET_BYTES, MQTT_MAX_PACKET_BYTES);
+    if let Some(clean) = config.clean_session {
+        opts.set_clean_session(clean);
+    }
+    if let Some(version) = config.protocol_version.as_deref() {
+        if !matches!(version.trim(), "" | "3.1" | "3.1.1" | "4") {
+            tracing::warn!(
+                "MQTT protocolVersion {:?} is not supported; using 3.1.1",
+                version
+            );
+        }
+    }
     if let (Some(u), Some(p)) = (config.username.clone(), config.password.clone()) {
         opts.set_credentials(u, p);
     } else if let Some(u) = config.username.clone() {
@@ -437,36 +501,78 @@ fn mqtt_options(config: &MqttConfig) -> Result<MqttOptions> {
     Ok(opts)
 }
 
-fn spawn_event_loop_driver(mut eventloop: rumqttc::EventLoop) {
+/// Drives a sink connection, tracking whether it is currently connected.
+/// Exits once every client handle is dropped (the sink is gone) instead of
+/// reconnecting forever.
+fn spawn_event_loop_driver(
+    mut eventloop: rumqttc::EventLoop,
+    connected: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering::Relaxed;
     tokio::spawn(async move {
         loop {
             match eventloop.poll().await {
+                Ok(Event::Incoming(Packet::ConnAck(_))) => connected.store(true, Relaxed),
                 Ok(_) => {}
+                Err(rumqttc::ConnectionError::RequestsDone) => break,
                 Err(e) => {
+                    connected.store(false, Relaxed);
                     tracing::warn!("MQTT event loop error: {}", e);
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             }
         }
+        connected.store(false, Relaxed);
     });
 }
 
-/// MQTT sink: publishes each record's `data` as JSON to the configured topic.
+/// Queued publishes between the sink worker and the network.
+const MQTT_SINK_REQUEST_CAPACITY: usize = 1024;
+/// How long a new sink waits for its first connection before failing sends.
+const MQTT_SINK_CONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// MQTT sink: one persistent connection that publishes each record's `data`
+/// as JSON to the configured topic. While the broker is unreachable, sends
+/// fail fast so the caller can cache and resend.
 pub struct MqttSink {
     pub config: MqttConfig,
     client: AsyncClient,
+    connected: Arc<std::sync::atomic::AtomicBool>,
+    created: std::time::Instant,
 }
 
 impl MqttSink {
     pub fn new(config: MqttConfig) -> Result<Self> {
         let opts = mqtt_options(&config)?;
-        let (client, eventloop) = AsyncClient::new(opts, 64);
-        spawn_event_loop_driver(eventloop);
-        Ok(Self { config, client })
+        let (client, eventloop) = AsyncClient::new(opts, MQTT_SINK_REQUEST_CAPACITY);
+        let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        spawn_event_loop_driver(eventloop, connected.clone());
+        Ok(Self {
+            config,
+            client,
+            connected,
+            created: std::time::Instant::now(),
+        })
     }
 
     pub fn config(&self) -> &MqttConfig {
         &self.config
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A fresh sink waits briefly for its first connection; afterwards a
+    /// disconnected sink fails immediately.
+    async fn ensure_connected(&self) -> Result<()> {
+        while !self.is_connected() {
+            if self.created.elapsed() >= MQTT_SINK_CONNECT_GRACE {
+                bail!("MQTT sink is not connected to {}", self.config.server);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        Ok(())
     }
 }
 
@@ -481,13 +587,14 @@ impl Sink for MqttSink {
 impl MqttSink {
     /// Publishes pre-rendered bytes (e.g. a `dataTemplate` result).
     pub async fn send_raw(&self, payload: Vec<u8>) -> Result<()> {
+        self.send_raw_to(&self.config.topic, payload).await
+    }
+
+    /// Publishes to an explicit topic (e.g. a `resendDestination`).
+    pub async fn send_raw_to(&self, topic: &str, payload: Vec<u8>) -> Result<()> {
+        self.ensure_connected().await?;
         self.client
-            .publish(
-                self.config.topic.clone(),
-                self.config.qos_level(),
-                false,
-                payload,
-            )
+            .publish(topic, self.config.qos_level(), false, payload)
             .await
             .map_err(|e| anyhow::anyhow!("MQTT publish failed: {}", e))?;
         Ok(())
@@ -498,23 +605,163 @@ impl MqttSink {
 ///
 /// The payload must be a JSON object; its members become the record data.
 pub fn decode_mqtt_payload(payload: &[u8]) -> Result<StreamRecord> {
-    let value: Value = serde_json::from_slice(payload).context("MQTT payload is not valid JSON")?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("MQTT payload must be a JSON object"))?;
-    let data: HashMap<String, Value> = obj.clone().into_iter().collect();
-    Ok(StreamRecord::new(data))
+    // Fast path: deserialize straight into the row map (no intermediate DOM,
+    // no object clone). Only a failing payload pays for the diagnostic parse
+    // that distinguishes invalid JSON from a non-object value.
+    match serde_json::from_slice::<HashMap<String, Value>>(payload) {
+        Ok(data) => Ok(StreamRecord::new(data)),
+        Err(_) => {
+            let value: Value =
+                serde_json::from_slice(payload).context("MQTT payload is not valid JSON")?;
+            match value {
+                Value::Object(map) => Ok(StreamRecord::new(map.into_iter().collect())),
+                _ => Err(anyhow::anyhow!("MQTT payload must be a JSON object")),
+            }
+        }
+    }
+}
+
+/// Decode one payload per `format` into rows appended to `out`. `meta`, when
+/// given, is attached to every produced row under `__meta__`.
+pub fn decode_payload_into(
+    format: &PayloadFormat,
+    payload: &[u8],
+    meta: Option<Value>,
+    out: &mut Vec<StreamRecord>,
+) -> Result<()> {
+    let first = out.len();
+    match format {
+        PayloadFormat::Json => match serde_json::from_slice::<HashMap<String, Value>>(payload) {
+            Ok(data) => out.push(StreamRecord::new(data)),
+            Err(_) => {
+                let value: Value =
+                    serde_json::from_slice(payload).context("MQTT payload is not valid JSON")?;
+                match value {
+                    Value::Object(map) => out.push(StreamRecord::new(map.into_iter().collect())),
+                    Value::Array(items) => {
+                        for item in items {
+                            match item {
+                                Value::Object(map) => {
+                                    out.push(StreamRecord::new(map.into_iter().collect()))
+                                }
+                                _ => {
+                                    out.truncate(first);
+                                    bail!("MQTT JSON array payload must contain only objects");
+                                }
+                            }
+                        }
+                    }
+                    _ => bail!("MQTT payload must be a JSON object or an array of objects"),
+                }
+            }
+        },
+        PayloadFormat::Binary => {
+            let value = match std::str::from_utf8(payload) {
+                Ok(text) => Value::String(text.to_string()),
+                Err(_) => {
+                    use base64::Engine as _;
+                    Value::String(base64::engine::general_purpose::STANDARD.encode(payload))
+                }
+            };
+            let mut data = HashMap::with_capacity(2);
+            data.insert("self".to_string(), value);
+            out.push(StreamRecord::new(data));
+        }
+        PayloadFormat::Delimited(codec) => {
+            let text = std::str::from_utf8(payload).context("delimited payload is not UTF-8")?;
+            let line = text.trim_end_matches(['\r', '\n']);
+            out.push(StreamRecord::new(codec.decode_row(line)));
+        }
+        PayloadFormat::Protobuf(message) => match ProtobufCodec::decode(payload, message) {
+            Value::Object(map) => out.push(StreamRecord::new(map.into_iter().collect())),
+            _ => bail!("payload is not a valid '{}' protobuf message", message.name),
+        },
+    }
+    if let Some(meta) = meta {
+        let end = out.len();
+        if end > first {
+            for record in &mut out[first..end - 1] {
+                record.data.insert("__meta__".to_string(), meta.clone());
+            }
+            out[end - 1].data.insert("__meta__".to_string(), meta);
+        }
+    }
+    Ok(())
+}
+
+/// eKuiper MQTT source metadata for `meta(topic)` / `meta(qos)` /
+/// `meta(messageId)`; the topic string is moved, not copied.
+fn mqtt_meta(topic: String, qos: QoS, pkid: u16) -> Value {
+    let mut meta = serde_json::Map::with_capacity(3);
+    meta.insert("topic".to_string(), Value::String(topic));
+    meta.insert("qos".to_string(), Value::from(qos as u8));
+    meta.insert("messageId".to_string(), Value::from(pkid));
+    Value::Object(meta)
+}
+
+/// Upper bound on MQTT publishes admitted to the stream bus in one batch.
+const MQTT_SOURCE_MAX_BATCH: usize = 1024;
+
+fn push_decoded(config: &MqttConfig, batch: &mut Vec<StreamRecord>, publish: rumqttc::Publish) {
+    let meta = config
+        .attach_meta
+        .then(|| mqtt_meta(publish.topic, publish.qos, publish.pkid));
+    if let Err(e) = decode_payload_into(&config.format, &publish.payload, meta, batch) {
+        tracing::warn!("Skipping invalid MQTT payload: {}", e);
+    }
+}
+
+/// Moves publishes that rumqttc has already read from the network and queued
+/// (`EventLoop::state.events`) into `batch`, in arrival order. `poll()` pops
+/// exactly this queue before touching the network again, so draining it here
+/// is equivalent to repeated `poll()` calls without the per-message await, and
+/// never waits for more data. Stops at the first non-publish event (left for
+/// `poll()`, e.g. ConnAck resubscribe handling) or once `max` records are
+/// collected. Acks for these packets were already flushed at read time.
+fn drain_buffered_publishes(
+    config: &MqttConfig,
+    events: &mut std::collections::VecDeque<rumqttc::Event>,
+    batch: &mut Vec<StreamRecord>,
+    max: usize,
+) {
+    while batch.len() < max {
+        if !matches!(
+            events.front(),
+            Some(rumqttc::Event::Incoming(rumqttc::Packet::Publish(_)))
+        ) {
+            break;
+        }
+        if let Some(rumqttc::Event::Incoming(rumqttc::Packet::Publish(p))) = events.pop_front() {
+            push_decoded(config, batch, p);
+        }
+    }
+}
+
+/// Subscribe to every configured topic in one SUBSCRIBE packet.
+async fn subscribe_topics(client: &AsyncClient, config: &MqttConfig) -> Result<()> {
+    let filters: Vec<rumqttc::SubscribeFilter> = config
+        .topics()
+        .into_iter()
+        .map(|t| rumqttc::SubscribeFilter::new(t, config.qos_level()))
+        .collect();
+    if filters.is_empty() {
+        bail!("MQTT source has no topic");
+    }
+    client
+        .subscribe_many(filters)
+        .await
+        .map_err(|e| anyhow::anyhow!("MQTT subscribe to {} failed: {}", config.topic, e))
 }
 
 /// MQTT source: subscribes to the configured topic and forwards each
 /// incoming JSON message as a [`StreamRecord`].
 pub struct MqttSource {
     pub config: MqttConfig,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl MqttSource {
-    pub fn new(config: MqttConfig, tx: tokio::sync::broadcast::Sender<StreamRecord>) -> Self {
+    pub fn new(config: MqttConfig, tx: StreamSender) -> Self {
         Self { config, tx }
     }
 
@@ -541,11 +788,8 @@ impl MqttSource {
                 }
             };
             let (client, mut eventloop) = AsyncClient::new(opts, 64);
-            if let Err(e) = client
-                .subscribe(self.config.topic.clone(), self.config.qos_level())
-                .await
-            {
-                tracing::warn!("MQTT subscribe to {} failed: {}", self.config.topic, e);
+            if let Err(e) = subscribe_topics(&client, &self.config).await {
+                tracing::warn!("{}", e);
                 return;
             }
             loop {
@@ -553,14 +797,22 @@ impl MqttSource {
                     event = eventloop.poll() => {
                         match event {
                             Ok(Event::Incoming(Packet::Publish(p))) => {
-                                match decode_mqtt_payload(&p.payload) {
-                                    Ok(record) => {
-                                        // Ignore SendError: subscribers dropped.
-                                        let _ = self.tx.send(record);
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("Skipping invalid MQTT payload: {}", e);
-                                    }
+                                // Opportunistic batch: admit this publish plus
+                                // every publish already read in the same
+                                // network read, in order, with one bus
+                                // admission. Backpressure still reaches the
+                                // source: send_batch awaits subscriber capacity
+                                // instead of overwriting buffered records.
+                                let mut batch = Vec::with_capacity(16);
+                                push_decoded(&self.config, &mut batch, p);
+                                drain_buffered_publishes(
+                                    &self.config,
+                                    &mut eventloop.state.events,
+                                    &mut batch,
+                                    MQTT_SOURCE_MAX_BATCH,
+                                );
+                                if !batch.is_empty() {
+                                    let _ = self.tx.send_batch(batch).await;
                                 }
                             }
                             // rumqttc does not restore subscriptions across
@@ -568,15 +820,8 @@ impl MqttSource {
                             // re-subscribe or the source goes silently deaf
                             // after a broker restart.
                             Ok(Event::Incoming(Packet::ConnAck(_))) => {
-                                if let Err(e) = client
-                                    .subscribe(self.config.topic.clone(), self.config.qos_level())
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        "MQTT resubscribe to {} failed: {}",
-                                        self.config.topic,
-                                        e
-                                    );
+                                if let Err(e) = subscribe_topics(&client, &self.config).await {
+                                    tracing::warn!("MQTT resubscribe: {}", e);
                                 }
                             }
                             Ok(_) => {}
@@ -605,31 +850,22 @@ impl MqttSource {
     pub async fn run(self, tx: tokio::sync::mpsc::Sender<StreamRecord>) -> Result<()> {
         let opts = mqtt_options(&self.config)?;
         let (client, mut eventloop) = AsyncClient::new(opts, 64);
-        client
-            .subscribe(self.config.topic.clone(), self.config.qos_level())
-            .await
-            .map_err(|e| anyhow::anyhow!("MQTT subscribe failed: {}", e))?;
+        subscribe_topics(&client, &self.config).await?;
+        let mut rows = Vec::new();
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Packet::Publish(p))) => {
-                    match decode_mqtt_payload(&p.payload) {
-                        Ok(record) => {
-                            if tx.send(record).await.is_err() {
-                                // Receiver dropped; shut down cleanly.
-                                return Ok(());
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Skipping invalid MQTT payload: {}", e);
+                    push_decoded(&self.config, &mut rows, p);
+                    for record in rows.drain(..) {
+                        if tx.send(record).await.is_err() {
+                            // Receiver dropped; shut down cleanly.
+                            return Ok(());
                         }
                     }
                 }
                 // See `spawn`: subscriptions die with the connection.
                 Ok(Event::Incoming(Packet::ConnAck(_))) => {
-                    client
-                        .subscribe(self.config.topic.clone(), self.config.qos_level())
-                        .await
-                        .map_err(|e| anyhow::anyhow!("MQTT resubscribe failed: {}", e))?;
+                    subscribe_topics(&client, &self.config).await?;
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -674,7 +910,7 @@ fn default_http_interval() -> u64 {
 /// response yields one record per object element.
 pub struct HttpPullSource {
     pub config: HttpPullConfig,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl HttpPullSource {
@@ -694,7 +930,7 @@ impl HttpPullSource {
                             Ok(records) => {
                                 for record in records {
                                     // All subscribers dropped: shut down cleanly.
-                                    if self.tx.send(record).is_err() {
+                                    if self.tx.send(record).await.is_err() {
                                         return;
                                     }
                                 }
@@ -838,7 +1074,7 @@ pub fn decode_websocket_message(text: &str) -> Result<Vec<StreamRecord>> {
 /// WebSocket source: streams incoming text messages as [`StreamRecord`]s.
 pub struct WebSocketSource {
     pub url: String,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl WebSocketSource {
@@ -864,7 +1100,7 @@ impl WebSocketSource {
                                     Ok(records) => {
                                         for record in records {
                                             // All subscribers dropped: shut down cleanly.
-                                            if self.tx.send(record).is_err() {
+                                            if self.tx.send(record).await.is_err() {
                                                 return;
                                             }
                                         }
@@ -1030,7 +1266,7 @@ fn redis_scalar_key(v: &Value) -> String {
 pub struct RedisSubSource {
     pub url: String,
     pub channel: String,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl RedisSubSource {
@@ -1081,7 +1317,7 @@ impl RedisSubSource {
                             Ok(records) => {
                                 for record in records {
                                     // All subscribers dropped: shut down cleanly.
-                                    if self.tx.send(record).is_err() {
+                                    if self.tx.send(record).await.is_err() {
                                         return;
                                     }
                                 }
@@ -1276,7 +1512,7 @@ fn value_to_key_bytes(v: &Value) -> Vec<u8> {
 /// forwards each JSON payload as [`StreamRecord`]s.
 pub struct KafkaSource {
     pub config: KafkaConfig,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
 }
 
 impl KafkaSource {
@@ -1332,7 +1568,7 @@ impl KafkaSource {
                                         Ok(decoded) => {
                                             for record in decoded {
                                                 // All subscribers dropped: shut down cleanly.
-                                                if self.tx.send(record).is_err() {
+                                                if self.tx.send(record).await.is_err() {
                                                     return;
                                                 }
                                             }
@@ -1569,7 +1805,7 @@ impl FileSource {
                                 {
                                     for record in records {
                                         // All subscribers dropped: shut down cleanly.
-                                        if self.tx.send(record).is_err() {
+                                        if self.tx.send(record).await.is_err() {
                                             return;
                                         }
                                     }
@@ -2319,15 +2555,12 @@ pub async fn sql_lookup_key(
 /// `HttpPullSource` ticker/cancellation discipline.
 pub struct SqlSource {
     pub config: SqlConnectorConfig,
-    pub tx: tokio::sync::broadcast::Sender<StreamRecord>,
+    pub tx: StreamSender,
     index: Vec<(String, serde_json::Value)>,
 }
 
 impl SqlSource {
-    pub fn new(
-        config: SqlConnectorConfig,
-        tx: tokio::sync::broadcast::Sender<StreamRecord>,
-    ) -> Self {
+    pub fn new(config: SqlConnectorConfig, tx: StreamSender) -> Self {
         let index = initial_index_pairs(&config);
         Self { config, tx, index }
     }
@@ -2347,7 +2580,7 @@ impl SqlSource {
                             Ok(records) => {
                                 for record in records {
                                     // All subscribers dropped: shut down cleanly.
-                                    if self.tx.send(record).is_err() {
+                                    if self.tx.send(record).await.is_err() {
                                         return;
                                     }
                                 }
@@ -2590,7 +2823,7 @@ mod tests {
                 delimiter: None,
                 interval: 0,
             },
-            tokio::sync::broadcast::channel(16).0,
+            rekuiper_core::StreamBus::new().get_or_create("test"),
         );
         let records = source.read_records().await.unwrap();
         assert_eq!(records.len(), 2);
@@ -2606,7 +2839,9 @@ mod tests {
         tokio::fs::write(&path, "{\"temp\": 20}\n{\"temp\": 25}\n{\"temp\": 30}\n")
             .await
             .unwrap();
-        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
+        let bus = rekuiper_core::StreamBus::new();
+        let tx = bus.get_or_create("test-filesource");
+        let mut rx = bus.subscribe("test-filesource");
         let source = FileSource::new(
             FileSourceConfig {
                 path: path.to_string_lossy().into_owned(),
@@ -2770,7 +3005,7 @@ mod tests {
         assert!(sink.insert_record(&StreamRecord::new(data)).await.is_err());
         assert!(super::sql_lookup_key(url, "t", "id", "1").await.is_err());
         let mut src =
-            super::SqlSource::new(cfg, tokio::sync::broadcast::channel::<StreamRecord>(8).0);
+            super::SqlSource::new(cfg, rekuiper_core::StreamBus::new().get_or_create("test"));
         assert!(src.poll_once().await.is_err());
     }
 
@@ -2958,7 +3193,7 @@ mod tests {
                 table: "rksink".to_string(),
                 ..Default::default()
             },
-            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+            rekuiper_core::StreamBus::new().get_or_create("test"),
         );
         let rows = src.poll_once().await.unwrap();
         assert_eq!(rows.len(), 1);
@@ -3100,7 +3335,7 @@ mod tests {
                 }),
                 ..Default::default()
             },
-            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+            rekuiper_core::StreamBus::new().get_or_create("test"),
         );
         assert_eq!(src_ids(&src.poll_once().await.unwrap()), vec![1, 2, 3]);
         let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
@@ -3127,7 +3362,7 @@ mod tests {
                 }),
                 ..Default::default()
             },
-            tokio::sync::broadcast::channel::<StreamRecord>(8).0,
+            rekuiper_core::StreamBus::new().get_or_create("test"),
         );
         assert_eq!(src_ids(&tsrc.poll_once().await.unwrap()), vec![4, 5]);
     }
@@ -3157,5 +3392,149 @@ mod tests {
         // Non-object payloads are rejected.
         assert!(super::decode_mqtt_payload(br#"[1, 2]"#).is_err());
         assert!(super::decode_mqtt_payload(br#"not json"#).is_err());
+    }
+
+    #[test]
+    fn test_drain_buffered_publishes_batches_in_order() {
+        use std::collections::VecDeque;
+        let publish = |payload: Vec<u8>| {
+            rumqttc::Event::Incoming(rumqttc::Packet::Publish(rumqttc::Publish::new(
+                "bench/telemetry",
+                rumqttc::QoS::AtMostOnce,
+                payload,
+            )))
+        };
+        let obj = |id: u32| format!("{{\"id\":{id}}}").into_bytes();
+
+        // Order preserved, invalid payload skipped, stops at the first
+        // non-publish event so poll() still handles it (and what follows).
+        let mut events: VecDeque<rumqttc::Event> = VecDeque::new();
+        events.push_back(publish(obj(2)));
+        events.push_back(publish(obj(3)));
+        events.push_back(publish(b"not json".to_vec()));
+        events.push_back(publish(obj(4)));
+        events.push_back(rumqttc::Event::Incoming(rumqttc::Packet::PingResp));
+        events.push_back(publish(obj(5)));
+        let mut config: super::MqttConfig =
+            serde_json::from_value(json!({"topic": "bench/telemetry"})).unwrap();
+        let mut batch = vec![super::decode_mqtt_payload(br#"{"id":1}"#).unwrap()];
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024);
+        let ids: Vec<_> = batch.iter().map(|r| r.data["id"].clone()).collect();
+        assert_eq!(ids, vec![json!(1), json!(2), json!(3), json!(4)]);
+        assert_eq!(
+            events.len(),
+            2,
+            "PingResp and the publish after it stay queued"
+        );
+        assert!(
+            batch.iter().all(|r| !r.data.contains_key("__meta__")),
+            "metadata is only attached on request"
+        );
+
+        // The batch size bound is respected; the rest stays queued in order.
+        let mut events: VecDeque<rumqttc::Event> = (0..10).map(|i| publish(obj(i))).collect();
+        let mut batch = Vec::new();
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 4);
+        let ids: Vec<_> = batch.iter().map(|r| r.data["id"].clone()).collect();
+        assert_eq!(ids, vec![json!(0), json!(1), json!(2), json!(3)]);
+        assert_eq!(events.len(), 6);
+
+        // Requested metadata carries the publish topic and qos.
+        config.attach_meta = true;
+        let mut batch = Vec::new();
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1);
+        assert_eq!(batch[0].data["__meta__"]["topic"], json!("bench/telemetry"));
+        assert_eq!(batch[0].data["__meta__"]["qos"], json!(0));
+        assert!(batch[0].data["__meta__"].get("messageId").is_some());
+    }
+
+    #[test]
+    fn test_decode_payload_formats() {
+        use super::{decode_payload_into, DelimitedCodec, PayloadFormat};
+        let meta = || Some(json!({"topic": "t/1", "qos": 1, "messageId": 7}));
+
+        // JSON array: one row per object, metadata on every row.
+        let mut rows = Vec::new();
+        decode_payload_into(
+            &PayloadFormat::Json,
+            br#"[{"a":1},{"a":2}]"#,
+            meta(),
+            &mut rows,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].data["a"], json!(2));
+        assert!(rows
+            .iter()
+            .all(|r| r.data["__meta__"]["topic"] == json!("t/1")));
+
+        // Scalars and mixed arrays are rejected without leaving partial rows.
+        let mut rows = Vec::new();
+        assert!(decode_payload_into(&PayloadFormat::Json, b"23.5", None, &mut rows).is_err());
+        assert!(
+            decode_payload_into(&PayloadFormat::Json, br#"[{"a":1},2]"#, None, &mut rows).is_err()
+        );
+        assert!(rows.is_empty());
+
+        // BINARY: ESPHome text state as text, other bytes as base64, in `self`.
+        decode_payload_into(&PayloadFormat::Binary, b"23.5", None, &mut rows).unwrap();
+        decode_payload_into(&PayloadFormat::Binary, &[0xff, 0x00], None, &mut rows).unwrap();
+        assert_eq!(rows[0].data["self"], json!("23.5"));
+        assert_eq!(rows[1].data["self"], json!("/wA="));
+
+        // DELIMITED: positional colN names without a schema, stream columns with one.
+        let mut rows = Vec::new();
+        let plain = PayloadFormat::Delimited(DelimitedCodec::new(',', Vec::new()));
+        decode_payload_into(&plain, b"V1,88.5,on\n", None, &mut rows).unwrap();
+        assert_eq!(rows[0].data["col0"], json!("V1"));
+        assert_eq!(rows[0].data["col1"], json!(88.5));
+        assert_eq!(rows[0].data["col2"], json!("on"));
+        let typed = PayloadFormat::Delimited(DelimitedCodec::new(
+            ';',
+            vec!["vin".to_string(), "speed".to_string()],
+        ));
+        decode_payload_into(&typed, b"V2;42", None, &mut rows).unwrap();
+        assert_eq!(rows[1].data["vin"], json!("V2"));
+        assert_eq!(rows[1].data["speed"], json!(42));
+
+        // PROTOBUF: compact vehicle frame; garbage is an error.
+        let messages = super::parse_proto(
+            "syntax = \"proto3\";\nmessage Frame { string vin = 1; double speed = 2; }",
+        )
+        .unwrap();
+        let frame = std::sync::Arc::new(messages["Frame"].clone());
+        let bytes = super::ProtobufCodec::encode(&json!({"vin": "V3", "speed": 61.25}), &frame);
+        let format = PayloadFormat::Protobuf(frame);
+        let mut rows = Vec::new();
+        decode_payload_into(&format, &bytes, meta(), &mut rows).unwrap();
+        assert_eq!(rows[0].data["vin"], json!("V3"));
+        assert_eq!(rows[0].data["speed"], json!(61.25));
+        assert_eq!(rows[0].data["__meta__"]["messageId"], json!(7));
+        assert!(decode_payload_into(&format, &[0x0a, 0x08], None, &mut rows).is_err());
+    }
+
+    #[test]
+    fn test_mqtt_config_ekuiper_options() {
+        let config: super::MqttConfig = serde_json::from_value(json!({
+            "server": "tcp://broker:1883",
+            "clientid": "vehicle-gw-1",
+            "protocolVersion": "3.1.1",
+            "cleanSession": false,
+            "keepAlive": 60,
+            "topic": "vehicles/+/telemetry, chargers/#"
+        }))
+        .unwrap();
+        assert_eq!(config.client_id.as_deref(), Some("vehicle-gw-1"));
+        assert_eq!(config.clean_session, Some(false));
+        assert_eq!(config.keep_alive, Some(60));
+        assert_eq!(
+            config.topics(),
+            vec!["vehicles/+/telemetry".to_string(), "chargers/#".to_string()]
+        );
+        assert!(super::mqtt_options(&config).is_ok());
+        // Stored action JSON keeps the camelCase spelling.
+        let action: super::MqttConfig =
+            serde_json::from_value(json!({"clientId": "c2", "topic": "x"})).unwrap();
+        assert_eq!(action.client_id.as_deref(), Some("c2"));
     }
 }

@@ -545,6 +545,25 @@ impl<'a> Parser<'a> {
                 };
                 Ok(Some(WindowDef::Count { size, interval }))
             }
+            "sessionwindow" => {
+                if args.len() != 3 {
+                    bail!(
+                        "SESSIONWINDOW expects 3 arguments (unit, maxDuration, timeout), got {}",
+                        args.len()
+                    );
+                }
+                let unit = Self::parse_window_unit(&args[0])?;
+                let max_duration = Self::parse_window_u64(&args[1])?;
+                let timeout = Self::parse_window_u64(&args[2])?;
+                if max_duration == 0 || timeout == 0 {
+                    bail!("SESSIONWINDOW maxDuration and timeout must be positive");
+                }
+                Ok(Some(WindowDef::Session {
+                    unit,
+                    max_duration,
+                    timeout,
+                }))
+            }
             _ => Ok(None),
         }
     }

@@ -191,7 +191,9 @@ def setup_rule(engine, ctx, mode="default"):
                           json={"id": "rbench", "sql": SQL, "actions": ACTIONS},
                           timeout=10)
         assert r.status_code in (200, 201), f"rek rule: {r.status_code} {r.text[:300]}"
-        effective = {"bufferLength": "n/a (rekuiper fixed 10k MPSC)", "concurrency": "n/a"}
+        effective = {"input": "bounded per-subscriber mpsc (4096) + HTTP backpressure",
+                     "sink": "per-rule mpsc, bufferLength default 10000",
+                     "concurrency": "n/a"}
     else:
         r = requests.post(base + "/streams",
                           json={"sql": 'CREATE STREAM bench () WITH (FORMAT="json", TYPE="httppush", DATASOURCE="/bench/data")'},
@@ -238,9 +240,25 @@ def get_counts(engine, ctx):
     }
 
 
+import threading as _th
+
+_tls = _th.local()
+
+def _thread_session():
+    s = getattr(_tls, "session", None)
+    if s is None:
+        s = requests.Session()
+        _tls.session = s
+    return s
+
+
 def post_batch(session, url, batch):
+    # `session` arg is ignored (kept for call compat); each worker thread uses
+    # its own thread-local Session. Sharing one Session across threads is unsafe
+    # under concurrent round-robin use.
+    sess = _thread_session()
     try:
-        r = session.post(url, json=batch, timeout=30)
+        r = sess.post(url, json=batch, timeout=30)
         ok = 200 <= r.status_code < 300
         return (ok, r.status_code, "" if ok else r.text[:200])
     except Exception as e:

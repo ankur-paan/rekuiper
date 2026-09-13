@@ -255,6 +255,14 @@ pub fn compile_graph_to_sql_and_actions(
                             format!("HOPPINGWINDOW({}, {}, {})", unit, size, interval)
                         }
                         "slidingwindow" => format!("SLIDINGWINDOW({}, {})", unit, size),
+                        // eKuiper graph session window: size = max duration,
+                        // interval = timeout.
+                        "sessionwindow" => format!(
+                            "SESSIONWINDOW({}, {}, {})",
+                            unit,
+                            size,
+                            prop_u64(&node.props, "interval", size)
+                        ),
                         "countwindow" => {
                             if node.props.contains_key("interval") {
                                 format!(
@@ -384,6 +392,26 @@ pub struct RuleStatus {
     pub sink_records_out_total: u64,
     #[serde(default)]
     pub exceptions_total: u64,
+    /// Input records dropped by the WHERE filter (stateless rules).
+    #[serde(default)]
+    pub source_records_filtered_total: u64,
+    /// Output records enqueued to the sink worker (before completion).
+    #[serde(default)]
+    pub sink_records_enqueued_total: u64,
+    /// Sink operations that failed after dequeue (write/connect errors).
+    #[serde(default)]
+    pub sink_records_failed_total: u64,
+    /// Records dropped by explicit bounded policy (feedback full, no
+    /// subscriber, oversized batch rejection accounting).
+    #[serde(default)]
+    pub dropped_by_policy_total: u64,
+    /// Deepest observed sink-queue backlog for this rule.
+    #[serde(default)]
+    pub sink_queue_high_water: usize,
+    /// Total microseconds the evaluation loop spent blocked on sink-queue
+    /// backpressure (awaiting capacity).
+    #[serde(default)]
+    pub sink_blocked_micros_total: u64,
 }
 
 impl Default for RuleStatus {
@@ -394,6 +422,12 @@ impl Default for RuleStatus {
             source_records_in_total: 0,
             sink_records_out_total: 0,
             exceptions_total: 0,
+            source_records_filtered_total: 0,
+            sink_records_enqueued_total: 0,
+            sink_records_failed_total: 0,
+            dropped_by_policy_total: 0,
+            sink_queue_high_water: 0,
+            sink_blocked_micros_total: 0,
         }
     }
 }
