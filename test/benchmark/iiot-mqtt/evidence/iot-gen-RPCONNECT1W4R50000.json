@@ -1,0 +1,12 @@
+{
+  "tool": "mqttgen 0.1.0 std-only QoS0",
+  "host": "127.0.0.1", "port": 11883, "topic": "bench/vehicles/{dev}/telemetry", "mode": "json",
+  "nominal_rate": 50000, "secs": 30, "conns": 8, "devices": 10000, "tag": "RPCONNECT1W4R50000",
+  "clock_start_epoch_ms": 1789331781789,
+  "nominal_messages": 1500000, "sent_messages": 1500000,
+  "actual_rate_over_schedule": 50000.0, "send_window_s": 30.000, "wall_s": 30.001,
+  "per_sec_sent": [49982, 50006, 50006, 49995, 49999, 50005, 49993, 50002, 50008, 49982, 50004, 50012, 49999, 49991, 50004, 50000, 49997, 50003, 50002, 49995, 50005, 50000, 50002, 49996, 49996, 50002, 49997, 49997, 50013, 49987, 20],
+  "per_sec_core_min": 49982, "per_sec_core_max": 50013,
+  "on_schedule": true,
+  "errors": []
+}

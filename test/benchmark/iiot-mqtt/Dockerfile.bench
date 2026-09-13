@@ -1,0 +1,68 @@
+# Benchmark-variant image with a cached dependency layer (Claude, 2026-09-13).
+# Same toolchain image, apk packages, cargo flags (-j2 release) and runtime stage as repo/deploy/docker/Dockerfile,
+# so codegen is equivalent; only the layering differs. Dependencies compile once in a layer keyed on the manifests;
+# a code-only change then rebuilds just the 7 workspace crates.
+# Build from the repo root:  docker build -f <this file> -t rkfix0424/candidate:<tag> <repo>
+FROM rust:alpine AS builder
+
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static sqlite-dev sqlite-static build-base
+
+WORKDIR /usr/src/rekuiper
+
+# ---- dependency layer: manifests + stub sources only ----
+COPY Cargo.toml Cargo.lock ./
+COPY crates/rekuiper-core/Cargo.toml crates/rekuiper-core/Cargo.toml
+COPY crates/rekuiper-sql/Cargo.toml crates/rekuiper-sql/Cargo.toml
+COPY crates/rekuiper-conf/Cargo.toml crates/rekuiper-conf/Cargo.toml
+COPY crates/rekuiper-connectors/Cargo.toml crates/rekuiper-connectors/Cargo.toml
+COPY crates/rekuiper-server/Cargo.toml crates/rekuiper-server/Cargo.toml
+COPY crates/rekuiper-cli/Cargo.toml crates/rekuiper-cli/Cargo.toml
+COPY crates/kuiperd/Cargo.toml crates/kuiperd/Cargo.toml
+RUN for c in rekuiper-core rekuiper-sql rekuiper-conf rekuiper-connectors rekuiper-server rekuiper-cli; do \
+        mkdir -p crates/$c/src && : > crates/$c/src/lib.rs; \
+    done && \
+    mkdir -p crates/kuiperd/src && \
+    echo 'fn main() {}' > crates/rekuiper-cli/src/main.rs && \
+    echo 'fn main() {}' > crates/kuiperd/src/main.rs && \
+    cargo build --release -j2 && \
+    rm -rf crates/*/src
+
+# ---- workspace layer: real sources; touch so cargo rebuilds past the stub fingerprints ----
+COPY crates ./crates
+RUN find crates -name '*.rs' -exec touch {} + && cargo build --release -j2
+
+# ==============================================================================
+# Runtime stage: identical to repo/deploy/docker/Dockerfile
+# ==============================================================================
+FROM alpine:latest
+
+ENV KUIPER_HOME="/kuiper" \
+    KUIPER__BASIC__CONSOLELOG="true" \
+    RUST_LOG="info"
+
+ARG KUIPER_USER="kuiper"
+ARG KUIPER_USER_ID="1001"
+
+RUN apk add --no-cache ca-certificates libgcc libssl3 sqlite-libs tzdata && \
+    adduser -DH -s /sbin/nologin -u ${KUIPER_USER_ID} ${KUIPER_USER} && \
+    mkdir -p ${KUIPER_HOME}/bin ${KUIPER_HOME}/etc ${KUIPER_HOME}/data ${KUIPER_HOME}/log && \
+    chown -R ${KUIPER_USER}:${KUIPER_USER} ${KUIPER_HOME}
+
+WORKDIR ${KUIPER_HOME}
+
+COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiperd /kuiper/bin/kuiperd
+COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiper /kuiper/bin/kuiper
+
+COPY --chown=${KUIPER_USER}:${KUIPER_USER} etc/ /kuiper/etc/
+
+USER ${KUIPER_USER}
+
+VOLUME ["/kuiper/etc", "/kuiper/data", "/kuiper/log"]
+
+EXPOSE 9081 20499
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:9081/ || exit 1
+
+ENTRYPOINT ["/kuiper/bin/kuiperd"]
+CMD ["--etc", "/kuiper/etc"]

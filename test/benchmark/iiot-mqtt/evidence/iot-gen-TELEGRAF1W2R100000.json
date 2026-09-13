@@ -1,0 +1,12 @@
+{
+  "tool": "mqttgen 0.1.0 std-only QoS0",
+  "host": "127.0.0.1", "port": 11883, "topic": "bench/telemetry", "mode": "json",
+  "nominal_rate": 100000, "secs": 30, "conns": 8, "devices": 1000, "tag": "TELEGRAF1W2R100000",
+  "clock_start_epoch_ms": 1789330311895,
+  "nominal_messages": 3000000, "sent_messages": 3000000,
+  "actual_rate_over_schedule": 100000.0, "send_window_s": 30.000, "wall_s": 30.001,
+  "per_sec_sent": [99958, 99998, 100023, 100008, 99971, 100010, 100015, 99987, 100021, 99995, 99985, 100006, 99990, 99996, 100001, 99995, 100026, 99991, 100003, 99987, 100007, 99998, 99989, 100026, 99984, 99996, 100009, 100002, 99990, 100010, 23],
+  "per_sec_core_min": 99971, "per_sec_core_max": 100026,
+  "on_schedule": true,
+  "errors": []
+}

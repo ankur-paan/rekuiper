@@ -1,5 +1,13 @@
 # BENCHMARK-AUDIT — fair over-HTTP audit (rekuiper 0.424 vs eKuiper 2.4.1)
 
+> PROVISIONAL (parent validation pending, 2026-09-12 HOLD): numbers below are
+> provisional sink-counter shortfall + burst throughput, NOT maximum sustainable
+> rate or proven loss. Nop/file counters alone were deemed insufficient; independent
+> file-sink external checks with unique IDs, thread-local sessions, reset isolation,
+> longer 30 s post-stability, and paced controls were run locally (uncommitted;
+> raw in workspace `evidence/bench-verify.json`, `bench-verify2.json`). See §9.
+> NO COMMIT/PUSH/MERGE/TAG performed for this validation round.
+
 HOLD: do not merge/tag/publish on the basis of this file alone — parent review required.
 PR #1 is already MERGED on remote (main `f931cc9`); this audit was produced on
 `codex/fix-0424` at `c90b059` (one commit ahead of the merged head `e4750da`).
@@ -164,8 +172,99 @@ pattern at smaller scale (tuned lossless at 20k, lossy at 500k for all).
 ## 8. What was NOT done (per HOLD)
 
 - No merge (PR #1 already MERGED remotely before this run; no new merge performed).
+- No commit/push/merge/tag in the validation round (all §9 edits + raw evidence local only).
 - No tag, no release, no Docker publish.
 - No revert of concurrent CI test change (`crates/rekuiper-server/tests/fvt_compat.rs` `c90b059` preserved).
-- No `cargo clean` beyond existing state (no engine rebuild; docs/harness-only changes).
+- No product-code tuning; no `cargo clean` beyond existing state (no engine rebuild).
 - No full system cleanup or unrelated changes; healthy `ekuiper-manager-*` stack untouched
   (benchmark used isolated ports/containers `rk-bench-*-fair`, removed after runs).
+
+## 9. Validation round (local only, 2026-09-12 HOLD)
+
+- Thread-local sessions fixed in `test/benchmark/bench_http_fair.py` (LOCAL edit, uncommitted):
+  round-robin tasks no longer share one `Session` concurrently.
+- Counter semantics verified (both engines): 7-event batch → sink +7 (records, not batches).
+  Reset isolation verified: fresh setup → sink 0 + clean file before each run.
+- File-sink external checks (identical `{"file":{"path":"/tmp/bench_out.json"}}` output work,
+  unique IDs `tag_N`, 30 s post-stability, `wc -l` + `cat` outside metrics):
+  - Small 5k: rekuiper cnt 1786 = file 1786 unique 1786; eKuiper default cnt 2079 ≈ file 2076;
+    eKuiper tuned cnt 5000 vs file 4917 (83 flush gap, stable, delta 0 post-30 s).
+    eKuiper lines are `[{...}]` arrays (unwrap for IDs); rekuiper lines are `{...}` objects.
+  - Full 500k file single-run: rekuiper cnt 11370 = file 11370 post-30 s (file 7960 at first
+    stable → 11370 post, proving short stable windows undercount); eKuiper default
+    cnt 143169 ≈ file 143168; tuned cnt 135961 ≈ file 135932; all post-30 s deltas 0.
+  - Conclusion: file observation corroborates counters within flush gaps; shortfall is
+    provisional burst-regime shortfall, not proven loss; longer observation required and done.
+- Paced low-load controls (identical, both engines): nop 10k (batch200/conc1/10 ms) →
+  10000/10000 all three configs; paced file 5k → rekuiper 5000/5000 unique, eKuiper 5000 cnt
+  vs 4972 file (28 flush gap). Burst shortfall is NOT maximum sustainable rate.
+- Limitations: single WSL2 host; `--cpus=1` quota only; burst regime; eKuiper file format
+  differs (array-wrapped) so unique counts need unwrapping; full 500k file is single-run
+  per config (not 3×); no product-code changes.
+
+## 8. Post-fix results: bounded admission + fast sink (fixed image)
+
+Fixed image `rkfix0424/candidate:0.424-beta` =
+`sha256:99d6f795f60ce9b69a94e3f891a5acf51eb2dc90cf2309f67b37a6badfda24ea`
+(local build from `codex/fix-0424` + uncommitted bounded-bus/sink-actor work; engine
+unchanged otherwise). Baseline `lfedge/ekuiper:2.4.1` re-pulled, same digest
+`sha256:41205fbf01fcfd3b7f99462d1f2551f8fcd44a25344bbeb620c6b7cb6a5c366a`.
+Identical invocation:
+`python3 test/benchmark/bench_http_fair.py --all --events 500000 --batch 500
+--concurrency 8 --runs 3 --warmup 1 --out /tmp/bench-fair-fixed.json`
+(raw per-run JSON in `evidence/bench-fair-fixed.json`).
+
+### rekuiper fixed (bounded per-subscriber mpsc 4096 + HTTP backpressure; sink mpsc 10000)
+
+| Run | Accepted req/events | Source_in / sink_out | Loss | Ingest ack eps | End-to-end eps | Total s (ingest s) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1000 / 500,000 | 500,000 / 500,000 | 0.0% | 100,117 | 62,234 | 8.03 (4.99) |
+| 2 | 1000 / 500,000 | 500,000 / 500,000 | 0.0% | 102,417 | 63,121 | 7.92 (4.88) |
+| 3 | 1000 / 500,000 | 500,000 / 500,000 | 0.0% | 106,900 | 64,713 | 7.73 (4.68) |
+
+Mean e2e 63,356 ± 1,026. 0 failed requests, 0 exceptions, all 3 runs lossless.
+
+### eKuiper 2.4.1 default (bufferLength 1024, concurrency 1)
+
+| Run | Accepted | Sink-out | Loss | Ack eps | E2e eps | Total s |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1000 / 500,000 | 39,862 | 92.0% | 88,575 | 4,555 | 8.75 |
+| 2 | 1000 / 500,000 | 143,307 | 71.3% | 92,431 | 5,552 | 25.81 |
+| 3 | 1000 / 500,000 | 241,153 | 51.8% | 80,280 | 5,524 | 43.66 |
+
+### eKuiper 2.4.1 tuned (bufferLength 32768, concurrency 4)
+
+| Run | Accepted | Sink-out | Loss | Ack eps | E2e eps | Total s |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1000 / 500,000 | 143,173 | 71.4% | 99,230 | 3,346 | 42.79 |
+| 2 | 1000 / 500,000 | 151,494 | 69.7% | 92,596 | 3,558 | 42.57 |
+| 3 | 1000 / 500,000 | 209,675 | 58.1% | 104,517 | 5,254 | 39.91 |
+
+### External-delivery proof (fixed image, real file sink, not nop)
+
+`scripts/proof_500k_lossless.py` → `evidence/proof-500k-lossless.json`: 500,000 unique
+IDs over HTTP (batch 500, 8 workers) into a file-sink rule: accepted 500,000/500,000,
+`sourceRecordsInTotal` 500,000, `sinkRecordsOutTotal` 500,000, **actual file rows
+500,000, unique IDs 500,000, duplicates 0, wrong transforms 0, exceptions 0** after
+drain + 15 s extended observation. Counters reconcile exactly
+(`sinkRecordsEnqueuedTotal` 500,000 = completed 500,000, `sinkRecordsFailedTotal` 0,
+`droppedByPolicyTotal` 0, `sinkQueueHighWater` 2198, `sinkBlockedMicrosTotal` 0).
+Ingest 8.94 s (55,959 ack eps), end-to-end 41,689 completed eps.
+
+### Honest findings (fixed image)
+
+- Same burst workload that cost the old candidate ~95.6% loss now delivers 500,000/500,000
+  on all 3 runs with 0 exceptions; completed throughput ~63k eps (nop) / ~41.7k eps (file).
+- eKuiper default+tuned lose 52-92% under this identical burst with very high run-to-run
+  variance (this session: default 40k-241k, tuned 143k-210k; a prior session measured
+  220k-366k default — single-host contention, not a stable ranking). Overload loss is
+  eKuiper's documented buffer tradeoff, NOT the performance headline: no multiplier is
+  claimed from it.
+- The aspirational ≥3× *sustained-lossless* target was not measured as a rate sweep:
+  this matrix compares one burst regime (overload for eKuiper at 500k/batch500/conc8),
+  not maximum sustainable lossless rates. Sustained-rate sweep with p50/p95/p99
+  source-to-sink latency histograms remains future work (§7 gaps).
+- e2e eps denominators differ by design (completed/total_wall); eKuiper totals include
+  long drains. Do not compare these eps numbers as same-work throughput.
+- Runs: 3 measured + 1 warmup per config (agreed minimum). ≥5 runs, slow-sink image
+  chaos, and latency histograms deferred and listed in PERFORMANCE-READY.md.
