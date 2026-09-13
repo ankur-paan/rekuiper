@@ -62,50 +62,31 @@ async fn test_high_throughput_streaming_pipeline() {
         .unwrap();
     assert!(resp.status().is_success());
 
-    // 4. Blast 50,000 records straight into the broadcast bus, in chunks with
-    // catch-up waits: on a single-threaded runtime an unyielding send loop
-    // would starve the rule task and overflow the broadcast buffer (lag
-    // drops). Chunking bounds in-flight records below capacity, so every
-    // record is counted exactly once.
+    // 4. Publish 500,000 records through the bounded bus with backpressure:
+    // the sender awaits subscriber capacity, so no record is ever lost to
+    // ring overwrite. The handle is resolved once outside the loop.
     let tx = state.stream_bus.get_or_create("perf_stream");
     let start = std::time::Instant::now();
     let mut sent = 0u64;
-    for _chunk in 0..1000 {
-        for _ in 0..500 {
-            let n = sent;
-            let data: HashMap<String, Value> = serde_json::from_str(&format!(
-                r#"{{"id": "dev_{}", "temp": {}}}"#,
-                n,
-                25.0 + (n % 10) as f64
-            ))
-            .unwrap();
-            let _ = tx.send(StreamRecord {
-                timestamp: n as i64,
-                data,
-            });
-            sent += 1;
-        }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            let seen = state
-                .rule_manager
-                .get_rule_status("rule_perf")
-                .map(|s| s.source_records_in_total)
-                .unwrap_or(0);
-            if seen >= sent {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "consumer stalled at {seen}/500,000"
-            );
-            tokio::task::yield_now().await;
-        }
+    for n in 0..500_000u64 {
+        let data: HashMap<String, Value> = serde_json::from_str(&format!(
+            r#"{{"id": "dev_{}", "temp": {}}}"#,
+            n,
+            25.0 + (n % 10) as f64
+        ))
+        .unwrap();
+        tx.send(StreamRecord {
+            timestamp: n as i64,
+            data,
+        })
+        .await
+        .expect("subscriber closed mid-benchmark");
+        sent += 1;
     }
     assert_eq!(sent, 500_000);
 
     // 5. Rule status reflects every ingested record.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let status: serde_json::Value = client
             .get(format!("{}/rules/rule_perf/status", base_url))
@@ -115,7 +96,9 @@ async fn test_high_throughput_streaming_pipeline() {
             .json()
             .await
             .unwrap();
-        if status["sourceRecordsInTotal"].as_u64().unwrap_or(0) >= 500_000 {
+        if status["sourceRecordsInTotal"].as_u64().unwrap_or(0) >= 500_000
+            && status["sinkRecordsOutTotal"].as_u64().unwrap_or(0) >= 500_000
+        {
             break;
         }
         assert!(

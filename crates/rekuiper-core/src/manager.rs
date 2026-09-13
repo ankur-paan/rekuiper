@@ -348,6 +348,80 @@ pub struct ActiveRule {
     pub def: RuleDefinition,
     pub status: Arc<RwLock<RuleStatus>>,
     pub handle: Option<JoinHandle<()>>,
+    counters: Arc<RuleCounters>,
+}
+
+/// Per-rule atomic counters. Rule tasks hold an `Arc<RuleCounters>` cloned at
+/// spawn time, so the hot path never takes the global rules-map lock: counts
+/// are bumped lock-free and mirrored into the status snapshot.
+#[derive(Debug, Default)]
+pub struct RuleCounters {
+    pub source_in: std::sync::atomic::AtomicU64,
+    pub sink_out: std::sync::atomic::AtomicU64,
+    pub exceptions: std::sync::atomic::AtomicU64,
+    pub filtered: std::sync::atomic::AtomicU64,
+    pub enqueued: std::sync::atomic::AtomicU64,
+    pub sink_failed: std::sync::atomic::AtomicU64,
+    pub dropped: std::sync::atomic::AtomicU64,
+    pub high_water: std::sync::atomic::AtomicU64,
+    pub blocked_micros: std::sync::atomic::AtomicU64,
+}
+
+impl RuleCounters {
+    fn sync_to(&self, status: &Arc<RwLock<RuleStatus>>) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut guard = status.write();
+        guard.source_records_in_total = self.source_in.load(Relaxed);
+        guard.sink_records_out_total = self.sink_out.load(Relaxed);
+        guard.exceptions_total = self.exceptions.load(Relaxed);
+        guard.source_records_filtered_total = self.filtered.load(Relaxed);
+        guard.sink_records_enqueued_total = self.enqueued.load(Relaxed);
+        guard.sink_records_failed_total = self.sink_failed.load(Relaxed);
+        guard.dropped_by_policy_total = self.dropped.load(Relaxed);
+        guard.sink_queue_high_water = self.high_water.load(Relaxed) as usize;
+        guard.sink_blocked_micros_total = self.blocked_micros.load(Relaxed);
+    }
+
+    /// Lock-free hot-path bumps (rule loops hold the Arc; no map locks).
+    pub fn inc_source(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.source_in.fetch_add(n, Relaxed);
+    }
+    pub fn inc_sink_out(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.sink_out.fetch_add(n, Relaxed);
+    }
+    pub fn inc_exceptions(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.exceptions.fetch_add(n, Relaxed);
+    }
+    pub fn inc_filtered(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.filtered.fetch_add(n, Relaxed);
+    }
+    pub fn inc_enqueued(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.enqueued.fetch_add(n, Relaxed);
+    }
+    pub fn inc_sink_failed(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.sink_failed.fetch_add(n, Relaxed);
+    }
+    pub fn inc_dropped(&self, n: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.dropped.fetch_add(n, Relaxed);
+    }
+    pub fn observe_high_water(&self, depth: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let prev = self.high_water.load(Relaxed);
+        if (depth as u64) > prev {
+            self.high_water.store(depth as u64, Relaxed);
+        }
+    }
+    pub fn add_blocked_micros(&self, micros: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.blocked_micros.fetch_add(micros, Relaxed);
+    }
 }
 
 #[derive(Clone)]
@@ -416,8 +490,10 @@ impl RuleManager {
                     source_records_in_total: 0,
                     sink_records_out_total: 0,
                     exceptions_total: 0,
+                    ..RuleStatus::default()
                 })),
                 handle: None,
+                counters: Arc::new(RuleCounters::default()),
             };
 
             map.insert(rule_id, Arc::new(RwLock::new(active)));
@@ -459,44 +535,66 @@ impl RuleManager {
             .collect()
     }
 
+    pub fn rule_counters(&self, id: &str) -> Option<Arc<RuleCounters>> {
+        self.rules.read().get(id).map(|r| r.read().counters.clone())
+    }
+
+    pub fn rule_status_handle(&self, id: &str) -> Option<Arc<RwLock<RuleStatus>>> {
+        self.rules.read().get(id).map(|r| r.read().status.clone())
+    }
+
     pub fn get_rule_status(&self, id: &str) -> Option<RuleStatus> {
-        self.rules
-            .read()
-            .get(id)
-            .map(|r| r.read().status.read().clone())
+        self.rules.read().get(id).map(|r| {
+            let active = r.read();
+            active.counters.sync_to(&active.status);
+            let snapshot = active.status.read().clone();
+            snapshot
+        })
     }
 
-    pub fn inc_source_records(&self, id: &str, count: u64) {
+    fn bump(
+        &self,
+        id: &str,
+        field: fn(&RuleCounters) -> &std::sync::atomic::AtomicU64,
+        count: u64,
+    ) {
+        use std::sync::atomic::Ordering::Relaxed;
         let map = self.rules.read();
         if let Some(rule) = map.get(id) {
-            rule.read().status.write().source_records_in_total += count;
-        }
-    }
-
-    pub fn inc_sink_records(&self, id: &str, count: u64) {
-        let map = self.rules.read();
-        if let Some(rule) = map.get(id) {
-            rule.read().status.write().sink_records_out_total += count;
+            let active = rule.read();
+            field(&active.counters).fetch_add(count, Relaxed);
         }
     }
 
     pub fn inc_exceptions(&self, id: &str, count: u64) {
-        let map = self.rules.read();
-        if let Some(rule) = map.get(id) {
-            rule.read().status.write().exceptions_total += count;
-        }
+        self.bump(id, |c| &c.exceptions, count);
+    }
+
+    pub fn inc_sink_failed(&self, id: &str, count: u64) {
+        self.bump(id, |c| &c.sink_failed, count);
+    }
+
+    pub fn inc_dropped(&self, id: &str, count: u64) {
+        self.bump(id, |c| &c.dropped, count);
     }
 
     pub fn reset_rule_metrics(&self, id: &str) -> Result<()> {
+        use std::sync::atomic::Ordering::Relaxed;
         let map = self.rules.read();
         let rule_arc = map
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
-        let status = rule_arc.read().status.clone();
-        let mut guard = status.write();
-        guard.source_records_in_total = 0;
-        guard.sink_records_out_total = 0;
-        guard.exceptions_total = 0;
+        let active = rule_arc.read();
+        active.counters.source_in.store(0, Relaxed);
+        active.counters.sink_out.store(0, Relaxed);
+        active.counters.exceptions.store(0, Relaxed);
+        active.counters.filtered.store(0, Relaxed);
+        active.counters.enqueued.store(0, Relaxed);
+        active.counters.sink_failed.store(0, Relaxed);
+        active.counters.dropped.store(0, Relaxed);
+        active.counters.high_water.store(0, Relaxed);
+        active.counters.blocked_micros.store(0, Relaxed);
+        active.counters.sync_to(&active.status);
         Ok(())
     }
 
@@ -593,8 +691,10 @@ impl RuleManager {
                     source_records_in_total: 0,
                     sink_records_out_total: 0,
                     exceptions_total: 0,
+                    ..RuleStatus::default()
                 })),
                 handle: None,
+                counters: Arc::new(RuleCounters::default()),
             };
             self.rules
                 .write()
