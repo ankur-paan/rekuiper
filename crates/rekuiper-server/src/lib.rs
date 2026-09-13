@@ -1,4 +1,5 @@
 pub mod routes;
+pub mod sink_cache;
 
 use anyhow::Result;
 use parking_lot::RwLock;
@@ -147,7 +148,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("Server initialized and ready in {:?}", init_start.elapsed());
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app).tcp_nodelay(true).await?;
 
     Ok(())
 }

@@ -222,3 +222,36 @@ async fn test_stream_bus_broadcast() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn test_stream_bus_bounded_no_overwrite() {
+    use rekuiper_core::{StreamBus, StreamRecord, STREAM_QUEUE_CAPACITY};
+    use std::collections::HashMap;
+
+    // A stalled subscriber applies backpressure instead of losing records:
+    // non-blocking feedback publish reports Full (nothing admitted), and
+    // capacity returns after the subscriber drains.
+    let bus = StreamBus::new();
+    let mut rx = bus.subscribe("bounded");
+    let record = || {
+        let mut data = HashMap::new();
+        data.insert("seq".to_string(), json!(1));
+        StreamRecord::new(data)
+    };
+    for _ in 0..STREAM_QUEUE_CAPACITY {
+        bus.try_publish("bounded", record())
+            .expect("capacity must hold");
+    }
+    assert!(
+        matches!(
+            bus.try_publish("bounded", record()),
+            Err(rekuiper_core::PublishError::Full)
+        ),
+        "full queue must reject explicitly, never overwrite"
+    );
+    // Drain one slot: admission succeeds again, order preserved.
+    let first = rx.recv().await.expect("queued record must survive");
+    assert_eq!(first.data.get("seq"), Some(&json!(1)));
+    bus.try_publish("bounded", record())
+        .expect("drained capacity must admit");
+}
