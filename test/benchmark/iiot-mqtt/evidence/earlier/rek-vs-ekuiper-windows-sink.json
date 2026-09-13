@@ -1470,7 +1470,7 @@
       "health_after": {
         "contaminated": true,
         "loadavg": "1.75 1.82 1.80 3/391 11692",
-        "ps_top": "%CPU COMMAND\n 300 ps -eo pcpu,args --sort=-pcpu\n69.0 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n30.9 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 1.5 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 1.4 emqx -Bd -zdbbl 8192 -spp true -A 4 -IOt 4 -SDio 8 -stbt db -sbwt none -sbwtdcpu none -sbwtdio none -C mu\n 0.6 bash -c sed -i 's/\\r$//' /mnt/c/Users/paanday/AppData/Local/Temp/claude/C--Users-paanday-Documents-idacs-\n 0.3 /mnt/c/Users/paanday/Documents/idacs/ekuiper-manager/.data/rekuiper-fix-0424/scripts/iotrunner/iotrunner\n 0.2 /usr/bin/containerd",
+        "ps_top": "%CPU COMMAND\n 300 ps -eo pcpu,args --sort=-pcpu\n69.0 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n30.9 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 1.5 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 1.4 emqx -Bd -zdbbl 8192 -spp true -A 4 -IOt 4 -SDio 8 -stbt db -sbwt none -sbwtdcpu none -sbwtdio none -C mu\n 0.6 bash -c sed -i 's/\\r$//' /mnt/c/Users/paanday/AppData/Local/Temp/session/C--Users-paanday-Documents-idacs-\n 0.3 /mnt/c/Users/paanday/Documents/idacs/ekuiper-manager/.data/rekuiper-fix-0424/scripts/iotrunner/iotrunner\n 0.2 /usr/bin/containerd",
         "t": "19:41:46",
         "windows_free_ram_gb": 2.71,
         "windows_host_cpu_pct": 23.0,
