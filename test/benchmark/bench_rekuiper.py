@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Benchmarks rekuiper (Rust) on 500,000 records.
-Executes the native release perf_throughput test harness.
+INTERNAL microbenchmark only (NOT comparable to over-HTTP results).
+Executes the native release perf_throughput test harness, which drives the
+in-process bus directly with chunked catch-up waits (no HTTP, no containers).
+Do NOT compare its numbers with bench_http_fair.py end-to-end results.
+See test/BENCHMARKS.md and BENCHMARK-AUDIT.md.
 """
 import subprocess
 import time

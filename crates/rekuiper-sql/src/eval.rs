@@ -7,6 +7,13 @@ use sha2::Digest as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod window;
+pub use window::IncrementalWindow;
+
+/// Record key holding source metadata (MQTT topic/qos/messageId). Read by
+/// `meta()`/`mqtt()`, never projected by `SELECT *`.
+pub const META_KEY: &str = "__meta__";
+
 /// Per-rule running state for analytic cumulative functions (`acc_*`).
 ///
 /// State keys have the format `{func_name}:{func_call_id}:{partition_key}`,
@@ -79,7 +86,9 @@ impl Evaluator {
             match field {
                 Expr::Wildcard => {
                     for (k, v) in record {
-                        output.insert(k.clone(), v.clone());
+                        if k != META_KEY {
+                            output.insert(k.clone(), v.clone());
+                        }
                     }
                 }
                 Expr::Identifier(name) => {
@@ -153,7 +162,9 @@ impl Evaluator {
                 Expr::Wildcard => {
                     if let Some(rec) = first {
                         for (k, v) in rec {
-                            output.entry(k.clone()).or_insert_with(|| v.clone());
+                            if k != META_KEY {
+                                output.entry(k.clone()).or_insert_with(|| v.clone());
+                            }
                         }
                     }
                 }
@@ -443,7 +454,9 @@ impl Evaluator {
             match field {
                 Expr::Wildcard => {
                     for (k, v) in record {
-                        output.insert(k.clone(), v.clone());
+                        if k != META_KEY {
+                            output.insert(k.clone(), v.clone());
+                        }
                     }
                 }
                 Expr::Identifier(name) => {
@@ -2282,7 +2295,7 @@ impl Evaluator {
             "mqtt" => Some(Self::resolve_meta(
                 args.first(),
                 record,
-                &["__mqtt__", "mqtt"],
+                &["__mqtt__", "mqtt", META_KEY],
             )),
             "event_time" => Some(Self::resolve_event_time(record)),
             "rule_id" => Some(Self::resolve_rule_id(record)),
@@ -2326,8 +2339,15 @@ impl Evaluator {
         let Some(key) = key else {
             return Value::Null;
         };
-        if let Some(value) = meta_obj.and_then(|m| m.get(&key)) {
-            return value.clone();
+        if let Some(m) = meta_obj {
+            // eKuiper metadata keys are case-insensitive (`messageid`).
+            if let Some(value) = m.get(&key).or_else(|| {
+                m.iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+                    .map(|(_, v)| v)
+            }) {
+                return value.clone();
+            }
         }
         record.get(&key).cloned().unwrap_or(Value::Null)
     }

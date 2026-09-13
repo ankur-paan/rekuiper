@@ -1,0 +1,11 @@
+[package]
+name = "iotrunner"
+version = "0.1.0"
+edition = "2021"
+description = "IIoT/vehicle MQTT benchmark orchestrator: rekuiper vs eKuiper on the same broker, pinned engine, external correctness proof. No Python."
+
+[dependencies]
+serde_json = "1"
+
+# Standalone tool: not part of the rekuiper workspace.
+[workspace]

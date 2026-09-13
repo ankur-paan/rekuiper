@@ -1,0 +1,21 @@
+rekuiper provenance notice (factual, not legal advice)
+
+- openapi.json declares:
+  x-source-tag: https://github.com/lf-edge/ekuiper/tree/v2.4.1
+  x-source-commit: bf8c1258b2a80e41e575d674346636c9bb687d33
+  info.license: Apache 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+  externalDocs: https://github.com/lf-edge/ekuiper/tree/v2.4.1/docs/en_US/api/restapi
+  Verification: file header inspected 2026-09-12; derivation from upstream
+  eKuiper v2.4.1 REST reference is stated in-file. Upstream project:
+  https://github.com/lf-edge/ekuiper (LF Edge, Apache-2.0).
+  Existing LICENSE / LICENSE-MIT already retain
+  "Copyright (c) LF Edge eKuiper Contributors".
+
+- docs/en_US, docs/zh_CN, deploy/, and test/ JMeter/txt fixtures were introduced
+  in initial commit de1952c alongside engine code and resemble upstream eKuiper
+  layout (docs, deploy/docker, JMeter suites). Full file-level provenance was not
+  re-verified in this benchmark run. Unresolved items recorded in
+  BENCHMARK-AUDIT.md "Provenance and naming review" for user follow-up.
+
+- No project/binary renaming was performed in this run (per user direction;
+  naming decision remains separate).

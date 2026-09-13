@@ -119,7 +119,7 @@ fn quote_cell(cell: &str, delimiter: char) -> String {
 }
 
 /// Delimited row codec with configurable delimiter, headers and quoting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DelimitedCodec {
     pub delimiter: char,
     pub headers: Vec<String>,
@@ -151,6 +151,19 @@ impl DelimitedCodec {
             map.insert(header.clone(), parse_token(raw));
         }
         map
+    }
+
+    /// Like [`Self::decode`], but a codec without headers names every column
+    /// positionally `col0`, `col1`, … (eKuiper delimited converter default).
+    pub fn decode_row(&self, line: &str) -> HashMap<String, Value> {
+        if !self.headers.is_empty() {
+            return self.decode(line);
+        }
+        split_quoted(line, self.delimiter)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (field, _))| (format!("col{}", i), parse_token(&field)))
+            .collect()
     }
 
     /// Encode a record as one line in header order, quoting cells that need

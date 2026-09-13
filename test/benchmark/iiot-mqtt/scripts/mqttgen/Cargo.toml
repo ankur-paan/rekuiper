@@ -1,0 +1,13 @@
+[package]
+name = "mqttgen"
+version = "0.1.0"
+edition = "2021"
+description = "Open-loop MQTT 3.1.1 QoS0 telemetry publisher for IIoT/vehicle benchmarks (std only, no dependencies)."
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+
+# Standalone tool: not part of the rekuiper workspace.
+[workspace]
