@@ -1,238 +1,97 @@
-# rekuiper: The High-Performance Edge Stream Processing Engine
+# rekuiper
 
 [![Release](https://img.shields.io/badge/release-v0.425--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
+[![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.425--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
-[![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-contract%20audited-blue.svg)](openapi.json)
-[![Benchmark](https://img.shields.io/badge/benchmark-IIoT%20MQTT%20vs%20eKuiper%2C%20Telegraf%2C%20Redpanda%20Connect-blue.svg)](test/benchmark/iiot-mqtt/README.md)
 
-> **🚀 Pure Rust edge stream processing engine — zero GC pauses by construction, small static binary and low idle RSS, with eKuiper-compatible REST/CLI/YAML surface (scoped parity, see below). MQTT benchmark results, method, configs and raw evidence are in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md); no latency-histogram p99 is claimed.**
+rekuiper is a stream processing engine for edge devices, written in Rust. It implements
+eKuiper's REST API, SQL dialect, rule format and `kuiper` CLI, so existing eKuiper streams,
+rules and tools, including [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager),
+work against it without changes.
 
----
+We built it for IIoT gateways, ESPHome fleets, vehicles and EV chargers: small machines that
+take in MQTT telemetry and have to filter, aggregate and forward it reliably on one or two cores.
 
-## ⚡ IIoT / Vehicle MQTT Benchmark
+## Performance
 
-Same Mosquitto broker, same Rust load generator (MQTT QoS 0, 8 connections), same container limits
-(`--cpus=1 --memory=1g`, dedicated core), 30 s per rate, and an exact loss proof at the sink
-(unique ids or per-device counts). One repetition, 2026-09-13. Full tables, engine configs, caveats
-and reproduction steps: **[test/benchmark/iiot-mqtt/README.md](test/benchmark/iiot-mqtt/README.md)**.
+We benchmark rekuiper against eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 on
+five MQTT workloads taken from those deployments. Every engine gets the same Mosquitto broker,
+the same load generator, one CPU core and 1 GB of memory. Each step runs for 30 seconds, and
+correctness is checked exactly at the output: every message id, or every per-device count, must
+be present.
 
-Highest tested rate with an exact, loss-free result (tested at 5k, 20k, 50k, 100k msg/s):
+The table shows the highest rate each engine handled without losing data. We tested 5,000,
+20,000, 50,000 and 100,000 messages per second.
 
 | Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 | :--- | :--- | :--- | :--- | :--- |
-| Telemetry filter (1k devices) | **≥ 100k** | 20k | 50k (20k without backlog) | 20k |
-| Per-device 10 s windows | **≥ 100k** | 20k | none (~6–27% loss) | 5k |
-| ESPHome, 10k topics, `meta(topic)` | **≥ 100k** | 20k | 50k (20k without backlog) | 20k |
-| Vehicles, 10k VIN topics, windows | **≥ 100k** | 20k | inconsistent | 5k |
-| EV charger `SESSIONWINDOW` | **≥ 100k** | 20k | not supported | not supported |
+| Telemetry filter, 1,000 devices | **100k** | 20k | 50k, with backlog | 20k |
+| 10-second window per device | **100k** | 20k | lost 6–27% at every rate | 5k |
+| ESPHome, 10,000 topics, `meta(topic)` | **100k** | 20k | 50k, with backlog | 20k |
+| Vehicles, 10,000 topics, windowed | **100k** | 20k | inconsistent | 5k |
+| EV charger sessions (`SESSIONWINDOW`) | **100k** | 20k | not supported | not supported |
 
-At 20k msg/s on the filter workload rekuiper used 48% of one core and 4.7 MB of heap
-(eKuiper 99% / 15 MB, Telegraf 90% / 92 MB, Redpanda Connect 99% / 72 MB). On windowed
-workloads at 20k its heap stayed at 5–10 MB versus 536–886 MB for eKuiper. rekuiper's own
-ceiling was not reached; 100k msg/s is the top of the ladder. Apache Flink 2.3.0 is not
-included because Flink 2.x has no MQTT connector.
+100,000 msg/s was the top of the test range, so rekuiper's actual limit is higher than shown.
+At 20,000 msg/s on the filter workload, rekuiper used 48% of a core and 4.7 MB of heap. eKuiper
+used 99% and 15 MB, Telegraf 90% and 92 MB, and Redpanda Connect 99% and 72 MB. Windowed rules
+are where the gap is largest: rekuiper keeps per-group state rather than buffering rows, so its
+heap stayed between 5 and 10 MB, while eKuiper used 536 to 886 MB at the same rate.
 
-## Earlier fair over-HTTP audit (provisional, pre-optimisation build)
+These are single runs on one laptop (Windows 11 with WSL2). The method, every engine config,
+the raw results, known caveats and the steps to reproduce them are in
+[test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). Apache Flink is not included
+because Flink 2.x has no MQTT connector.
 
-> Kept for transparency. These numbers were measured on the 0.424-beta candidate before the
-> admission, windowing and MQTT work above, and were marked provisional pending validation.
+## Getting started
 
-Same Python harness delivers the identical 500,000 synthetic events through documented
-ingestion endpoints into containers with equal `--cpus=1 --memory=1g` constraints,
-sequentially (never concurrent), with equivalent SQL/sink work. Source-to-sink
-(rule-status sink counters) is measured, not HTTP-ack alone. 1 warmup + 3 measured
-runs per config; raw per-run evidence and variance are preserved. No ranking is
-claimed for Flink/Benthos/Telegraf — no equivalent over-HTTP rerun was completed,
-so old noncomparable numbers were removed. Nothing here is called bulletproof.
-
-- SQL: `SELECT id, temp * 1.8 + 32 AS temp_f FROM bench WHERE temp > 20.0`, sink `[{"nop":{}}]`
-- Payload: `{"id":"dev_N","temp":25.0+(N%10)}` (~30 B, all pass filter), batch 500/POST, 8 HTTP workers
-- rekuiper ingest: `POST /streams/bench/data` (implemented; covered by `test_http_push_data_ingestion`)
-- eKuiper ingest: `POST :10081/bench/data` with `TYPE="httppush" DATASOURCE="/bench/data"`
-  ([HTTP Push source](https://ekuiper.org/docs/en/latest/guide/sources/builtin/http_push.html))
-- eKuiper default vs tuned (`bufferLength`/`concurrency`,
-  [rule fine-tuning](https://ekuiper.org/docs/en/latest/guide/rules/overview.html#fine-tuning));
-  effective options verified via `GET /rules/<id>`
-
-| Config (500k attempted, --cpus=1) | Accepted (HTTP 2xx) | Observed sink-out / loss | End-to-end source-to-sink |
-| :--- | :--- | :--- | :--- |
-| `rekuiper` 0.424-beta candidate | 500,000 (1000×500) | ~21.2k–22.1k delivered (~95.7% loss under burst) | ~2,570–2,992 eps |
-| eKuiper 2.4.1 default (1024/1) | 500,000 | ~219k–366k delivered (~27–56% loss, high variance) | ~4,635–6,808 eps |
-| eKuiper 2.4.1 tuned (32768/4) | 500,000 | ~307k–336k delivered (~33–39% loss) | ~4,514–5,397 eps |
-
-Per-run rows, drain timeout (120 s), errors, duration boundaries, image IDs, host/runtime,
-and throughput/loss tradeoff notes are in **[BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md)** and
-**[test/BENCHMARKS.md](test/BENCHMARKS.md)**. Larger eKuiper buffers reduce loss at the same
-burst; undrained output is not called loss — loss is reported only after the drain window
-stabilizes.
-
-### 🔬 Internal microbenchmark (separate, NOT comparable)
-
-`cargo test --release --test perf_throughput -- --nocapture` drives the in-process
-engine bus directly (no HTTP, no containers). It is an internal regression floor
-(assert > 20,000 eps), never compared against end-to-end HTTP numbers.
+### Docker
 
 ```bash
-cargo test --release --test perf_throughput -- --nocapture
-python3 test/benchmark/bench_http_fair.py --all --events 500000 --batch 500 --concurrency 8
-```
-
-### Scoped implementation notes
-
-- No latency-histogram p99 is claimed (no histogram at a defined boundary was measured).
-- Idle RSS / binary size / cold-boot figures from prior internal runs are retained only as
-  informational, labeled noncomparable in `test/BENCHMARKS.md`.
-- API coverage is scoped: 98 paths / 140 operations are registered against the audited
-  `openapi.json` baseline with evidence-linked tests; known residual gaps are listed below.
-
----
-
-## 🚀 Quick Start (Under 60 Seconds)
-
-### Option 1: Docker (Fastest)
-
-Run `rekuiper` with Docker Hub image:
-
-```bash
-docker run -d \
-  --name rekuiper \
-  -p 9081:9081 \
-  -p 20499:20499 \
+docker run -d --name rekuiper \
+  -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
   ankurkrp/rekuiper:0.425-beta
 ```
 
-Or spin up an instant end-to-end edge stack (rekuiper + Mosquitto MQTT broker + Redis):
+To run rekuiper together with Mosquitto and Redis:
 
 ```bash
 docker compose -f deploy/docker/docker-compose.yml up -d
 ```
 
-### Option 2: Pre-Compiled Binary
+### Prebuilt binaries
 
-1. Download the release binary for Linux, macOS, or Windows from [GitHub Releases](https://github.com/ankur-paan/rekuiper/releases).
-2. Start the daemon:
+Download a build for Linux, macOS or Windows from
+[Releases](https://github.com/ankur-paan/rekuiper/releases), then start the daemon:
 
 ```bash
-# Linux / macOS
-./bin/kuiperd --etc etc
-
-# Windows
-.\bin\kuiperd.exe --etc etc
+./bin/kuiperd --etc etc          # Linux and macOS
+.\bin\kuiperd.exe --etc etc      # Windows
 ```
 
-### Option 3: Build from Source
+### From source
 
-Prerequisites: Rust 1.85+ (`rustup update stable`).
+You need Rust 1.85 or newer.
 
 ```bash
 git clone https://github.com/ankur-paan/rekuiper.git
 cd rekuiper
-
-# Build release binaries in parallel (placed in target/release/)
-cargo build --release
-
-# Or build and bundle binaries into bin/
-make build
+cargo build --release        # binaries in target/release/
+make build                   # or copy them into bin/
 ```
 
----
+## A first rule
 
-## 🏗️ Architectural Overview
-
-`rekuiper` implements a lock-free, pipelined actor topology designed to isolate stream ingestion, query evaluation, and sink network I/O:
-
-```
-                    +------------------------------------+
-                    |        Data Source Streams         |
-                    | (MQTT, Kafka, Redis, WS, HTTP,...) |
-                    +-----------------+------------------+
-                                      |
-                                      v
-                    +------------------------------------+
-                    |        StreamBus Broadcast         |
-                    |  (Zero-allocation in-memory bus)   |
-                    +-----------------+------------------+
-                                      |
-                                      v
-             +--------------------------------------------------+
-             |            Streaming SQL Engine Loop             |
-             |  - Stream-Table Lookup JOINs (Redis / SQL / Mem) |
-             |  - Tumbling, Hopping, Sliding, & Count Windows   |
-|  - 40+ Math, String, Trig, & Aggregate Functions |
-             +------------------------+-------------------------+
-                                      |
-                               (try_send non-blocking)
-                                      v
-             +--------------------------------------------------+
-             |         Bounded Actor MPSC Channel               |
-             |       (10,000 capacity backpressure buffer)      |
-             +------------------------+-------------------------+
-                                      |
-                                      v
-             +--------------------------------------------------+
-             |         Dedicated Async Sink Worker              |
-             |  - Persistent Keep-Alive Connection Pools        |
-             |  - Mustache dataTemplate Payload Rendering       |
-             |  - MQTT, Kafka, WS, REST, File, Redis, SQL Sinks |
-             +--------------------------------------------------+
-```
-
----
-
-## 📋 Supported vs. Unsupported Features Matrix
-
-Detailed capability disclosures for the **v0.425-beta** release:
-
-| Feature Area | Supported in v0.425-beta | Status & Evidence |
-| :--- | :--- | :--- |
-| **REST API** | **Scoped route coverage** | 98 paths / 140 operations registered against the audited `openapi.json` baseline; covered by `fvt_compat` black-box tests. Not claimed as exhaustive parity — see known gaps in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md#known-residual-gaps) and `TEST-CONTRACT-AUDIT.md` where applicable. |
-| **CLI Tool** | **`kuiper` Drop-in Replacement** | ✅ Full stream, table, rule management subcommands. |
-| **Streaming Windows** | **Tumbling, Hopping, Sliding, Count** | ✅ Millisecond/second/minute/hour time units and event counts. |
-| **Stream-Table JOINs** | **LEFT JOIN & INNER JOIN** | ✅ Join dynamic streams against static or external Redis / SQL lookup tables. |
-| **SQL Expressions** | **Conditionals, CASE, Aliases, Logic** | ✅ Searched & simple `CASE`, nested `a.b.c` JSON paths, `ORDER BY`, `LIMIT`. |
-| **SQL Functions** | **40+ Built-in Functions** | ✅ Math, trigonometry, string manipulation, JSON, `lag()`, `unnest()`, accumulators. |
-| **MQTT Connector** | **Source & Sink** | ✅ Powered by `rumqttc`. Full QoS 0/1/2, TLS, client authentication. |
-| **Apache Kafka** | **Source & Sink** | ✅ Pure-Rust high-throughput partition consumer & producer via `rskafka`. |
-| **Redis** | **Source, Sink, & Lookup Table** | ✅ Key/value lookup, `redissub` pub/sub stream source, `SET`/`PUBLISH` sinks. |
-| **WebSocket** | **Source & Sink** | ✅ Live frame streaming and client sink broadcasting via `tokio-tungstenite`. |
-| **HTTP Pull & Push** | **Source & Sink** | ✅ High-speed timer poller (Pull) and `POST /streams/:name/data` (Push). |
-| **Relational SQL** | **Source, Lookup, & Sink** | ✅ Multi-dialect query and insert engine for PostgreSQL, SQLite, MySQL via `sqlx`. |
-| **File I/O** | **Source & Sink** | ✅ RFC-4180 CSV with automatic headers and JSON Lines. |
-| **Sink Data Templates** | **Mustache `{{.field}}` Formatting** | ✅ Dynamic payload transformation bypassing standard JSON serialization. |
-| **Observability** | **Prometheus Metrics** | ✅ Native Prometheus text exposition (`GET /metrics`) and standalone port `20499`. |
-| **Interactive Ruletest**| **Real-time SSE Streaming** | ✅ Interactive `POST /ruletest` with Server-Sent Events pipeline replay. |
-| **Graph Rule DAGs**    | **Visual DAG Engine**               | ✅ Visual drag-and-drop DAGs (`"graph": { "nodes": ..., "topo": ... }`). |
-| **Config & Uploads**   | **Persistent Disk & Secret Masking** | ✅ Real disk storage in `data/uploads/`, YAML key maps with dynamic overlays, and recursive secret masking. |
-| **EdgeX Foundry IPC** | ❌ **Not Supported in Core** | ⚠️ *Excluded to prevent bundling heavy C/ZeroMQ dependencies. Integrate via EdgeX MQTT/Redis message bus.* |
-| **EMQ Neuron / NeuronEX**| ❌ **Not Supported in Core** | ⚠️ *Excluded proprietary IPC. Connect directly via standard MQTT broker (NanoMQ / EMQX).* |
-| **Video / CV Pipelines**| ❌ **Not Supported in Core** | ⚠️ *FFmpeg, OpenCV, and RTSP video decoders are excluded to preserve the 9.6 MB micro footprint.* |
-| **Embedded AI / ONNX** | ❌ **Not Supported in Core** | ⚠️ *ONNX Runtime and TensorFlow Lite C-bindings are omitted. No release scheduled.* |
-| **Dynamic Go Plugins** | ❌ **Not Supported** | ⚠️ *Loading raw Go `.so` shared libraries violates Rust memory safety. Portable supervisor plugins and JS UDF services are fully supported.* |
-| **Industrial Protocols**| ❌ **Not Supported in Core** | ⚠️ *Direct binary Modbus, OPC-UA, and BACnet drivers are not bundled. Bridge via an industrial edge gateway or NanoMQ.* |
-| **Multi-Node Cluster** | ❌ **Not Supported** | ⚠️ *Designed exclusively as a hyper-specialized, single-node deterministic edge streaming daemon.* |
-
----
-
-## 💡 Step-by-Step Usage Example
-
-### 1. Create an Ingestion Stream
+Create a stream, add a rule that flags hot sensors and publishes an alert over MQTT, then send
+a reading.
 
 ```bash
 curl -X POST http://localhost:9081/streams \
   -H "Content-Type: application/json" \
   -d '{"sql": "CREATE STREAM telemetry () WITH (FORMAT=\"json\")"}'
-```
 
-### 2. Define a Streaming Analytics Rule
-
-Filter high-temperature readings, convert Celsius to Fahrenheit, and publish to an MQTT topic with a custom data template:
-
-```bash
 curl -X POST http://localhost:9081/rules \
   -H "Content-Type: application/json" \
   -d '{
@@ -240,95 +99,125 @@ curl -X POST http://localhost:9081/rules \
     "sql": "SELECT id, temp, temp * 1.8 + 32 AS temp_f FROM telemetry WHERE temp > 30.0",
     "actions": [
       {"log": {}},
-      {
-        "mqtt": {
-          "server": "tcp://broker.emqx.io:1883",
-          "topic": "alerts/critical",
-          "dataTemplate": "{\"alert\": \"OVERHEAT\", \"device\": \"{{.id}}\", \"temp_f\": {{.temp_f}}}"
-        }
-      }
+      {"mqtt": {
+        "server": "tcp://broker.emqx.io:1883",
+        "topic": "alerts/critical",
+        "dataTemplate": "{\"alert\": \"OVERHEAT\", \"device\": \"{{.id}}\", \"temp_f\": {{.temp_f}}}"
+      }}
     ]
   }'
-```
 
-### 3. Push Real-Time Telemetry
-
-```bash
 curl -X POST http://localhost:9081/streams/telemetry/data \
   -H "Content-Type: application/json" \
   -d '{"id": "sensor_01", "temp": 35.6}'
+
+curl http://localhost:9081/rules/alert_rule/status
 ```
 
-### 4. Monitor Rule Health & Metrics
+## What rekuiper supports
 
-```bash
-# Query rule metrics
-curl -X GET http://localhost:9081/rules/alert_rule/status
+| Area | Details |
+| :--- | :--- |
+| REST API | 98 paths and 140 operations of eKuiper's API, checked against `openapi.json` by the black-box tests in `fvt_compat`. Known gaps are listed in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md#known-residual-gaps). |
+| CLI | `kuiper` subcommands for streams, tables, rules, import/export and validation. |
+| SQL | `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `CASE`, nested JSON paths, array index and slice, `unnest`, built-in math, string, JSON, time, hashing, aggregate and analytic functions. |
+| Windows | Tumbling, hopping, sliding, count and session windows. Time windows align to wall-clock boundaries. Common aggregates (`count`, `sum`, `avg`, `min`, `max`) run incrementally, so memory depends on the number of groups rather than the message rate. |
+| Joins | Stream-to-table lookups against memory, Redis and SQL tables; stream-to-stream joins inside windows (inner, left, right, full, cross). |
+| MQTT | Source and sink over MQTT 3.1.1 with QoS 0, 1 and 2 and username/password. Payload formats: JSON objects and arrays, binary, delimited, and protobuf (via a registered schema). `meta(topic)`, `meta(qos)` and `meta(messageId)`. Wildcard and multiple topics. TLS support is coming in an upcoming release. |
+| Other connectors | Kafka, Redis (lookup, pub/sub source, `SET`/`PUBLISH` sink), WebSocket, HTTP pull and push, PostgreSQL/MySQL/SQLite (source, lookup, sink), files (JSON Lines and CSV), memory. These work but are not yet stable; they will be tested and released as stable in upcoming versions. MQTT is the stable, benchmarked path today. |
+| Sink delivery | `dataTemplate` payloads. Optional offline cache with eKuiper's options (`enableCache`, `memoryCacheThreshold`, `maxDiskCache`, `bufferPageSize`, `resendInterval`, `resendPriority`, ...): failed records are kept in memory and then on disk, and resent in order when the destination comes back. |
+| Rule testing and graphs | `POST /ruletest` with results streamed over Server-Sent Events; graph (DAG) rules. |
+| Observability | Prometheus metrics on port 20499 and at `/metrics`. |
 
-# Or scrape Prometheus endpoint
-curl -X GET http://localhost:20499/metrics
+Not supported, by design or not yet:
+
+- EdgeX IPC and EMQ Neuron IPC: connect through MQTT or Redis instead.
+- Native Go plugins (`.so`): use portable plugins or JavaScript UDFs.
+- Video pipelines, embedded ONNX/TFLite models, Modbus, OPC UA and BACnet drivers: use a
+  gateway that publishes to MQTT.
+- Clustering: rekuiper runs as a single node.
+
+## How it works
+
+Each source publishes into an in-process stream bus with bounded queues, so a slow rule applies
+backpressure instead of dropping data. Every rule runs as its own task that evaluates the SQL and
+maintains window state. Output goes through a bounded sink queue (`bufferLength`, 10,000 by
+default) to a per-rule sink worker, which keeps a persistent connection for MQTT, reuses HTTP
+connections, batches file writes, and holds failed records in the offline cache when caching is
+enabled.
+
+```
+sources (MQTT, HTTP, Kafka, Redis, WebSocket, SQL, files)
+   │
+   ▼
+stream bus: bounded queues, backpressure
+   │
+   ▼
+rule task: SQL evaluation, windows, joins
+   │
+   ▼
+sink queue: bufferLength, default 10,000
+   │
+   ▼
+sink worker: MQTT, HTTP, Kafka, Redis, WebSocket, SQL, files, offline cache
 ```
 
+## Monitoring
+
+Prometheus metrics are served on port 20499 and at `http://localhost:9081/metrics`:
+
+- `kuiper_rule_count{status="running|stop"}`
+- `kuiper_rule_status{rule="<id>"}`
+- `kuiper_source_records_in_total{rule="<id>"}` and `kuiper_source_records_out_total{rule="<id>"}`
+- `kuiper_sink_records_in_total{rule="<id>"}` and `kuiper_sink_records_out_total{rule="<id>"}`
+- `kuiper_sink_exceptions_total{rule="<id>"}`
+- `kuiper_sink_latency_us{rule="<id>"}`
+
+## Why we built it
+
+rekuiper comes from I-Dacs Labs, where we run edge telemetry pipelines for industrial gateways
+and robotics. JVM engines such as Flink need more memory than those machines have. Go-based tools
+such as eKuiper, Telegraf and Benthos fit, but on one core they fell behind well below the message
+rates we see from vehicle and charger fleets, and window state grew with traffic. We wanted an
+engine that stays within a small, predictable memory budget and keeps up on a single core, while
+remaining compatible with the eKuiper ecosystem we already used.
+
+## Earlier HTTP measurements
+
+Before the 0.425 work, we ran an over-HTTP comparison with eKuiper on the 0.424-beta build. That
+build lost most of a 500,000-event burst, and the results were marked provisional. The admission
+path has since been rewritten, but the HTTP comparison has not been rerun, so we make no HTTP
+performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md) and
+[test/BENCHMARKS.md](test/BENCHMARKS.md).
+
+## Release history
+
+- **0.425-beta** (current): correct window aggregation (`GROUP BY`, `WHERE`, `HAVING`, `ORDER BY`,
+  `LIMIT`) with bounded memory, `SESSIONWINDOW`, MQTT binary/delimited/protobuf payloads and
+  `meta()`, a persistent MQTT sink with offline cache, and the IIoT MQTT benchmark.
+- **0.424-beta**: PostgreSQL and SQL source/lookup fixes, windowed joins, array and JSONPath
+  syntax, rule test SSE on port 10081, rules resume after restart, CLI parity.
+- **0.423-beta**: `POST /rules/:name/start`, ruleset and data import.
+- **0.422-beta**: remote MQTT ingestion and `CONF_KEY`, PostgreSQL data plane, PUT/PATCH handlers,
+  JWT auth, stream and table schemas.
+- **0.421-beta**: OpenAPI route registration, persistent uploads, YAML overlays and secret masking,
+  bulk rule control.
+- **0.420-beta**: first release: Rust engine, sink queue, connectors, graph rules.
+
+See [CHANGELOG.md](CHANGELOG.md) for details.
+
+## Contributing
+
+Build and test with `cargo build` and `cargo test --workspace`. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the development workflow and commit sign-off, and [SECURITY.md](SECURITY.md) for reporting
+vulnerabilities.
+
+## License
+
+rekuiper is available under the MIT license or the Apache License 2.0, at your option. See
+[LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE).
+
 ---
 
-## 📊 Observability & Management
-
-- **Web UI Compatible**: Works with the official [eKuiper Manager Web UI](https://ankur-paan.github.io/ekuiper-manager/) via the audited OpenAPI contract (scoped coverage; see gaps note above).
-- **Prometheus Scrapes**: Scrape port `20499` (or `http://localhost:9081/metrics`) to monitor:
-  - `kuiper_rule_count{status="running|stop"}`
-  - `kuiper_rule_status{rule="<id>"}`
-  - `kuiper_source_records_in_total{rule="<id>"}`
-  - `kuiper_source_records_out_total{rule="<id>"}`
-  - `kuiper_sink_records_in_total{rule="<id>"}`
-  - `kuiper_sink_records_out_total{rule="<id>"}`
-  - `kuiper_sink_exceptions_total{rule="<id>"}`
-  - `kuiper_sink_latency_us{rule="<id>"}`
-
----
-
-## 📖 Background & The Story Behind rekuiper
-
-### Why we built and open-sourced `rekuiper`
-
-Like [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager), `rekuiper` was engineered by **I-Dacs Labs**. We originally built and ran it internally to power our high-throughput edge telemetry pipelines, industrial IoT gateways, and real-time robotics infrastructure.
-
-In production, edge streaming architectures faced a frustrating compromise:
-1. **Heavyweight JVM Stream Engines (Apache Flink, Spark Streaming)**: Feature-rich, but require gigabytes of RAM, take seconds to boot, and instantly crash resource-constrained industrial gateways, Raspberry Pis, or embedded edge micro-servers.
-2. **Go / Python Stream Processors (Upstream eKuiper, Benthos, Telegraf)**: Substantially lighter than JVM runtimes, but burdened by continuous garbage collection sweeps. Under sustained high-frequency sensor ingestion (10k–100k events/sec), Stop-The-World GC sweeps introduce severe tail latency spikes, dropped packets, and CPU jitter.
-
-`rekuiper` was created to address this compromise. As a Rust implementation it has no GC pauses by construction; measured over-HTTP source-to-sink behavior and limits are reported in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md) rather than as absolute throughput claims. It is released under **MIT / Apache-2.0**.
-
----
-
-## 🗺️ Roadmap
-
-- **0.425-beta (Current)**: Correct windowed aggregation (GROUP BY, WHERE, HAVING, ORDER BY, LIMIT) with memory-bounded incremental aggregates, `SESSIONWINDOW`, MQTT source formats (json arrays, binary, delimited, protobuf), `meta(topic)` and connection options, persistent MQTT sink with offline cache and resend, and a reproducible IIoT MQTT benchmark against eKuiper, Telegraf and Redpanda Connect.
-- **0.424-beta**: Documented parity fixes for PG/SQL sources and lookups, windowed joins, array/JSONPath, ruletest SSE on port 10081, restart resume, CLI surface, and Docker `restIp` default. Fair over-HTTP benchmark audit added.
-- **0.423-beta**: Dynamic Rule Resume (`POST /rules/:name/start`), Envelope Import Support (`POST /ruleset/import` & `POST /data/import`).
-- **0.422-beta**: Evaluation fixes across documented root causes (D1–D12), remote MQTT ingestion & CONF_KEY, PostgreSQL data plane, HTTP PUT/PATCH handlers, RSA/JWT guard, SSE ruletest, stream/table schemas.
-- **0.421-beta**: Engine throughput test floor, OpenAPI route registration, persistent uploads, YAML overlays & masking, bulk rule control.
-- **0.420-beta**: Rust core engine, actor sink queue, connector ecosystem, graph rule DAG engine.
-
----
-
-## 🤝 Contributing & Community
-
-We welcome contributions from the edge computing, IoT, and Rust communities!
-- Please review [CONTRIBUTING.md](CONTRIBUTING.md) for build, testing, and DCO commit guidelines.
-- To report security vulnerabilities, follow the procedures outlined in [SECURITY.md](SECURITY.md).
-
-## 📄 License
-
-`rekuiper` is open source software released under the **MIT License** (or at your option, the **Apache License, Version 2.0**) — the most permissive open-source licensing model.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies in personal, commercial, and enterprise production environments with zero fees or royalties.
-
-See [LICENSE](LICENSE) and [LICENSE-APACHE](LICENSE-APACHE) for full terms.
-
----
-
-**Developed and maintained by [I-Dacs Labs](https://i-dacs.com)**
-
-📧 [measure@i-dacs.com](mailto:measure@i-dacs.com) · 🌐 [i-dacs.com](https://i-dacs.com) · 💼 [LinkedIn](https://www.linkedin.com/company/110770924)
-
-*Building the future of Industrial IoT together.*
+Maintained by [I-Dacs Labs](https://i-dacs.com) · [measure@i-dacs.com](mailto:measure@i-dacs.com) ·
+[LinkedIn](https://www.linkedin.com/company/110770924)
