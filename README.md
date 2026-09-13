@@ -6,13 +6,39 @@
 [![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.424--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
 [![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-contract%20audited-blue.svg)](openapi.json)
-[![Benchmark](https://img.shields.io/badge/benchmark-fair%20over--HTTP%20audit-blue.svg)](BENCHMARK-AUDIT.md)
+[![Benchmark](https://img.shields.io/badge/benchmark-IIoT%20MQTT%20vs%20eKuiper%2C%20Telegraf%2C%20Redpanda%20Connect-blue.svg)](test/benchmark/iiot-mqtt/README.md)
 
-> **🚀 Pure Rust edge stream processing engine — zero GC pauses by construction, small static binary and low idle RSS, with eKuiper-compatible REST/CLI/YAML surface (scoped parity, see below). Fair over-HTTP source-to-sink results are reported in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md); no latency-histogram p99 is claimed.**
+> **🚀 Pure Rust edge stream processing engine — zero GC pauses by construction, small static binary and low idle RSS, with eKuiper-compatible REST/CLI/YAML surface (scoped parity, see below). MQTT benchmark results, method, configs and raw evidence are in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md); no latency-histogram p99 is claimed.**
 
 ---
 
-## ⚡ Fair Over-HTTP Benchmark (rekuiper vs eKuiper)
+## ⚡ IIoT / Vehicle MQTT Benchmark
+
+Same Mosquitto broker, same Rust load generator (MQTT QoS 0, 8 connections), same container limits
+(`--cpus=1 --memory=1g`, dedicated core), 30 s per rate, and an exact loss proof at the sink
+(unique ids or per-device counts). One repetition, 2026-09-13. Full tables, engine configs, caveats
+and reproduction steps: **[test/benchmark/iiot-mqtt/README.md](test/benchmark/iiot-mqtt/README.md)**.
+
+Highest tested rate with an exact, loss-free result (tested at 5k, 20k, 50k, 100k msg/s):
+
+| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | :--- | :--- | :--- | :--- |
+| Telemetry filter (1k devices) | **≥ 100k** | 20k | 50k (20k without backlog) | 20k |
+| Per-device 10 s windows | **≥ 100k** | 20k | none (~6–27% loss) | 5k |
+| ESPHome, 10k topics, `meta(topic)` | **≥ 100k** | 20k | 50k (20k without backlog) | 20k |
+| Vehicles, 10k VIN topics, windows | **≥ 100k** | 20k | inconsistent | 5k |
+| EV charger `SESSIONWINDOW` | **≥ 100k** | 20k | not supported | not supported |
+
+At 20k msg/s on the filter workload rekuiper used 48% of one core and 4.7 MB of heap
+(eKuiper 99% / 15 MB, Telegraf 90% / 92 MB, Redpanda Connect 99% / 72 MB). On windowed
+workloads at 20k its heap stayed at 5–10 MB versus 536–886 MB for eKuiper. rekuiper's own
+ceiling was not reached; 100k msg/s is the top of the ladder. Apache Flink 2.3.0 is not
+included because Flink 2.x has no MQTT connector.
+
+## Earlier fair over-HTTP audit (provisional, pre-optimisation build)
+
+> Kept for transparency. These numbers were measured on the 0.424-beta candidate before the
+> admission, windowing and MQTT work above, and were marked provisional pending validation.
 
 Same Python harness delivers the identical 500,000 synthetic events through documented
 ingestion endpoints into containers with equal `--cpus=1 --memory=1g` constraints,

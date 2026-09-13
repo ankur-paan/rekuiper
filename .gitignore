@@ -68,3 +68,6 @@ test/benchmark/*.png
 test/benchmark/temp_race_audio.wav
 *.wav
 
+
+# Sink-cache pages written by broker-backed tests (cwd = crate dir)
+crates/*/data/
