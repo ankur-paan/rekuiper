@@ -1,3 +1,20 @@
+# Release Notes - rekuiper v0.425-beta
+
+`rekuiper` v0.425-beta makes windowed analytics correct and memory-bounded, adds
+`SESSIONWINDOW`, extends the MQTT source (binary, delimited and protobuf payloads,
+`meta(topic)`, multiple topics, session options), replaces the per-record MQTT sink
+client with a persistent connection, and adds an offline sink cache with resend.
+See CHANGELOG for details.
+
+Benchmark: [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md) compares
+rekuiper with eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 over MQTT
+under identical limits, with configs, raw evidence and reproduction steps.
+
+- Docker image: `ankurkrp/rekuiper:0.425-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.425-beta`)
+
+---
+
 # Release Notes - rekuiper v0.424-beta
 
 `rekuiper` v0.424-beta fixes every documented compatibility defect found in the

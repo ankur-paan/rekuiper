@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.425.0-beta] - 2026-09-13
+
+### Fixed
+- **Windowed aggregation**: time and count windows now apply `WHERE`, partition by `GROUP BY` (one row per group), and honour `HAVING`, `ORDER BY` and `LIMIT`. Previously a window emitted a single row with group values taken from its first record, ignored `WHERE`, and buffered and cloned every row, which exhausted memory at high rates.
+- **MQTT sink connection leak**: the sink created a new client with a never-ending event loop for every output record; it now keeps one persistent connection per action and reports disconnection as a send failure.
+
+### Added
+- `SESSIONWINDOW(unit, maxDuration, timeout)` (eKuiper argument order, processing time, graph API `sessionwindow`).
+- Memory-bounded incremental window aggregation for `count/sum/avg/min/max`.
+- MQTT source: stream `FORMAT` json (object or array), binary (`self`), delimited, protobuf (`SCHEMAID`); `meta(topic|qos|messageId)`; comma-separated topics; `clientid`, `protocolVersion`, `cleanSession`, `keepAlive`; 16 MiB packets.
+- Sink offline cache and resend with the eKuiper options (`enableCache`, `memoryCacheThreshold`, `maxDiskCache`, `bufferPageSize`, `resendInterval`, `cleanCacheAtStop`, `resendPriority`, `resendIndicatorField`, `resendDestination`).
+- IIoT/vehicle MQTT benchmark with tools, configs and raw evidence: `test/benchmark/iiot-mqtt`.
+
+### Changed
+- Tumbling and hopping windows align to natural time boundaries.
+- HTTP stream ingest uses reserve-then-commit admission; the REST listener sets `TCP_NODELAY`.
+
 ## [0.424.0-beta] - 2026-09-12
 
 ### Fixed (documented parity defects, each proven against official eKuiper 2.4.1)

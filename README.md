@@ -1,9 +1,9 @@
 # rekuiper: The High-Performance Edge Stream Processing Engine
 
-[![Release](https://img.shields.io/badge/release-v0.424--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.425--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.424--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.425--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](#)
 [![OpenAPI 3.0](https://img.shields.io/badge/OpenAPI%203.0-contract%20audited-blue.svg)](openapi.json)
 [![Benchmark](https://img.shields.io/badge/benchmark-IIoT%20MQTT%20vs%20eKuiper%2C%20Telegraf%2C%20Redpanda%20Connect-blue.svg)](test/benchmark/iiot-mqtt/README.md)
@@ -103,7 +103,7 @@ docker run -d \
   -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.424-beta
+  ankurkrp/rekuiper:0.425-beta
 ```
 
 Or spin up an instant end-to-end edge stack (rekuiper + Mosquitto MQTT broker + Redis):
@@ -186,9 +186,9 @@ make build
 
 ## 📋 Supported vs. Unsupported Features Matrix
 
-Detailed capability disclosures for the **v0.424-beta** release:
+Detailed capability disclosures for the **v0.425-beta** release:
 
-| Feature Area | Supported in v0.424-beta | Status & Evidence |
+| Feature Area | Supported in v0.425-beta | Status & Evidence |
 | :--- | :--- | :--- |
 | **REST API** | **Scoped route coverage** | 98 paths / 140 operations registered against the audited `openapi.json` baseline; covered by `fvt_compat` black-box tests. Not claimed as exhaustive parity — see known gaps in [BENCHMARK-AUDIT.md](BENCHMARK-AUDIT.md#known-residual-gaps) and `TEST-CONTRACT-AUDIT.md` where applicable. |
 | **CLI Tool** | **`kuiper` Drop-in Replacement** | ✅ Full stream, table, rule management subcommands. |
@@ -302,7 +302,8 @@ In production, edge streaming architectures faced a frustrating compromise:
 
 ## 🗺️ Roadmap
 
-- **0.424-beta (Current)**: Documented parity fixes for PG/SQL sources and lookups, windowed joins, array/JSONPath, ruletest SSE on port 10081, restart resume, CLI surface, and Docker `restIp` default. Fair over-HTTP benchmark audit added.
+- **0.425-beta (Current)**: Correct windowed aggregation (GROUP BY, WHERE, HAVING, ORDER BY, LIMIT) with memory-bounded incremental aggregates, `SESSIONWINDOW`, MQTT source formats (json arrays, binary, delimited, protobuf), `meta(topic)` and connection options, persistent MQTT sink with offline cache and resend, and a reproducible IIoT MQTT benchmark against eKuiper, Telegraf and Redpanda Connect.
+- **0.424-beta**: Documented parity fixes for PG/SQL sources and lookups, windowed joins, array/JSONPath, ruletest SSE on port 10081, restart resume, CLI surface, and Docker `restIp` default. Fair over-HTTP benchmark audit added.
 - **0.423-beta**: Dynamic Rule Resume (`POST /rules/:name/start`), Envelope Import Support (`POST /ruleset/import` & `POST /data/import`).
 - **0.422-beta**: Evaluation fixes across documented root causes (D1–D12), remote MQTT ingestion & CONF_KEY, PostgreSQL data plane, HTTP PUT/PATCH handlers, RSA/JWT guard, SSE ruletest, stream/table schemas.
 - **0.421-beta**: Engine throughput test floor, OpenAPI route registration, persistent uploads, YAML overlays & masking, bulk rule control.
