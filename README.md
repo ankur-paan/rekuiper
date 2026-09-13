@@ -21,8 +21,9 @@ the same load generator, one CPU core and 1 GB of memory. Each step runs for 30 
 correctness is checked exactly at the output: every message id, or every per-device count, must
 be present.
 
-The table shows the highest rate each engine handled without losing data. We tested 5,000,
-20,000, 50,000 and 100,000 messages per second.
+We tested 5,000, 20,000, 50,000 and 100,000 messages per second.
+
+**Highest rate handled without losing data**
 
 | Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -33,10 +34,35 @@ The table shows the highest rate each engine handled without losing data. We tes
 | EV charger sessions (`SESSIONWINDOW`) | **100k** | 20k | not supported | not supported |
 
 100,000 msg/s was the top of the test range, so rekuiper's actual limit is higher than shown.
-At 20,000 msg/s on the filter workload, rekuiper used 48% of a core and 4.7 MB of heap. eKuiper
-used 99% and 15 MB, Telegraf 90% and 92 MB, and Redpanda Connect 99% and 72 MB. Windowed rules
-are where the gap is largest: rekuiper keeps per-group state rather than buffering rows, so its
-heap stayed between 5 and 10 MB, while eKuiper used 536 to 886 MB at the same rate.
+
+The next two tables compare cost at 20,000 msg/s, the highest rate most engines still handle.
+Where an engine was already losing data at that rate, the cell says so, because a figure from a
+failing run is not comparable.
+
+**CPU at 20,000 msg/s** (percent of one core)
+
+| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | ---: | ---: | ---: | ---: |
+| Telemetry filter | **49%** | 99% | 90% | 99% |
+| 10-second window per device | **44%** | 86% | 81% (losing 9%) | 98% (losing all) |
+| ESPHome, 10,000 topics | **48%** | 94% | 70% | 98% |
+| Vehicles, 10,000 topics | **46%** | 91% | 86% (losing 9%) | 99% (losing all) |
+| EV charger sessions | **45%** | 87% | not supported | not supported |
+
+**Memory at 20,000 msg/s** (engine heap, MB)
+
+| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | ---: | ---: | ---: | ---: |
+| Telemetry filter | **4.7** | 15 | 92 | 72 |
+| 10-second window per device | **5.4** | 536 | 52 (losing 9%) | 1,012 (losing all) |
+| ESPHome, 10,000 topics | **4.8** | 43 | 85 | 68 |
+| Vehicles, 10,000 topics | **10** | 886 | 94 (losing 9%) | 993 (losing all) |
+| EV charger sessions | **5.9** | 832 | not supported | not supported |
+
+Memory is the engine's anonymous memory from its container cgroup. Total container memory also
+counts page cache from writing the output file and is listed in the full results. rekuiper keeps
+per-group state for windows instead of buffering rows, which is why its window memory stays flat
+while the others grow with traffic up to the 1 GB limit.
 
 These are single runs on one laptop (Windows 11 with WSL2). The method, every engine config,
 the raw results, known caveats and the steps to reproduce them are in
