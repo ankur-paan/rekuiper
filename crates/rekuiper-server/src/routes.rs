@@ -373,29 +373,7 @@ pub struct PortablePluginStatus {
 
 pub fn create_default_portables(
 ) -> Arc<RwLock<HashMap<String, (PortablePluginInfo, PortablePluginStatus)>>> {
-    let mut map = HashMap::new();
-    map.insert(
-        "pyfunc".to_string(),
-        (
-            PortablePluginInfo {
-                name: "pyfunc".to_string(),
-                version: "1.0.0".to_string(),
-                language: "python".to_string(),
-                executable: "pyfunc.py".to_string(),
-                virtual_env_type: None,
-                env: None,
-                sources: Vec::new(),
-                sinks: Vec::new(),
-                functions: vec!["pyfunc".to_string()],
-            },
-            PortablePluginStatus {
-                ref_count: HashMap::new(),
-                status: "running".to_string(),
-                err_msg: "".to_string(),
-            },
-        ),
-    );
-    Arc::new(RwLock::new(map))
+    Arc::new(RwLock::new(HashMap::new()))
 }
 
 #[derive(Clone)]
@@ -1823,7 +1801,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
             .entry(rule_id.to_string())
             .or_default()
             .push(cancel_tx);
-        MqttSource::new(config, stream_tx).spawn(cancel_rx);
+        MqttSource::new(config, stream_tx)
+            .with_rule_counters(state.rule_manager.rule_counters(rule_id))
+            .spawn(cancel_rx);
     }
 
     // File source streams tail a line-delimited file into the stream bus.
@@ -2747,7 +2727,10 @@ fn spawn_rule_task(
         let mut ticker = tokio::time::interval(SINK_TICK);
         // First tick fires immediately; consume it so time-flushes align.
         ticker.tick().await;
-        let mut pending_records: u64 = 0;
+        let file_actions = runtimes
+            .iter()
+            .any(|rt| matches!(&rt.action, PreparedAction::File { .. }));
+        let mut pending_file_records: u64 = 0;
         let mut last_live = tokio::time::Instant::now();
         loop {
             tokio::select! {
@@ -2756,6 +2739,7 @@ fn spawn_rule_task(
                         // Rule end/cancel/update/delete/shutdown: drain, flush
                         // every file destination, persist caches, then exit.
                         // Errors propagate to exceptions before exit.
+                        let mut all_flushed = true;
                         for writer in files.values_mut() {
                             if let Err(e) = writer.flush().await {
                                 tracing::warn!(
@@ -2763,9 +2747,13 @@ fn spawn_rule_task(
                                     sink_rule_id, e
                                 );
                                 sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
-                                sink_rule_mgr.inc_sink_failed(&sink_rule_id, pending_records);
-                                pending_records = 0;
+                                all_flushed = false;
                             }
+                        }
+                        if all_flushed {
+                            sink_counters.sink_out.fetch_add(pending_file_records, Relaxed);
+                        } else {
+                            sink_rule_mgr.inc_sink_failed(&sink_rule_id, pending_file_records);
                         }
                         for rt in std::mem::take(&mut runtimes) {
                             if let Some(cache) = rt.cache {
@@ -2782,7 +2770,6 @@ fn spawn_rule_task(
                         break;
                     };
                     last_live = tokio::time::Instant::now();
-                    pending_records += 1;
                     maybe_trace_record(
                         &sink_trace_mgr,
                         &sink_rule_id,
@@ -2797,15 +2784,19 @@ fn spawn_rule_task(
                     };
                     match deliver_record(&mut runtimes, &output_record, &ctx, &mut files).await {
                         Delivery::Delivered => {
-                            sink_counters.sink_out.fetch_add(1, Relaxed);
+                            if file_actions {
+                                pending_file_records += 1;
+                            } else {
+                                sink_counters.sink_out.fetch_add(1, Relaxed);
+                            }
                         }
                         // Counted as delivered when the resend succeeds.
                         Delivery::Cached => {}
                         Delivery::Failed => sink_rule_mgr.inc_sink_failed(&sink_rule_id, 1),
                     }
-                    pending_records = pending_records.saturating_sub(1);
                     let need_flush = files.values().any(|w| w.should_flush());
                     if need_flush {
+                        let mut all_flushed = true;
                         for writer in files.values_mut() {
                             if let Err(e) = writer.flush().await {
                                 tracing::warn!(
@@ -2813,7 +2804,12 @@ fn spawn_rule_task(
                                     sink_rule_id, e
                                 );
                                 sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
+                                all_flushed = false;
                             }
+                        }
+                        if all_flushed {
+                            sink_counters.sink_out.fetch_add(pending_file_records, Relaxed);
+                            pending_file_records = 0;
                         }
                     }
                 }
@@ -2832,6 +2828,9 @@ fn spawn_rule_task(
                     }
                     if any_error {
                         sink_rule_mgr.inc_exceptions(&sink_rule_id, 1);
+                    } else {
+                        sink_counters.sink_out.fetch_add(pending_file_records, Relaxed);
+                        pending_file_records = 0;
                     }
                     let ctx = SinkContext {
                         rule_id: &sink_rule_id,
@@ -2843,7 +2842,11 @@ fn spawn_rule_task(
                     for rt in runtimes.iter_mut() {
                         let resent = resend_cached(rt, live_recent, &ctx, &mut files).await;
                         if resent > 0 {
-                            sink_counters.sink_out.fetch_add(resent, Relaxed);
+                            if file_actions {
+                                pending_file_records += resent;
+                            } else {
+                                sink_counters.sink_out.fetch_add(resent, Relaxed);
+                            }
                         }
                     }
                 }
@@ -6325,52 +6328,11 @@ pub fn compile_and_register_js_udf(udf: &JavascriptUdf) -> Result<(), String> {
 }
 
 pub fn create_default_services() -> Arc<RwLock<HashMap<String, ServiceDetail>>> {
-    let mut map = HashMap::new();
-    let mut about = HashMap::new();
-    about.insert(
-        "description".to_string(),
-        json!("EdgeX Foundry service integration"),
-    );
-    about.insert("author".to_string(), json!("EMQ"));
-    about.insert("version".to_string(), json!("1.0.0"));
-
-    let mut interfaces = HashMap::new();
-    interfaces.insert(
-        "core-data".to_string(),
-        json!({
-            "protocol": "rest",
-            "port": 59900
-        }),
-    );
-
-    let echo_fn = ExternalFunction {
-        service_name: "edgex".to_string(),
-        interface_name: "core-data".to_string(),
-        addr: "tcp://localhost:59900".to_string(),
-        method_name: "echo".to_string(),
-        func_name: "echo".to_string(),
-    };
-
-    let detail = ServiceDetail {
-        about,
-        interfaces,
-        functions: vec![echo_fn],
-    };
-    map.insert("edgex".to_string(), detail);
-    Arc::new(RwLock::new(map))
+    Arc::new(RwLock::new(HashMap::new()))
 }
 
 pub fn create_default_js_udfs() -> Arc<RwLock<HashMap<String, JavascriptUdf>>> {
-    let mut map = HashMap::new();
-    let func1 = JavascriptUdf {
-        id: "func1".to_string(),
-        description: "Default echo JavaScript function".to_string(),
-        script: "function func1(x) { return x; }".to_string(),
-        is_agg: false,
-    };
-    let _ = compile_and_register_js_udf(&func1);
-    map.insert("func1".to_string(), func1);
-    Arc::new(RwLock::new(map))
+    Arc::new(RwLock::new(HashMap::new()))
 }
 
 async fn list_services(State(state): State<AppState>) -> impl IntoResponse {
@@ -7072,62 +7034,18 @@ async fn list_portable_plugins(State(state): State<AppState>) -> impl IntoRespon
 }
 
 async fn create_portable_plugin(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(payload): Json<Value>,
 ) -> Response {
-    let name = match payload.get("name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
-        None => return (StatusCode::BAD_REQUEST, "missing name").into_response(),
-    };
-    if let Err(resp) = check_valid_name(&name) {
-        return resp;
+    if payload.get("name").and_then(Value::as_str).is_none() {
+        return (StatusCode::BAD_REQUEST, "missing name").into_response();
     }
-
-    let info: PortablePluginInfo = match serde_json::from_value(payload.clone()) {
-        Ok(info) => info,
-        Err(_) => {
-            let file = payload
-                .get("file")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            PortablePluginInfo {
-                name: name.clone(),
-                version: "1.0.0".to_string(),
-                language: "python".to_string(),
-                executable: file.unwrap_or_else(|| format!("{}.py", name)),
-                virtual_env_type: None,
-                env: None,
-                sources: Vec::new(),
-                sinks: Vec::new(),
-                functions: vec![name.clone()],
-            }
-        }
-    };
-
-    let status = PortablePluginStatus {
-        ref_count: HashMap::new(),
-        status: "running".to_string(),
-        err_msg: "".to_string(),
-    };
-
-    let _ = state
-        .plugin_manager
-        .register_plugin(PluginDefinition {
-            name: name.clone(),
-            plugin_type: "portable".to_string(),
-            file: Some(info.executable.clone()),
-            description: Some(format!("Portable plugin in {}", info.language)),
-            functions: info.functions.clone(),
-        })
-        .await;
-
-    state
-        .portable_plugins
-        .write()
-        .insert(name.clone(), (info, status));
     (
-        StatusCode::CREATED,
-        format!("Plugin {} is created.\n", name),
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({
+            "error": 1001,
+            "message": "portable plugin execution is not implemented"
+        })),
     )
         .into_response()
 }
@@ -7144,91 +7062,38 @@ async fn get_portable_plugin(State(state): State<AppState>, Path(name): Path<Str
 }
 
 async fn update_portable_plugin(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(name): Path<String>,
-    body: Bytes,
+    _body: Bytes,
 ) -> Response {
     if let Err(resp) = check_valid_name(name.as_str()) {
         return resp;
     }
-    if !state.portable_plugins.read().contains_key(&name)
-        && state.plugin_manager.get_plugin(&name).is_none()
-    {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": 1000,
-                "message": format!("plugin {} is not found", name)
-            })),
-        )
-            .into_response();
-    }
-    let mut plugins = state.portable_plugins.write();
-    if let Some((info, _)) = plugins.get_mut(&name) {
-        if !body.is_empty() {
-            if let Ok(val) = serde_json::from_slice::<Value>(&body) {
-                if let Some(ver) = val.get("version").and_then(|v| v.as_str()) {
-                    info.version = ver.to_string();
-                }
-                if let Some(exec) = val.get("executable").and_then(|v| v.as_str()) {
-                    info.executable = exec.to_string();
-                }
-                if let Some(desc) = val.get("description").and_then(|v| v.as_str()) {
-                    info.env = Some(desc.to_string());
-                }
-            }
-        }
-    } else {
-        plugins.insert(
-            name.clone(),
-            (
-                PortablePluginInfo {
-                    name: name.clone(),
-                    version: "1.0.0".to_string(),
-                    language: "python".to_string(),
-                    executable: format!("{}.py", name),
-                    virtual_env_type: None,
-                    env: None,
-                    sources: Vec::new(),
-                    sinks: Vec::new(),
-                    functions: vec![name.clone()],
-                },
-                PortablePluginStatus {
-                    ref_count: HashMap::new(),
-                    status: "running".to_string(),
-                    err_msg: "".to_string(),
-                },
-            ),
-        );
-    }
-    (StatusCode::OK, format!("Plugin {} is updated.\n", name)).into_response()
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        format!(
+            "Portable plugin {} cannot be updated: runtime support is unavailable\n",
+            name
+        ),
+    )
+        .into_response()
 }
 
 async fn delete_portable_plugin(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    if !state.portable_plugins.read().contains_key(&name)
-        && state.plugin_manager.get_plugin(&name).is_none()
-    {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": 1000,
-                "message": format!(
-                    "fail to delete plugin {}: plugin {} is not found",
-                    name, name
-                )
-            })),
-        )
-            .into_response();
-    }
-    let _ = state.plugin_manager.delete_plugin(&name).await;
-    state.portable_plugins.write().remove(&name);
-    (StatusCode::OK, format!("Plugin {} is dropped.\n", name)).into_response()
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        format!(
+            "Portable plugin {} cannot be deleted: runtime support is unavailable\n",
+            name
+        ),
+    )
+        .into_response()
 }
 
 async fn get_portable_plugin_status(

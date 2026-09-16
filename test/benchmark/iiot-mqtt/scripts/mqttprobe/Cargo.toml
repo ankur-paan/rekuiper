@@ -1,0 +1,7 @@
+[package]
+name = "mqttprobe"
+version = "0.1.0"
+edition = "2021"
+description = "Independent MQTT QoS 0 subscriber for broker and generator capacity checks"
+
+[workspace]

@@ -377,7 +377,8 @@ fn health() -> Value {
 fn start_broker() -> Result<(), String> {
     let _ = run("docker", &["network", "create", NET]);
     let _ = run("docker", &["container", "remove", "-f", BROKER]);
-    let conf = format!("{DATA}/scripts/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro");
+    let broker_config = env_or("IOT_BROKER_CONFIG", &format!("{DATA}/scripts/mosquitto/mosquitto.conf"));
+    let conf = format!("{broker_config}:/mosquitto/config/mosquitto.conf:ro");
     let port = format!("{BROKER_HOST_PORT}:1883");
     let cpus = format!("--cpuset-cpus={}", env_or("IOT_BROKER_CPUSET", "8,9"));
     let (code, out) = run(
@@ -627,6 +628,14 @@ fn source_in(e: &Engine) -> u64 {
         .unwrap_or(0)
 }
 
+fn exceptions_total(e: &Engine) -> u64 {
+    if !matches!(e.kind, Kind::Rekuiper) { return 0; }
+    let (_, body) = http("GET", &format!("http://127.0.0.1:{}/rules/rbench/status", e.port), None);
+    serde_json::from_str::<Value>(&body).ok()
+        .and_then(|status| status["exceptionsTotal"].as_u64())
+        .unwrap_or(u64::MAX)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn mqttgen(w: &Workload, rate: u64, secs: u64, conns: usize, tag: &str, devprefix: &str, out: &str) -> Option<Value> {
     let gen = format!("{DATA}/scripts/mqttgen/mqttgen");
@@ -750,7 +759,7 @@ fn step(e: &Engine, w: &Workload, rate: u64, secs: u64, rep: usize, latdir: &str
     }
     sleep_s(2);
     // Warm-up proves the subscription is live before measuring (QoS0 is not replayed).
-    let warm_tag = format!("WARM{rep}{}{rate}", w.key);
+    let warm_tag = format!("{}WARM{rep}{}{rate}", env_or("IOT_TAG_PREFIX", ""), w.key);
     let warm_out = format!("{DATA}/evidence/iot-warm-{}-{warm_tag}.json", e.key);
     let before = source_in(e);
     let _ = mqttgen(w, 500, 2, 1, &warm_tag, "warm_", &warm_out);
@@ -770,13 +779,15 @@ fn step(e: &Engine, w: &Workload, rate: u64, secs: u64, rep: usize, latdir: &str
     }
     sleep_s(1);
 
-    let tag = format!("{}{}{}R{rate}", e.key.to_uppercase().replace('-', ""), rep, w.key.to_uppercase());
+    let tag = format!("{}{}{}{}R{rate}", env_or("IOT_TAG_PREFIX", ""), e.key.to_uppercase().replace('-', ""), rep, w.key.to_uppercase());
     let gen_out = format!("{DATA}/evidence/iot-gen-{tag}.json");
     let in_before = source_in(e);
+    let exceptions_before = exceptions_total(e);
     let cg = Cg::start(e.name);
     let t_send = Instant::now();
     let gen = mqttgen(w, rate, secs, CONNS, &tag, "dev_", &gen_out);
     let send_s = t_send.elapsed().as_secs_f64();
+    let in_at_send_end = source_in(e);
 
     let deadline = Instant::now() + Duration::from_secs(w.drain_max_s);
     let (mut last, mut stable, mut last_growth) = (-1i64, 0u64, Instant::now());
@@ -797,6 +808,7 @@ fn step(e: &Engine, w: &Workload, rate: u64, secs: u64, rep: usize, latdir: &str
     let lag_after_send_s = last_growth.saturating_duration_since(t_send).as_secs_f64() - send_s;
     let cpu = cg.finish(secs as usize);
     let in_after = source_in(e);
+    let exceptions_after = exceptions_total(e);
     // Graceful stop flushes buffered file sinks (symmetric for every engine).
     stop_pipeline(e);
     sleep_s(5);
@@ -810,6 +822,9 @@ fn step(e: &Engine, w: &Workload, rate: u64, secs: u64, rep: usize, latdir: &str
         "workload": w.key, "rate": rate, "secs": secs, "rep": rep, "tag": tag,
         "generator_on_schedule": gen_ok, "sent": sent,
         "source_in_delta": in_after.saturating_sub(in_before),
+        "source_in_end_send_delta": in_at_send_end.saturating_sub(in_before),
+        "upstream_gap_at_send_end": sent.saturating_sub(in_at_send_end.saturating_sub(in_before)),
+        "exceptions_delta": exceptions_after.saturating_sub(exceptions_before),
         "lag_after_send_s": (lag_after_send_s * 10.0).round() / 10.0,
         "cpu": cpu, "health_t": clock(),
     });
@@ -850,7 +865,10 @@ fn step(e: &Engine, w: &Workload, rate: u64, secs: u64, rep: usize, latdir: &str
     };
     let lag_limit = if w.proof == Proof::GroupSum { 15.0 } else { 5.0 };
     out["complete"] = json!(complete);
-    out["sustained"] = json!(complete && lag_after_send_s <= lag_limit);
+    let bounded = env_or("IOT_BROKER_CONFIG", "").ends_with("mosquitto-bounded.conf");
+    let end_gap = sent.saturating_sub(in_at_send_end.saturating_sub(in_before));
+    out["sustained"] = json!(complete && bounded && secs >= 120 && end_gap <= 4096
+        && exceptions_after == exceptions_before && lag_after_send_s <= lag_limit);
     out
 }
 
@@ -920,6 +938,8 @@ fn main() {
         "sink_dir": latdir.clone(),
         "memory_note": "peak_rss_mb = cgroup memory.current (includes page cache from writing the sink file); peak_anon_mb = cgroup anon memory (engine heap)",
         "topology": "broker cores 8,9 | mqttgen cores 10,11 | engine core 2 (cpuset, 1 CPU, 1 GB, no swap) | runner cores 0,1,4-7",
+        "broker_config": env_or("IOT_BROKER_CONFIG", &format!("{DATA}/scripts/mosquitto/mosquitto.conf")),
+        "tag_prefix": env_or("IOT_TAG_PREFIX", ""),
         "rates": rates, "secs": secs, "reps": reps, "workloads": wanted, "devices": DEVICES, "conns": CONNS,
         "started": clock(), "runs": [],
     });

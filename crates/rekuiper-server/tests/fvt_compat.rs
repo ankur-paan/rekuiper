@@ -349,6 +349,110 @@ async fn test_rule_metrics_increment() {
 }
 
 #[tokio::test]
+async fn test_file_sink_counter_follows_written_rows() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "rekuiper-file-counter-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_text = path.to_string_lossy().to_string();
+
+    let resp = client.post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "CREATE STREAM file_metric_stream () WITH (TYPE=\"memory\", FORMAT=\"json\")"}))
+        .send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(
+            &json!({"id": "file_metric_rule", "sql": "SELECT * FROM file_metric_stream",
+            "actions": [{"file": {"path": path_text}}]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .post(format!("{}/streams/file_metric_stream/data", base_url))
+        .json(&json!({"id": "written"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    wait_for_rule_status(&client, &base_url, "file_metric_rule", 1, 1).await;
+    let text = tokio::fs::read_to_string(&path).await.unwrap();
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(lines[0]).unwrap()["id"],
+        "written"
+    );
+    let _ = tokio::fs::remove_file(path).await;
+}
+
+#[tokio::test]
+async fn test_file_sink_flush_failure_does_not_count_delivery() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "rekuiper-file-failure-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir(&path).await.unwrap();
+    let resp = client.post(format!("{}/streams", base_url))
+        .json(&json!({"sql": "CREATE STREAM failure_stream () WITH (TYPE=\"memory\", FORMAT=\"json\")"}))
+        .send().await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(
+            &json!({"id": "failure_rule", "sql": "SELECT * FROM failure_stream",
+            "actions": [{"file": {"path": path.to_string_lossy()}}]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+    client
+        .post(format!("{}/streams/failure_stream/data", base_url))
+        .json(&json!({"id": 1}))
+        .send()
+        .await
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let status = fetch_rule_status(&client, &base_url, "failure_rule").await;
+        if status["exceptionsTotal"].as_u64().unwrap_or(0) > 0 {
+            assert_eq!(status["sinkRecordsOutTotal"], 0);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "file flush did not report failure"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    client
+        .post(format!("{}/rules/failure_rule/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let _ = tokio::fs::remove_dir(path).await;
+}
+
+#[tokio::test]
 async fn test_tables_and_details_lifecycle() {
     let (base_url, _handle) = spawn_test_server().await;
     let client = reqwest::Client::new();
@@ -750,11 +854,6 @@ async fn test_all_openapi_paths_responding() {
         "/metadata/connections/yaml/mqtt",
         "/plugins/sources/mqtt",
         "/plugins/sinks/mqtt",
-        "/plugins/portables/pyfunc",
-        "/plugins/portables/pyfunc/status",
-        "/services/edgex",
-        "/services/functions/echo",
-        "/udf/javascript/func1",
     ] {
         let resp = client
             .get(format!("{}{}", base_url, path))
@@ -764,8 +863,7 @@ async fn test_all_openapi_paths_responding() {
         assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 
-    // Strict plugin endpoints need existing registrations (pyfunc and the
-    // edgex/func1 fixtures are pre-seeded; the rest are created here, ahead
+    // Strict plugin endpoints need existing registrations; these are created here, ahead
     // of the POST loop that registers function symbols). Names are distinct
     // because the registry keys definitions by bare name.
     for (path, body) in [
@@ -815,9 +913,6 @@ async fn test_all_openapi_paths_responding() {
         "/plugins/sources/mqtt_src_plug",
         "/plugins/sinks/mqtt_sink_plug",
         "/plugins/functions/echo_fn_plug",
-        "/plugins/portables/pyfunc",
-        "/services/edgex",
-        "/udf/javascript/func1",
         "/metadata/sources/mqtt/confKeys/testConf",
         "/metadata/sinks/mqtt/confKeys/testConf",
         "/metadata/connections/mqtt/confKeys/testConf",
@@ -846,9 +941,6 @@ async fn test_all_openapi_paths_responding() {
         "/plugins/sources/mqtt_src_plug",
         "/plugins/sinks/mqtt_sink_plug",
         "/plugins/functions/echo_fn_plug",
-        "/plugins/portables/pyfunc",
-        "/services/edgex",
-        "/udf/javascript/func1",
         "/metadata/sources/mqtt/confKeys/testConf",
         "/metadata/sinks/mqtt/confKeys/testConf",
         "/metadata/connections/mqtt/confKeys/testConf",
@@ -3222,7 +3314,7 @@ async fn test_buffer_length_and_send_error_options() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM opt_stream () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM opt_stream () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -4808,11 +4900,10 @@ async fn test_source_and_sink_plugin_registries() {
 }
 
 #[tokio::test]
-async fn test_portable_plugin_process_lifecycle() {
+async fn test_portable_plugins_report_unsupported_runtime() {
     let (base_url, _handle) = spawn_test_server().await;
     let client = reqwest::Client::new();
 
-    // 1. Initial portable plugins list contains pre-seeded pyfunc
     let resp = client
         .get(format!("{}/plugins/portables", base_url))
         .send()
@@ -4820,29 +4911,8 @@ async fn test_portable_plugin_process_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let names: Vec<String> = resp.json().await.unwrap();
-    assert!(names.contains(&"pyfunc".to_string()));
+    assert!(names.is_empty());
 
-    // 2. Query pre-seeded pyfunc metadata and status
-    let resp = client
-        .get(format!("{}/plugins/portables/pyfunc", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let pyfunc_info: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(pyfunc_info["name"], "pyfunc");
-    assert_eq!(pyfunc_info["language"], "python");
-
-    let resp = client
-        .get(format!("{}/plugins/portables/pyfunc/status", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let pyfunc_status: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(pyfunc_status["status"], "running");
-
-    // 3. Install a new portable plugin
     let resp = client
         .post(format!("{}/plugins/portables", base_url))
         .json(&serde_json::json!({
@@ -4852,35 +4922,22 @@ async fn test_portable_plugin_process_lifecycle() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
-
-    let resp = client
-        .get(format!("{}/plugins/portables", base_url))
-        .send()
-        .await
-        .unwrap();
-    let names: Vec<String> = resp.json().await.unwrap();
-    assert!(names.contains(&"mirror".to_string()));
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
 
     let resp = client
         .get(format!("{}/plugins/portables/mirror", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let mirror_info: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(mirror_info["name"], "mirror");
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
     let resp = client
         .get(format!("{}/plugins/portables/mirror/status", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let mirror_status: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(mirror_status["status"], "running");
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
-    // 4. Update portable plugin
     let resp = client
         .put(format!("{}/plugins/portables/mirror", base_url))
         .json(&serde_json::json!({
@@ -4890,46 +4947,14 @@ async fn test_portable_plugin_process_lifecycle() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
 
-    let resp = client
-        .get(format!("{}/plugins/portables/mirror", base_url))
-        .send()
-        .await
-        .unwrap();
-    let updated_mirror: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(updated_mirror["version"], "2.0.0");
-    assert_eq!(updated_mirror["executable"], "custom_mirror.py");
-
-    // 5. Delete portable plugin
     let resp = client
         .delete(format!("{}/plugins/portables/mirror", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-
-    let resp = client
-        .get(format!("{}/plugins/portables/mirror", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
-
-    let resp = client
-        .get(format!("{}/plugins/portables/mirror/status", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
-
-    let resp = client
-        .get(format!("{}/plugins/portables", base_url))
-        .send()
-        .await
-        .unwrap();
-    let names_after: Vec<String> = resp.json().await.unwrap();
-    assert!(!names_after.contains(&"mirror".to_string()));
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
 }
 
 #[tokio::test]
@@ -4937,7 +4962,7 @@ async fn test_external_services_and_javascript_udf_engine() {
     let (base_url, _handle) = spawn_test_server().await;
     let client = reqwest::Client::new();
 
-    // 1. Verify default JS UDFs and register a new executable JS UDF
+    // Register an executable JS UDF in an initially empty registry.
     let resp = client
         .get(format!("{}/udf/javascript", base_url))
         .send()
@@ -4945,7 +4970,7 @@ async fn test_external_services_and_javascript_udf_engine() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let udfs: Vec<String> = resp.json().await.unwrap();
-    assert!(udfs.contains(&"func1".to_string()));
+    assert!(udfs.is_empty());
 
     let resp = client
         .post(format!("{}/udf/javascript", base_url))
@@ -5076,17 +5101,7 @@ async fn test_external_services_and_javascript_udf_engine() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let services: Vec<String> = resp.json().await.unwrap();
-    assert!(services.contains(&"edgex".to_string()));
-
-    let resp = client
-        .get(format!("{}/services/edgex", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let edgex_detail: serde_json::Value = resp.json().await.unwrap();
-    assert!(edgex_detail.get("About").is_some());
-    assert!(edgex_detail.get("Interfaces").is_some());
+    assert!(services.is_empty());
 
     let resp = client
         .get(format!("{}/services/functions", base_url))
@@ -5095,16 +5110,7 @@ async fn test_external_services_and_javascript_udf_engine() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let funcs: Vec<serde_json::Value> = resp.json().await.unwrap();
-    assert!(funcs.iter().any(|f| f["FuncName"] == "echo"));
-
-    let resp = client
-        .get(format!("{}/services/functions/echo", base_url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let echo_fn: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(echo_fn["ServiceName"], "edgex");
+    assert!(funcs.is_empty());
 
     // Register a new service
     let resp = client
@@ -6302,13 +6308,13 @@ async fn test_plugin_service_validation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
     let resp = client
         .delete(format!("{}/plugins/portables/noplug_xyz", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(resp.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
 
     // T11: services with unreadable files are rejected; valid ones register.
     let resp = client

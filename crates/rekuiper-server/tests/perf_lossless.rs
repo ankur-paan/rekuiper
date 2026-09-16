@@ -41,7 +41,10 @@ async fn spawn_test_server_with_state() -> (String, tokio::task::JoinHandle<()>,
 async fn create_stream(client: &reqwest::Client, base_url: &str, name: &str) {
     let resp = client
         .post(format!("{}/streams", base_url))
-        .json(&json!({"sql": format!("CREATE STREAM {} () WITH (FORMAT=\"json\")", name)}))
+        .json(&json!({"sql": format!(
+            "CREATE STREAM {} () WITH (TYPE=\"memory\", FORMAT=\"json\")",
+            name
+        )}))
         .send()
         .await
         .unwrap();

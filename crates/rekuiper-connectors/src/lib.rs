@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use rekuiper_core::model::StreamRecord;
+use rekuiper_core::RuleCounters;
 use rekuiper_core::StreamSender;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::{Deserialize, Serialize};
@@ -702,12 +703,20 @@ fn mqtt_meta(topic: String, qos: QoS, pkid: u16) -> Value {
 /// Upper bound on MQTT publishes admitted to the stream bus in one batch.
 const MQTT_SOURCE_MAX_BATCH: usize = 1024;
 
-fn push_decoded(config: &MqttConfig, batch: &mut Vec<StreamRecord>, publish: rumqttc::Publish) {
+fn push_decoded(
+    config: &MqttConfig,
+    batch: &mut Vec<StreamRecord>,
+    publish: rumqttc::Publish,
+    counters: Option<&RuleCounters>,
+) {
     let meta = config
         .attach_meta
         .then(|| mqtt_meta(publish.topic, publish.qos, publish.pkid));
     if let Err(e) = decode_payload_into(&config.format, &publish.payload, meta, batch) {
         tracing::warn!("Skipping invalid MQTT payload: {}", e);
+        if let Some(counters) = counters {
+            counters.inc_exceptions(1);
+        }
     }
 }
 
@@ -723,6 +732,7 @@ fn drain_buffered_publishes(
     events: &mut std::collections::VecDeque<rumqttc::Event>,
     batch: &mut Vec<StreamRecord>,
     max: usize,
+    counters: Option<&RuleCounters>,
 ) {
     while batch.len() < max {
         if !matches!(
@@ -732,7 +742,7 @@ fn drain_buffered_publishes(
             break;
         }
         if let Some(rumqttc::Event::Incoming(rumqttc::Packet::Publish(p))) = events.pop_front() {
-            push_decoded(config, batch, p);
+            push_decoded(config, batch, p, counters);
         }
     }
 }
@@ -758,11 +768,21 @@ async fn subscribe_topics(client: &AsyncClient, config: &MqttConfig) -> Result<(
 pub struct MqttSource {
     pub config: MqttConfig,
     pub tx: StreamSender,
+    rule_counters: Option<Arc<RuleCounters>>,
 }
 
 impl MqttSource {
     pub fn new(config: MqttConfig, tx: StreamSender) -> Self {
-        Self { config, tx }
+        Self {
+            config,
+            tx,
+            rule_counters: None,
+        }
+    }
+
+    pub fn with_rule_counters(mut self, counters: Option<Arc<RuleCounters>>) -> Self {
+        self.rule_counters = counters;
+        self
     }
 
     pub fn config(&self) -> &MqttConfig {
@@ -784,12 +804,18 @@ impl MqttSource {
                 Ok(opts) => opts,
                 Err(e) => {
                     tracing::warn!("MQTT source bad broker config: {}", e);
+                    if let Some(counters) = self.rule_counters.as_deref() {
+                        counters.inc_exceptions(1);
+                    }
                     return;
                 }
             };
             let (client, mut eventloop) = AsyncClient::new(opts, 64);
             if let Err(e) = subscribe_topics(&client, &self.config).await {
                 tracing::warn!("{}", e);
+                if let Some(counters) = self.rule_counters.as_deref() {
+                    counters.inc_exceptions(1);
+                }
                 return;
             }
             loop {
@@ -804,12 +830,13 @@ impl MqttSource {
                                 // source: send_batch awaits subscriber capacity
                                 // instead of overwriting buffered records.
                                 let mut batch = Vec::with_capacity(16);
-                                push_decoded(&self.config, &mut batch, p);
+                                push_decoded(&self.config, &mut batch, p, self.rule_counters.as_deref());
                                 drain_buffered_publishes(
                                     &self.config,
                                     &mut eventloop.state.events,
                                     &mut batch,
                                     MQTT_SOURCE_MAX_BATCH,
+                                    self.rule_counters.as_deref(),
                                 );
                                 if !batch.is_empty() {
                                     let _ = self.tx.send_batch(batch).await;
@@ -822,11 +849,13 @@ impl MqttSource {
                             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                                 if let Err(e) = subscribe_topics(&client, &self.config).await {
                                     tracing::warn!("MQTT resubscribe: {}", e);
+                                    if let Some(counters) = self.rule_counters.as_deref() { counters.inc_exceptions(1); }
                                 }
                             }
                             Ok(_) => {}
                             Err(e) => {
                                 tracing::warn!("MQTT connection error: {}", e);
+                                if let Some(counters) = self.rule_counters.as_deref() { counters.inc_exceptions(1); }
                                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                             }
                         }
@@ -855,7 +884,7 @@ impl MqttSource {
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Packet::Publish(p))) => {
-                    push_decoded(&self.config, &mut rows, p);
+                    push_decoded(&self.config, &mut rows, p, self.rule_counters.as_deref());
                     for record in rows.drain(..) {
                         if tx.send(record).await.is_err() {
                             // Receiver dropped; shut down cleanly.
@@ -870,6 +899,9 @@ impl MqttSource {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::warn!("MQTT connection error: {}", e);
+                    if let Some(counters) = self.rule_counters.as_deref() {
+                        counters.inc_exceptions(1);
+                    }
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             }
@@ -2283,7 +2315,7 @@ fn bind_pg_arg<'q>(
 
 /// SQL sink: executes parameterized row inserts into the database (SQLite
 /// `?` placeholders, PostgreSQL `$n` placeholders). Unknown URL schemes
-/// remain a no-op for forward compatibility.
+/// are rejected so a rule cannot report a write that never happened.
 pub struct SqlSink {
     pub config: SqlConnectorConfig,
 }
@@ -2336,6 +2368,8 @@ impl SqlSink {
                 query = bind_pg_arg(query, v);
             }
             query.execute(&pool).await?;
+        } else {
+            bail!("Unsupported SQL sink URL scheme: {}", self.config.url);
         }
         Ok(())
     }
@@ -2984,6 +3018,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sql_sink_rejects_unsupported_url() {
+        let sink = super::SqlSink {
+            config: super::SqlConnectorConfig {
+                url: "mysql://localhost/readings".to_string(),
+                table: "readings".to_string(),
+                ..Default::default()
+            },
+        };
+        let err = sink
+            .insert_record(&StreamRecord::new(HashMap::new()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Unsupported SQL sink URL scheme"));
+    }
+
+    #[tokio::test]
     async fn test_pg_paths_fail_loudly_without_broker() {
         // D8: postgres URLs must attempt a real connection and surface the
         // error, never silently report Ok with zero rows written or read.
@@ -3418,7 +3468,14 @@ mod tests {
         let mut config: super::MqttConfig =
             serde_json::from_value(json!({"topic": "bench/telemetry"})).unwrap();
         let mut batch = vec![super::decode_mqtt_payload(br#"{"id":1}"#).unwrap()];
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024);
+        let counters = super::RuleCounters::default();
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024, Some(&counters));
+        assert_eq!(
+            counters
+                .exceptions
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         let ids: Vec<_> = batch.iter().map(|r| r.data["id"].clone()).collect();
         assert_eq!(ids, vec![json!(1), json!(2), json!(3), json!(4)]);
         assert_eq!(
@@ -3434,7 +3491,7 @@ mod tests {
         // The batch size bound is respected; the rest stays queued in order.
         let mut events: VecDeque<rumqttc::Event> = (0..10).map(|i| publish(obj(i))).collect();
         let mut batch = Vec::new();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 4);
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 4, None);
         let ids: Vec<_> = batch.iter().map(|r| r.data["id"].clone()).collect();
         assert_eq!(ids, vec![json!(0), json!(1), json!(2), json!(3)]);
         assert_eq!(events.len(), 6);
@@ -3442,7 +3499,7 @@ mod tests {
         // Requested metadata carries the publish topic and qos.
         config.attach_meta = true;
         let mut batch = Vec::new();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1);
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1, None);
         assert_eq!(batch[0].data["__meta__"]["topic"], json!("bench/telemetry"));
         assert_eq!(batch[0].data["__meta__"]["qos"], json!(0));
         assert!(batch[0].data["__meta__"].get("messageId").is_some());
