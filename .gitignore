@@ -71,3 +71,15 @@ test/benchmark/temp_race_audio.wav
 
 # Sink-cache pages written by broker-backed tests (cwd = crate dir)
 crates/*/data/
+
+# Local MQTT throughput runs include large sink archives and scratch reports.
+test/benchmark/iiot-mqtt/results/
+test/benchmark/iiot-mqtt/scripts/*/target/
+test/benchmark/iiot-mqtt/scripts/mqttgen/mqttgen
+test/benchmark/iiot-mqtt/scripts/mqttprobe/mqttprobe
+test/benchmark/iiot-mqtt/scripts/iotrunner/iotrunner
+test/benchmark/iiot-mqtt/evidence/iot-gen-*.json
+test/benchmark/iiot-mqtt/evidence/iot-warm-*.json
+test/benchmark/iiot-mqtt/evidence/mqttprobe-*.log
+test/benchmark/iiot-mqtt/evidence/mqttgen-probe-1000.json
+test/benchmark/iiot-mqtt/evidence/mqttprobe-1000.json

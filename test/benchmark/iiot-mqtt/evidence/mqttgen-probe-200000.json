@@ -1,0 +1,12 @@
+{
+  "tool": "mqttgen 0.1.0 std-only QoS0",
+  "host": "127.0.0.1", "port": 11884, "topic": "bench/telemetry", "mode": "json",
+  "nominal_rate": 200000, "secs": 30, "conns": 8, "devices": 1000, "tag": "PROBE200000",
+  "clock_start_epoch_ms": 1789517412530,
+  "nominal_messages": 6000000, "sent_messages": 6000000,
+  "actual_rate_over_schedule": 200000.0, "send_window_s": 30.919, "wall_s": 30.920,
+  "per_sec_sent": [199912, 200002, 200026, 199990, 199999, 200037, 199963, 200038, 200000, 199959, 200044, 199969, 199983, 200025, 199986, 200023, 199986, 199960, 188239, 211011, 183008, 200007, 198931, 188362, 193568, 170247, 143529, 230485, 143651, 196192, 152868],
+  "per_sec_core_min": 143529, "per_sec_core_max": 230485,
+  "on_schedule": false,
+  "errors": []
+}

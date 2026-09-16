@@ -4,6 +4,9 @@ rekuiper vs eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 on the s
 the same load generator, the same CPU and memory limits, and an exact loss proof at the sink.
 Everything needed to rerun it is in this folder. Raw per-step evidence is in [`evidence/`](evidence/).
 
+The current-code bounded peak and 120-second follow-up is in
+[`FOLLOWUP.md`](FOLLOWUP.md).
+
 - Run date: 2026-09-13 (final run 20:21–21:38 local time), 1 repetition per engine and rate.
 - Result file: [`evidence/perf-iot-mqtt-final.json`](evidence/perf-iot-mqtt-final.json)
   (every step, per-second CPU, peak memory, generator report, host-health snapshot, image IDs).
@@ -243,6 +246,7 @@ docker pull redpandadata/connect:4.109.0
 # tools
 (cd scripts/mqttgen && cargo build --release && cp target/release/mqttgen .)
 (cd scripts/iotrunner && cargo build --release && cp target/release/iotrunner .)
+(cd scripts/mqttprobe && cargo build --release && cp target/release/mqttprobe .)
 mkdir -p evidence
 
 # run (about 1 h 45 min for four engines, five workloads, four rates)
@@ -260,7 +264,30 @@ IOT_OUT=perf-iot-mqtt.json taskset -c 0,1,4-7 scripts/iotrunner/iotrunner
 | `IOT_DUR` / `IOT_REPS` | `30` / `2` | seconds per step / repetitions |
 | `IOT_REK_IMAGE` / `IOT_EKU_IMAGE` | `rekuiper-bench:local` / `lfedge/ekuiper:2.4.1` | engine images |
 | `IOT_LATDIR` | `<tmp>/iot_lat` | sink directory; must be a local filesystem |
+| `IOT_BROKER_CONFIG` | `scripts/mosquitto/mosquitto.conf` | absolute broker config path; use `scripts/mosquitto/mosquitto-bounded.conf` for short-run capacity checks with a 4,096-message / 1 MiB queue limit |
+| `IOT_TAG_PREFIX` | empty | prefix for run IDs and generator report files; set for follow-up runs to preserve the published evidence |
 | `IOT_ENGINE_CPUSET` / `IOT_BROKER_CPUSET` / `IOT_GEN_CPUSET` | `2` / `8,9` / `10,11` | core placement |
 
 Each step prints one line (`complete`, `loss%`, `lag_s`, `cpu`, `rss`, `anon`) and the full record is
 saved after every step, so an interrupted run keeps its evidence.
+
+For a separate broker/generator capacity check, [`scripts/mqttprobe`](scripts/mqttprobe)
+is a Rust MQTT QoS 0 subscriber. Run it on cores outside the engine container
+before the five workload runs. Its per-second receive counts establish that
+the publisher and broker can deliver the requested traffic. Keep this probe
+out of the engine comparison itself: another subscriber adds broker fanout and
+changes the workload. The `source_in_end_send_delta` and
+`upstream_gap_at_send_end` fields in each new runner step show how far the
+engine fell behind during sending. In new reports, `sustained` requires a
+bounded broker, at least 120 seconds of sending, an end-of-send source gap of
+at most 4,096 packets, zero rule exceptions, exact sink proof and the workload's
+normal window-flush time. It describes the measured trial, not a claim about
+months of operation. The older published report's `sustained` field used only
+a drain-time criterion, so it cannot establish this bounded steady rate.
+
+Run `bash scripts/probe_capacity.sh` from this directory for a 30-second 200k
+publisher/subscriber capacity check. It starts a separate bounded Mosquitto
+container on cores 8–9, runs the Rust subscriber on 4–7 and the Rust publisher
+on 10–11, then saves the send and receive reports in `evidence/`. The
+subscriber checks each publisher connection's sequence using eight counters,
+so the proof does not grow in memory with message count.

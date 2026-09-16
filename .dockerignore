@@ -1,2 +1,4 @@
 target/
 .git/
+test/benchmark/iiot-mqtt/results/
+test/benchmark/iiot-mqtt/scripts/*/target/
