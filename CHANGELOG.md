@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.426.0-beta] - 2026-09-16
+
+### Fixed
+- File-sink output counters advance only after buffered rows are flushed successfully. Flush failures increment exceptions and failed-record counters instead of reporting delivery.
+- MQTT payload, broker configuration, subscription, resubscription and connection failures now increment the owning rule's exception counter.
+- Unsupported SQL sink URL schemes return an error instead of succeeding without writing a record.
+- Removed built-in portable plugin, external service and JavaScript UDF records that claimed unavailable runtimes were installed and running. Portable plugin mutations now return `501 Not Implemented` until a real runtime exists.
+
+### Added
+- A bounded sustained MQTT benchmark for five rule workloads, with exact sink proofs, end-of-send backlog measurement, rule-exception checks and raw evidence.
+- Independent Rust MQTT publisher and constant-memory subscriber tools for traffic-path capacity and sequence checks.
+- Published reproduction commands for the 100k sustained suite and higher-rate search. The previous four-engine benchmark remains archived in the repository.
+
+### Performance
+- All five workloads sustained 100,000 MQTT messages/s for 120 seconds on one CPU core and 1 GiB RAM, processing 12 million messages per trial with exact delivery.
+- The ESPHome topic workload sustained 150,000 messages/s for 120 seconds. The 200,000 messages/s target was not reached and is not claimed.
+
 ## [0.425.0-beta] - 2026-09-13
 
 ### Fixed

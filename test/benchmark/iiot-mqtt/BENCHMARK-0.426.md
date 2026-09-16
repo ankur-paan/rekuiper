@@ -1,7 +1,10 @@
-# Current-code MQTT follow-up
+# rekuiper 0.426 MQTT benchmark results
 
-This report measures the `0.425.0-beta` code used by this change. It does not
-reuse the earlier `0.423.0-beta` follow-up numbers.
+This report contains the measurements published for `0.426-beta`. The benchmark
+image reports `0.425.0-beta` because the release-candidate runtime was measured
+before the version field changed. The later edits were version and documentation
+files plus a test-fixture source declaration; the runtime hot path is identical.
+The raw image ID and reports are retained for auditability.
 
 ## Setup
 
