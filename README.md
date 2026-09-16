@@ -1,9 +1,9 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.425--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.426--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.425--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.426--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine for edge devices, written in Rust. It implements
 eKuiper's REST API, SQL dialect, rule format and `kuiper` CLI, so existing eKuiper streams,
@@ -15,59 +15,32 @@ take in MQTT telemetry and have to filter, aggregate and forward it reliably on 
 
 ## Performance
 
-We benchmark rekuiper against eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 on
-five MQTT workloads taken from those deployments. Every engine gets the same Mosquitto broker,
-the same load generator, one CPU core and 1 GB of memory. Each step runs for 30 seconds, and
-correctness is checked exactly at the output: every message id, or every per-device count, must
-be present.
+On one CPU core and 1 GiB RAM, rekuiper sustained **100,000 MQTT messages/s**
+for 120 seconds on each of five rule workloads. Each trial sent 12 million
+messages and produced the exact expected sink output with zero rule exceptions.
+The ESPHome topic workload also sustained 150,000 messages/s. We tested 200,000
+messages/s and did not reach it, so it is not a release claim.
 
-We tested 5,000, 20,000, 50,000 and 100,000 messages per second.
+| Workload | Highest sustained trial | CPU | Engine anonymous memory | End-of-send gap |
+|---|---:|---:|---:|---:|
+| Telemetry filter, 1,000 devices | 100k msg/s | 76.3% | 6.1 MiB | 8 |
+| 10-second window per device | 100k msg/s | 66.9% | 8.0 MiB | 9 |
+| ESPHome, 10,000 topics, `meta(topic)` | **150k msg/s** | 94.9% | 11.2 MiB | 10 |
+| Vehicles, 10,000 topics, windowed | 100k msg/s | 69.0% | 12.0 MiB | 10 |
+| EV charger sessions (`SESSIONWINDOW`) | 100k msg/s | 69.5% | 5.9 MiB | 1 |
 
-**Highest rate handled without losing data**
+The release test uses a separate bounded Mosquitto broker, an external Rust
+publisher, one pinned engine core, one Tokio worker, and a JSON Lines sink on
+WSL ext4. `sustained` requires an on-schedule 120-second publisher run, an exact
+sink proof, zero exceptions, no more than the broker's 4,096-message queue bound
+missing from the source counter when publishing stops, and no extended drain.
+This rules out reporting a short burst that accumulates in the broker or engine.
 
-| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | :--- | :--- | :--- | :--- |
-| Telemetry filter, 1,000 devices | **100k** | 20k | 50k, with backlog | 20k |
-| 10-second window per device | **100k** | 20k | lost 6–27% at every rate | 5k |
-| ESPHome, 10,000 topics, `meta(topic)` | **100k** | 20k | 50k, with backlog | 20k |
-| Vehicles, 10,000 topics, windowed | **100k** | 20k | inconsistent | 5k |
-| EV charger sessions (`SESSIONWINDOW`) | **100k** | 20k | not supported | not supported |
-
-100,000 msg/s was the top of the test range, so rekuiper's actual limit is higher than shown.
-
-The next two tables compare cost at 20,000 msg/s, the highest rate most engines still handle.
-Where an engine was already losing data at that rate, the cell says so, because a figure from a
-failing run is not comparable.
-
-**CPU at 20,000 msg/s** (percent of one core)
-
-| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **49%** | 99% | 90% | 99% |
-| 10-second window per device | **44%** | 86% | 81% (losing 9%) | 98% (losing all) |
-| ESPHome, 10,000 topics | **48%** | 94% | 70% | 98% |
-| Vehicles, 10,000 topics | **46%** | 91% | 86% (losing 9%) | 99% (losing all) |
-| EV charger sessions | **45%** | 87% | not supported | not supported |
-
-**Memory at 20,000 msg/s** (engine heap, MB)
-
-| Workload | rekuiper | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **4.7** | 15 | 92 | 72 |
-| 10-second window per device | **5.4** | 536 | 52 (losing 9%) | 1,012 (losing all) |
-| ESPHome, 10,000 topics | **4.8** | 43 | 85 | 68 |
-| Vehicles, 10,000 topics | **10** | 886 | 94 (losing 9%) | 993 (losing all) |
-| EV charger sessions | **5.9** | 832 | not supported | not supported |
-
-Memory is the engine's anonymous memory from its container cgroup. Total container memory also
-counts page cache from writing the output file and is listed in the full results. rekuiper keeps
-per-group state for windows instead of buffering rows, which is why its window memory stays flat
-while the others grow with traffic up to the 1 GB limit.
-
-These are single runs on one laptop (Windows 11 with WSL2). The method, every engine config,
-the raw results, known caveats and the steps to reproduce them are in
-[test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). Apache Flink is not included
-because Flink 2.x has no MQTT connector.
+The complete method, commands, Rust traffic tools, per-second measurements,
+raw evidence, failed higher-rate trials, and limitations are published in
+[test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). The previous
+four-engine comparison remains in
+[ARCHIVE-0.425-COMPARISON.md](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md).
 
 ## Getting started
 
@@ -78,7 +51,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.425-beta
+  ankurkrp/rekuiper:0.426-beta
 ```
 
 To run rekuiper together with Mosquitto and Redis:
@@ -218,7 +191,10 @@ performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHM
 
 ## Release history
 
-- **0.425-beta** (current): correct window aggregation (`GROUP BY`, `WHERE`, `HAVING`, `ORDER BY`,
+- **0.426-beta** (current): truthful MQTT and sink delivery accounting, removal of fabricated
+  runtime registrations, and a bounded sustained-throughput benchmark with Rust publisher and
+  subscriber tools.
+- **0.425-beta**: correct window aggregation (`GROUP BY`, `WHERE`, `HAVING`, `ORDER BY`,
   `LIMIT`) with bounded memory, `SESSIONWINDOW`, MQTT binary/delimited/protobuf payloads and
   `meta()`, a persistent MQTT sink with offline cache, and the IIoT MQTT benchmark.
 - **0.424-beta**: PostgreSQL and SQL source/lookup fixes, windowed joins, array and JSONPath

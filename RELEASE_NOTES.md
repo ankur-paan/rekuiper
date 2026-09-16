@@ -1,3 +1,24 @@
+# Release Notes - rekuiper v0.426-beta
+
+`rekuiper` v0.426-beta makes delivery metrics reflect real writes. File-sink
+records count only after a successful flush, MQTT source errors reach the rule
+exception counter, and unsupported SQL sink URLs fail instead of reporting a
+write. Default portable plugins, external services and JavaScript UDFs no
+longer advertise runtimes that are not installed.
+
+The release includes a bounded MQTT benchmark with an external Rust publisher,
+a constant-memory Rust subscriber probe, exact sink proofs and raw evidence.
+All five workloads sustained 100,000 messages/s for 120 seconds on one CPU core
+and 1 GiB RAM; the ESPHome topic workload sustained 150,000 messages/s. The
+200,000 messages/s target was tested but is not claimed.
+
+- Benchmark and method: [`test/benchmark/iiot-mqtt`](test/benchmark/iiot-mqtt/README.md)
+- Archived 0.425 comparison: [`ARCHIVE-0.425-COMPARISON.md`](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md)
+- Docker image: `ankurkrp/rekuiper:0.426-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.426-beta`)
+
+---
+
 # Release Notes - rekuiper v0.425-beta
 
 `rekuiper` v0.425-beta makes windowed analytics correct and memory-bounded, adds
