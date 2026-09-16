@@ -15,32 +15,49 @@ take in MQTT telemetry and have to filter, aggregate and forward it reliably on 
 
 ## Performance
 
-On one CPU core and 1 GiB RAM, rekuiper sustained **100,000 MQTT messages/s**
-for 120 seconds on each of five rule workloads. Each trial sent 12 million
-messages and produced the exact expected sink output with zero rule exceptions.
-The ESPHome topic workload also sustained 150,000 messages/s. We tested 200,000
-messages/s and did not reach it, so it is not a release claim.
+We benchmark rekuiper against eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 on
+five MQTT workloads. Every engine gets the same Mosquitto broker, Rust load generator, one CPU
+core and 1 GiB of memory. Each ladder step runs for 30 seconds at 5k, 20k, 50k or 100k messages/s,
+and correctness is checked exactly at the sink.
 
-| Workload | Highest sustained trial | CPU | Engine anonymous memory | End-of-send gap |
-|---|---:|---:|---:|---:|
-| Telemetry filter, 1,000 devices | 100k msg/s | 76.3% | 6.1 MiB | 8 |
-| 10-second window per device | 100k msg/s | 66.9% | 8.0 MiB | 9 |
-| ESPHome, 10,000 topics, `meta(topic)` | **150k msg/s** | 94.9% | 11.2 MiB | 10 |
-| Vehicles, 10,000 topics, windowed | 100k msg/s | 69.0% | 12.0 MiB | 10 |
-| EV charger sessions (`SESSIONWINDOW`) | 100k msg/s | 69.5% | 5.9 MiB | 1 |
+**Highest tested rate with an exact, loss-free result**
 
-The release test uses a separate bounded Mosquitto broker, an external Rust
-publisher, one pinned engine core, one Tokio worker, and a JSON Lines sink on
-WSL ext4. `sustained` requires an on-schedule 120-second publisher run, an exact
-sink proof, zero exceptions, no more than the broker's 4,096-message queue bound
-missing from the source counter when publishing stops, and no extended drain.
-This rules out reporting a short burst that accumulates in the broker or engine.
+| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | :--- | :--- | :--- | :--- |
+| Telemetry filter, 1,000 devices | **100k** | 20k | 50k, with backlog | 20k |
+| 10-second window per device | **100k** | 20k | lost 6-27% at every rate | 5k |
+| ESPHome, 10,000 topics, `meta(topic)` | **150k** | 20k | 50k, with backlog | 20k |
+| Vehicles, 10,000 topics, windowed | **100k** | 20k | inconsistent | 5k |
+| EV charger sessions (`SESSIONWINDOW`) | **100k** | 20k | not supported | not supported |
 
-The complete method, commands, Rust traffic tools, per-second measurements,
-raw evidence, failed higher-rate trials, and limitations are published in
-[test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). The previous
-four-engine comparison remains in
-[ARCHIVE-0.425-COMPARISON.md](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md).
+**CPU at 20,000 msg/s** (percent of one core)
+
+| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | ---: | ---: | ---: | ---: |
+| Telemetry filter | **42%** | 99% | 90% | 99% |
+| 10-second window per device | **38%** | 86% | 81% (losing 9%) | 98% (losing all) |
+| ESPHome, 10,000 topics | **42%** | 94% | 70% | 98% |
+| Vehicles, 10,000 topics | **41%** | 91% | 86% (losing 9%) | 99% (losing all) |
+| EV charger sessions | **37%** | 87% | not supported | not supported |
+
+**Memory at 20,000 msg/s** (engine anonymous memory, MiB)
+
+| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | ---: | ---: | ---: | ---: |
+| Telemetry filter | **4.6** | 15 | 92 | 72 |
+| 10-second window per device | **5.7** | 536 | 52 (losing 9%) | 1,012 (losing all) |
+| ESPHome, 10,000 topics | **4.8** | 43 | 85 | 68 |
+| Vehicles, 10,000 topics | **10.1** | 886 | 94 (losing 9%) | 993 (losing all) |
+| EV charger sessions | **6.5** | 832 | not supported | not supported |
+
+The rekuiper column is the repeated 0.426 ladder. The competitor columns are the published runs on
+the same host and harness; those engines were unchanged and were not rerun for this release. A stricter
+bounded test also verified that rekuiper sustained 100k msg/s for 120 seconds on every workload and
+150k on ESPHome. It did not sustain the 200k target.
+
+The complete method, every engine configuration, per-rate tables, raw evidence, sustained trials and
+limitations are published in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). The original
+0.425 report is preserved in [ARCHIVE-0.425-COMPARISON.md](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md).
 
 ## Getting started
 
