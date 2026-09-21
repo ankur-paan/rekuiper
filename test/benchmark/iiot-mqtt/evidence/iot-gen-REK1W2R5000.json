@@ -2,7 +2,7 @@
   "tool": "mqttgen 0.1.0 std-only QoS0",
   "host": "127.0.0.1", "port": 11883, "topic": "bench/telemetry", "mode": "json",
   "nominal_rate": 5000, "secs": 30, "conns": 8, "devices": 1000, "tag": "REK1W2R5000",
-  "clock_start_epoch_ms": 1789327541742,
+  "clock_start_epoch_ms": 1790024773196,
   "nominal_messages": 150000, "sent_messages": 150000,
   "actual_rate_over_schedule": 5000.0, "send_window_s": 29.999, "wall_s": 29.999,
   "per_sec_sent": [5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 0],

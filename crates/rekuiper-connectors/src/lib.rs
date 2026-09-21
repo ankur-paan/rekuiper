@@ -2373,6 +2373,117 @@ impl SqlSink {
         }
         Ok(())
     }
+
+    /// Multi-row batch insert: batches up to `sub_batch_size` records per query
+    /// within parameter limits for dramatic write throughput gains.
+    pub async fn insert_batch(&self, records: &[StreamRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        if records.len() == 1 {
+            return self.insert_record(&records[0]).await;
+        }
+        let fields = if self.config.fields.is_empty() {
+            let mut set = std::collections::BTreeSet::new();
+            for r in records {
+                for k in r.data.keys() {
+                    set.insert(k.clone());
+                }
+            }
+            set.into_iter().collect::<Vec<_>>()
+        } else {
+            self.config.fields.clone()
+        };
+        if fields.is_empty() {
+            for r in records {
+                self.insert_record(r).await?;
+            }
+            return Ok(());
+        }
+
+        // Limit sub-batch size so total parameters stay comfortably within database limits
+        let sub_batch_size = (900 / fields.len().max(1)).clamp(1, 256);
+        for chunk in records.chunks(sub_batch_size) {
+            if self.config.url.starts_with("sqlite") {
+                let pool = sqlx::sqlite::SqlitePool::connect(&self.config.url).await?;
+                let mut sql = format!(
+                    "INSERT INTO {} ({}) VALUES ",
+                    self.config.table,
+                    fields.join(", ")
+                );
+                let mut all_vals = Vec::new();
+                for (row_idx, record) in chunk.iter().enumerate() {
+                    if row_idx > 0 {
+                        sql.push_str(", ");
+                    }
+                    sql.push('(');
+                    for (col_idx, field) in fields.iter().enumerate() {
+                        if col_idx > 0 {
+                            sql.push_str(", ");
+                        }
+                        let val = json_to_bind(record.data.get(field));
+                        match val {
+                            Some(v) => {
+                                sql.push('?');
+                                all_vals.push(v);
+                            }
+                            None => {
+                                sql.push_str("NULL");
+                            }
+                        }
+                    }
+                    sql.push(')');
+                }
+                let mut query = sqlx::query(&sql);
+                for v in &all_vals {
+                    query = bind_sqlite_arg(query, v);
+                }
+                query.execute(&pool).await?;
+            } else if self.config.url.starts_with("postgres") {
+                let pool = pg_pool(&self.config.url).await?;
+                let mut sql = format!(
+                    "INSERT INTO {} ({}) VALUES ",
+                    self.config.table,
+                    fields.join(", ")
+                );
+                let mut all_vals = Vec::new();
+                let mut param_idx = 1u32;
+                for (row_idx, record) in chunk.iter().enumerate() {
+                    if row_idx > 0 {
+                        sql.push_str(", ");
+                    }
+                    sql.push('(');
+                    for (col_idx, field) in fields.iter().enumerate() {
+                        if col_idx > 0 {
+                            sql.push_str(", ");
+                        }
+                        let val = json_to_bind(record.data.get(field));
+                        match val {
+                            Some(v) => {
+                                sql.push_str(&format!("${}", param_idx));
+                                param_idx += 1;
+                                all_vals.push(v);
+                            }
+                            None => {
+                                sql.push_str("NULL");
+                            }
+                        }
+                    }
+                    sql.push(')');
+                }
+                let mut query = sqlx::query(&sql);
+                for v in &all_vals {
+                    query = bind_pg_arg(query, v);
+                }
+                query.execute(&pool).await?;
+            } else {
+                for r in chunk {
+                    self.insert_record(r).await?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `INSERT INTO {table} ({cols}) VALUES (?, ...)` for SQLite.
@@ -3321,6 +3432,51 @@ mod tests {
                 ("n3".to_string(), Some(21.0), Some(1)),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_sink_batch_insert() {
+        let url = sqlite_file_url("sinkbatch");
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        sqlx::query("CREATE TABLE rkbatch(id INTEGER PRIMARY KEY, val REAL, label TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        drop(pool);
+
+        let sink = super::SqlSink {
+            config: super::SqlConnectorConfig {
+                url: url.clone(),
+                table: "rkbatch".to_string(),
+                fields: vec!["id".to_string(), "val".to_string(), "label".to_string()],
+                ..Default::default()
+            },
+        };
+
+        let mut records = Vec::new();
+        for i in 1..=50 {
+            let mut data = HashMap::new();
+            data.insert("id".to_string(), json!(i));
+            data.insert("val".to_string(), json!(i as f64 * 1.5));
+            data.insert("label".to_string(), json!(format!("label-{}", i)));
+            records.push(StreamRecord::new(data));
+        }
+
+        sink.insert_batch(&records).await.unwrap();
+
+        let pool = sqlx::sqlite::SqlitePool::connect(&url).await.unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rkbatch")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 50);
+
+        let first: (i64, f64, String) =
+            sqlx::query_as("SELECT id, val, label FROM rkbatch WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(first, (1, 1.5, "label-1".to_string()));
     }
 
     #[tokio::test]

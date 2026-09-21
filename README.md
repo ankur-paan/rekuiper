@@ -1,9 +1,10 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.426--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.500--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.426--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.500--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine for edge devices, written in Rust. It implements
 eKuiper's REST API, SQL dialect, rule format and `kuiper` CLI, so existing eKuiper streams,
@@ -22,42 +23,44 @@ and correctness is checked exactly at the sink.
 
 **Highest tested rate with an exact, loss-free result**
 
-| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 | :--- | :--- | :--- | :--- | :--- |
-| Telemetry filter, 1,000 devices | **100k** | 20k | 50k, with backlog | 20k |
-| 10-second window per device | **100k** | 20k | lost 6-27% at every rate | 5k |
+| Telemetry filter, 1,000 devices | **150k** | 20k | 50k, with backlog | 20k |
+| 10-second window per device | **200k** | 20k | lost 6-27% at every rate | 5k |
 | ESPHome, 10,000 topics, `meta(topic)` | **150k** | 20k | 50k, with backlog | 20k |
-| Vehicles, 10,000 topics, windowed | **100k** | 20k | inconsistent | 5k |
-| EV charger sessions (`SESSIONWINDOW`) | **100k** | 20k | not supported | not supported |
+| Vehicles, 10,000 topics, windowed | **200k** | 20k | inconsistent | 5k |
+| EV charger sessions (`SESSIONWINDOW`) | **126k** | 20k | not supported | not supported |
 
 **CPU at 20,000 msg/s** (percent of one core)
 
-| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 | :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **42%** | 99% | 90% | 99% |
-| 10-second window per device | **38%** | 86% | 81% (losing 9%) | 98% (losing all) |
-| ESPHome, 10,000 topics | **42%** | 94% | 70% | 98% |
+| Telemetry filter | **45%** | 99% | 90% | 99% |
+| 10-second window per device | **43%** | 86% | 81% (losing 9%) | 98% (losing all) |
+| ESPHome, 10,000 topics | **50%** | 94% | 70% | 98% |
 | Vehicles, 10,000 topics | **41%** | 91% | 86% (losing 9%) | 99% (losing all) |
-| EV charger sessions | **37%** | 87% | not supported | not supported |
+| EV charger sessions | **50%** | 87% | not supported | not supported |
 
 **Memory at 20,000 msg/s** (engine anonymous memory, MiB)
 
-| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 | :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **4.6** | 15 | 92 | 72 |
-| 10-second window per device | **5.7** | 536 | 52 (losing 9%) | 1,012 (losing all) |
-| ESPHome, 10,000 topics | **4.8** | 43 | 85 | 68 |
-| Vehicles, 10,000 topics | **10.1** | 886 | 94 (losing 9%) | 993 (losing all) |
-| EV charger sessions | **6.5** | 832 | not supported | not supported |
+| Telemetry filter | **4.4** | 15 | 92 | 72 |
+| 10-second window per device | **6.4** | 536 | 52 (losing 9%) | 1,012 (losing all) |
+| ESPHome, 10,000 topics | **4.5** | 43 | 85 | 68 |
+| Vehicles, 10,000 topics | **10.2** | 886 | 94 (losing 9%) | 993 (losing all) |
+| EV charger sessions | **7.3** | 832 | not supported | not supported |
 
-The rekuiper column is the repeated 0.426 ladder. The competitor columns are the published runs on
-the same host and harness; those engines were unchanged and were not rerun for this release. A stricter
-bounded test also verified that rekuiper sustained 100k msg/s for 120 seconds on every workload and
-150k on ESPHome. It did not sustain the 200k target.
+The rekuiper column is the repeated 0.500 ladder and exact peak searches. The competitor columns are
+the published runs on the same host and harness; those engines were unchanged and were not rerun for
+this release. Bounded capacity searches verified that rekuiper reached certified sustained ceilings of
+150k on telemetry filter and ESPHome, 200k on per-device and vehicle windows, and 126k on charger sessions.
 
 The complete method, every engine configuration, per-rate tables, raw evidence, sustained trials and
-limitations are published in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md). The original
-0.425 report is preserved in [ARCHIVE-0.425-COMPARISON.md](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md).
+limitations are published in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md) and
+[BENCHMARK-0.500.md](test/benchmark/iiot-mqtt/BENCHMARK-0.500.md). The earlier 0.426 and 0.425 reports
+are preserved in [BENCHMARK-0.426.md](test/benchmark/iiot-mqtt/BENCHMARK-0.426.md) and
+[ARCHIVE-0.425-COMPARISON.md](test/benchmark/iiot-mqtt/ARCHIVE-0.425-COMPARISON.md).
 
 ## Getting started
 
@@ -68,7 +71,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.426-beta
+  ankurkrp/rekuiper:0.500-beta
 ```
 
 To run rekuiper together with Mosquitto and Redis:
@@ -208,7 +211,10 @@ performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHM
 
 ## Release history
 
-- **0.426-beta** (current): truthful MQTT and sink delivery accounting, removal of fabricated
+- **0.500-beta** (current): in-memory Redis-style catalog architecture, zero-disk hot path for
+  rule execution and REST dispatch, multi-row SQL batch insertions, hot-path connection pooling,
+  and exact peak capacity benchmarks certifying up to 200,000 msg/s per core.
+- **0.426-beta**: truthful MQTT and sink delivery accounting, removal of fabricated
   runtime registrations, and a bounded sustained-throughput benchmark with Rust publisher and
   subscriber tools.
 - **0.425-beta**: correct window aggregation (`GROUP BY`, `WHERE`, `HAVING`, `ORDER BY`,

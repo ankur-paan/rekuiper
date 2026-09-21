@@ -692,10 +692,19 @@ fn spki_to_pkcs1(spki: &[u8]) -> Option<Vec<u8>> {
 
 /// Load the RSA public key for JWT verification: an explicit
 /// `KUIPER_AUTH_PUBLIC_KEY_FILE` path first, then the conventional
+static AUTH_KEY_CACHE: parking_lot::RwLock<Option<Option<Vec<u8>>>> =
+    parking_lot::RwLock::new(None);
+
+/// Load the RSA public key for JWT verification: an explicit
+/// `KUIPER_AUTH_PUBLIC_KEY_FILE` path first, then the conventional
 /// `etc/mgmt/public.pem` and `etc/public.pem` locations. Both SPKI
 /// (`PUBLIC KEY`) and bare PKCS#1 (`RSA PUBLIC KEY`) PEM blocks are
 /// accepted; either way the PKCS#1 DER that `ring` expects is returned.
+/// Result is permanently cached in memory to ensure zero disk reads on hot request paths.
 fn load_auth_public_key() -> Option<Vec<u8>> {
+    if let Some(cached) = AUTH_KEY_CACHE.read().as_ref() {
+        return cached.clone();
+    }
     let mut candidates = Vec::new();
     if let Ok(path) = std::env::var("KUIPER_AUTH_PUBLIC_KEY_FILE") {
         if !path.trim().is_empty() {
@@ -704,7 +713,7 @@ fn load_auth_public_key() -> Option<Vec<u8>> {
     }
     candidates.push("etc/mgmt/public.pem".to_string());
     candidates.push("etc/public.pem".to_string());
-    candidates.into_iter().find_map(|path| {
+    let der = candidates.into_iter().find_map(|path| {
         let bytes = std::fs::read(&path).ok()?;
         let (label, der) = parse_pem_block(&bytes)?;
         match label.as_str() {
@@ -712,7 +721,9 @@ fn load_auth_public_key() -> Option<Vec<u8>> {
             "RSA PUBLIC KEY" => Some(der),
             _ => None,
         }
-    })
+    });
+    *AUTH_KEY_CACHE.write() = Some(der.clone());
+    der
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -2662,7 +2673,17 @@ fn spawn_rule_task(
     {
         trace_manager.start_trace(&rule_id, "always".to_string());
     }
-    let rx = stream_bus.subscribe(&resolve_source_topic(stream_manager, &select_stmt.from));
+    let buffer_len = rule_options
+        .as_ref()
+        .and_then(|o| o.get("bufferLength"))
+        .and_then(|v| v.as_u64())
+        .and_then(|n| usize::try_from(n).ok())
+        .map(|n| n.max(1))
+        .unwrap_or(32_768);
+    let rx = stream_bus.subscribe_with_capacity(
+        &resolve_source_topic(stream_manager, &select_stmt.from),
+        buffer_len,
+    );
     let window = select_stmt.window.clone();
     let tables = table_manager.clone();
     let confs = source_configs.clone();
@@ -2676,20 +2697,16 @@ fn spawn_rule_task(
             && !join_rxs.iter().any(|(s, _)| s == &join.target)
         {
             let topic = resolve_source_topic(stream_manager, &join.target);
-            join_rxs.push((join.target.clone(), stream_bus.subscribe(&topic)));
+            join_rxs.push((
+                join.target.clone(),
+                stream_bus.subscribe_with_capacity(&topic, buffer_len),
+            ));
         }
     }
 
     // Bounded decoupled sink queue: the streaming evaluation loop never blocks
     // on sink network/disk I/O. Dropping `sink_tx` (rule end/cancel) lets the
     // worker flush remaining outputs and exit cleanly.
-    let buffer_len = rule_options
-        .as_ref()
-        .and_then(|o| o.get("bufferLength"))
-        .and_then(|v| v.as_u64())
-        .and_then(|n| usize::try_from(n).ok())
-        .map(|n| n.max(1))
-        .unwrap_or(10_000);
     let send_error = rule_options
         .as_ref()
         .and_then(|o| o.get("sendError"))
@@ -3138,6 +3155,7 @@ fn action_cache_configs(actions: &[HashMap<String, Value>]) -> Vec<Option<CacheC
 struct ActionRuntime {
     action: PreparedAction,
     mqtt: Option<MqttSink>,
+    sql: Option<SqlSink>,
     cache: Option<SinkCache>,
     /// Earliest time the next resend may be attempted.
     retry_at: tokio::time::Instant,
@@ -3150,6 +3168,7 @@ impl ActionRuntime {
         Self {
             action,
             mqtt: None,
+            sql: None,
             cache,
             retry_at: tokio::time::Instant::now(),
             last_warn: None,
@@ -3295,9 +3314,12 @@ async fn send_action(
                 .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
         }
         PreparedAction::Sql { config } => {
-            let sink = SqlSink {
-                config: (**config).clone(),
-            };
+            if rt.sql.is_none() {
+                rt.sql = Some(SqlSink {
+                    config: (**config).clone(),
+                });
+            }
+            let sink = rt.sql.as_ref().unwrap();
             sink.insert_record(output)
                 .await
                 .map_err(|e| SendError::Retry(format!("sql action failed: {}", e)))
@@ -7426,6 +7448,24 @@ fn find_etc_file(relative: &str) -> Option<std::path::PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+static ETC_FILE_CACHE: parking_lot::RwLock<
+    Option<std::collections::HashMap<String, Option<String>>>,
+> = parking_lot::RwLock::new(None);
+
+/// Read an etc file with in-memory caching to avoid filesystem access on hot paths.
+fn read_etc_cached(relative: &str) -> Option<String> {
+    if let Some(map) = ETC_FILE_CACHE.read().as_ref() {
+        if let Some(cached) = map.get(relative) {
+            return cached.clone();
+        }
+    }
+    let content = find_etc_file(relative).and_then(|p| std::fs::read_to_string(p).ok());
+    let mut guard = ETC_FILE_CACHE.write();
+    let map = guard.get_or_insert_with(std::collections::HashMap::new);
+    map.insert(relative.to_string(), content.clone());
+    content
+}
+
 async fn list_source_metadata() -> impl IntoResponse {
     Json(named_entries(&[
         "edgex",
@@ -7581,11 +7621,9 @@ async fn get_connection_metadata(
     if let Some(conn) = state.connections.read().get(&name).cloned() {
         return Json(conn).into_response();
     }
-    if let Some(path) = find_etc_file(&format!("connections/{}.json", name)) {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(val) = serde_json::from_str::<Value>(&content) {
-                return Json(val).into_response();
-            }
+    if let Some(content) = read_etc_cached(&format!("connections/{}.json", name)) {
+        if let Ok(val) = serde_json::from_str::<Value>(&content) {
+            return Json(val).into_response();
         }
     }
     Json(json!({
@@ -7623,20 +7661,18 @@ async fn get_connection_yaml(State(state): State<AppState>, Path(name): Path<Str
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    let found = find_etc_file(&format!("connections/{}.yaml", name))
-        .or_else(|| find_etc_file("connections/connection.yaml"));
+    let found = read_etc_cached(&format!("connections/{}.yaml", name))
+        .or_else(|| read_etc_cached("connections/connection.yaml"));
 
     let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut raw_content = String::new();
 
-    if let Some(path) = found {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            raw_content = content.clone();
-            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
-                if let Some(obj) = yaml_val.as_object() {
-                    for (k, v) in obj {
-                        result_map.insert(k.clone(), v.clone());
-                    }
+    if let Some(content) = found {
+        raw_content = content.clone();
+        if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+            if let Some(obj) = yaml_val.as_object() {
+                for (k, v) in obj {
+                    result_map.insert(k.clone(), v.clone());
                 }
             }
         }
@@ -7686,18 +7722,16 @@ async fn get_source_metadata(Path(name): Path<String>) -> Response {
         return resp;
     }
     let found = if name == "mqtt" {
-        find_etc_file("mqtt_source.json").or_else(|| find_etc_file("sources/mqtt.json"))
+        read_etc_cached("mqtt_source.json").or_else(|| read_etc_cached("sources/mqtt.json"))
     } else if name == "http" {
-        find_etc_file("sources/http.json").or_else(|| find_etc_file("sources/httppull.json"))
+        read_etc_cached("sources/http.json").or_else(|| read_etc_cached("sources/httppull.json"))
     } else {
-        find_etc_file(&format!("sources/{}.json", name))
+        read_etc_cached(&format!("sources/{}.json", name))
     };
 
-    if let Some(path) = found {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
-                return Json(json_val).into_response();
-            }
+    if let Some(content) = found {
+        if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+            return Json(json_val).into_response();
         }
     }
     (
@@ -7712,18 +7746,16 @@ async fn get_sink_metadata(Path(name): Path<String>) -> Response {
         return resp;
     }
     let found = if name == "mqtt" {
-        find_etc_file("sinks/mqtt.json")
+        read_etc_cached("sinks/mqtt.json")
     } else if name == "http" {
-        find_etc_file("sinks/rest.json").or_else(|| find_etc_file("sinks/http.json"))
+        read_etc_cached("sinks/rest.json").or_else(|| read_etc_cached("sinks/http.json"))
     } else {
-        find_etc_file(&format!("sinks/{}.json", name))
+        read_etc_cached(&format!("sinks/{}.json", name))
     };
 
-    if let Some(path) = found {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
-                return Json(json_val).into_response();
-            }
+    if let Some(content) = found {
+        if let Ok(json_val) = serde_json::from_str::<Value>(&content) {
+            return Json(json_val).into_response();
         }
     }
     (StatusCode::NOT_FOUND, format!("sink {} not found\n", name)).into_response()
@@ -7734,24 +7766,22 @@ async fn get_source_yaml(State(state): State<AppState>, Path(name): Path<String>
         return resp;
     }
     let found = if name == "mqtt" {
-        find_etc_file("mqtt_source.yaml").or_else(|| find_etc_file("sources/mqtt.yaml"))
+        read_etc_cached("mqtt_source.yaml").or_else(|| read_etc_cached("sources/mqtt.yaml"))
     } else if name == "http" {
-        find_etc_file("sources/httppull.yaml").or_else(|| find_etc_file("sources/http.yaml"))
+        read_etc_cached("sources/httppull.yaml").or_else(|| read_etc_cached("sources/http.yaml"))
     } else {
-        find_etc_file(&format!("sources/{}.yaml", name))
+        read_etc_cached(&format!("sources/{}.yaml", name))
     };
 
     let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut raw_content = String::new();
 
-    if let Some(path) = found {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            raw_content = content.clone();
-            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
-                if let Some(obj) = yaml_val.as_object() {
-                    for (k, v) in obj {
-                        result_map.insert(k.clone(), v.clone());
-                    }
+    if let Some(content) = found {
+        raw_content = content.clone();
+        if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+            if let Some(obj) = yaml_val.as_object() {
+                for (k, v) in obj {
+                    result_map.insert(k.clone(), v.clone());
                 }
             }
         }
@@ -7801,24 +7831,22 @@ async fn get_sink_yaml(State(state): State<AppState>, Path(name): Path<String>) 
         return resp;
     }
     let found = if name == "mqtt" {
-        find_etc_file("sinks/mqtt.yaml").or_else(|| find_etc_file("mqtt_sink.yaml"))
+        read_etc_cached("sinks/mqtt.yaml").or_else(|| read_etc_cached("mqtt_sink.yaml"))
     } else if name == "http" {
-        find_etc_file("sinks/rest.yaml").or_else(|| find_etc_file("sinks/http.yaml"))
+        read_etc_cached("sinks/rest.yaml").or_else(|| read_etc_cached("sinks/http.yaml"))
     } else {
-        find_etc_file(&format!("sinks/{}.yaml", name))
+        read_etc_cached(&format!("sinks/{}.yaml", name))
     };
 
     let mut result_map: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut raw_content = String::new();
 
-    if let Some(path) = found {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            raw_content = content.clone();
-            if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
-                if let Some(obj) = yaml_val.as_object() {
-                    for (k, v) in obj {
-                        result_map.insert(k.clone(), v.clone());
-                    }
+    if let Some(content) = found {
+        raw_content = content.clone();
+        if let Ok(yaml_val) = serde_yaml::from_str::<Value>(&content) {
+            if let Some(obj) = yaml_val.as_object() {
+                for (k, v) in obj {
+                    result_map.insert(k.clone(), v.clone());
                 }
             }
         }

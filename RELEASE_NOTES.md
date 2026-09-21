@@ -1,3 +1,30 @@
+# Release Notes - rekuiper v0.500-beta
+
+`rekuiper` v0.500-beta introduces an in-memory Redis-style catalog and zero-disk
+hot path architecture. Stream definitions, table schemas, and active rules are
+held in memory with synchronized concurrency (`MemoryCatalog`), completely
+removing SQLite disk contention from stream ingestion and query dispatch.
+SQLite backing files operate under tuned WAL pragmas for durable background
+synchronization.
+
+Authentication keys, configuration files, and database connection pools are now
+cached on the hot path, and channel buffer depths have been scaled to 32,768
+messages to eliminate thread backpressure under heavy burst workloads.
+
+This release includes an exact 1k-resolution peak capacity benchmark under a
+bounded Mosquitto broker (4,096-message queue limit). Certified sustained ceilings
+reach 150,000 msg/s for telemetry filters and ESPHome topics, 200,000 msg/s for
+per-device and vehicle windows, and 126,000 msg/s for EV charger sessions on a
+single CPU core and 1 GiB of RAM.
+
+- Benchmark and exact peak results: [`test/benchmark/iiot-mqtt/BENCHMARK-0.500.md`](test/benchmark/iiot-mqtt/BENCHMARK-0.500.md)
+- Benchmark suite and harness: [`test/benchmark/iiot-mqtt`](test/benchmark/iiot-mqtt/README.md)
+- Archived 0.426 benchmark: [`BENCHMARK-0.426.md`](test/benchmark/iiot-mqtt/BENCHMARK-0.426.md)
+- Docker image: `ankurkrp/rekuiper:0.500-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.500-beta`)
+
+---
+
 # Release Notes - rekuiper v0.426-beta
 
 `rekuiper` v0.426-beta makes delivery metrics reflect real writes. File-sink

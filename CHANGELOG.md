@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.500.0-beta] - 2026-09-21
+
+### Added
+- In-memory Redis-style catalog (`MemoryCatalog` / `SharedCatalog`) with synchronized concurrency for streams, tables, and rules, eliminating disk I/O bottlenecks during hot-path rule execution and REST state queries.
+- Hot-path caching for authentication tokens, configuration profiles, and database connection pools in `rekuiper-server`.
+- Multi-row batched insert statement generation in SQL sink connector for high-throughput relational data export.
+- Hierarchical peak capacity search with 1k resolution across W1–W5 workloads under a bounded broker (4,096-message queue limit).
+
+### Changed
+- SQLite metadata store pragmas updated to `journal_mode=WAL`, `synchronous=NORMAL`, 32 MiB page cache, and `temp_store=MEMORY` for non-blocking persistence.
+- Channel queue depths on ingestion and sink pipelines expanded from 1,024 to 32,768 to absorb burst traffic without backpressure stalls.
+
+### Performance
+- W1 (telemetry filter) certified sustained ceiling reached **150,000 msg/s** (94.5% CPU, 17.4 MiB RAM, 1.0s lag; 151k saturates single core at 99.4% CPU with 20.53% packet drop).
+- W2 (device 10s windows) certified on-schedule ceiling reached **200,000 msg/s** (94.4% CPU, 6.7 MiB RAM, 10.0s lag; lossless execution up to 240k msg/s before host load generator falls off schedule).
+- W3 (ESPHome 10k plain-text topics) certified sustained ceiling reached **150,000 msg/s** (97.4% CPU, 16.6 MiB RAM, 1.0s lag, 15-message end gap out of 4.5M).
+- W4 (vehicles 10k VIN windows) certified on-schedule ceiling reached **200,000 msg/s** (97.5% CPU, 18.1 MiB RAM, 11.0s lag).
+- W5 (EV charger sessions) certified ceiling reached **126,000 msg/s** (86.7% CPU, 6.0 MiB RAM, 4.0s lag; 127k exceeds session close stability limit).
+- Single-core CPU at 100k msg/s reduced by 9.1 percentage points on W1 (79.4% vs 88.5%) and 9.2 percentage points on W2 (70.9% vs 80.1%).
+
 ## [0.426.0-beta] - 2026-09-16
 
 ### Fixed

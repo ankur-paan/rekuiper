@@ -105,7 +105,12 @@ impl StreamBus {
     /// backpressure to publishers, never silent loss of another subscriber's
     /// data.
     pub fn subscribe(&self, stream_name: &str) -> StreamReceiver {
-        let (tx, rx) = mpsc::channel(STREAM_QUEUE_CAPACITY);
+        self.subscribe_with_capacity(stream_name, STREAM_QUEUE_CAPACITY)
+    }
+
+    /// Subscribe with a caller-specified bounded queue capacity.
+    pub fn subscribe_with_capacity(&self, stream_name: &str, capacity: usize) -> StreamReceiver {
+        let (tx, rx) = mpsc::channel(capacity.max(1));
         self.topics
             .write()
             .entry(stream_name.to_string())
