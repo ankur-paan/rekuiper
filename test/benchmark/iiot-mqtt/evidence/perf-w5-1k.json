@@ -1,0 +1,338 @@
+{
+  "broker_config": "/mnt/c/Users/paanday/Documents/idacs/rekuiper/ekuiper/test/benchmark/iiot-mqtt/scripts/mosquitto/mosquitto-bounded.conf",
+  "conns": 8,
+  "devices": 1000,
+  "engines": [
+    "rek"
+  ],
+  "finished": "23:16:03",
+  "memory_note": "peak_rss_mb = cgroup memory.current (includes page cache from writing the sink file); peak_anon_mb = cgroup anon memory (engine heap)",
+  "rates": [
+    126000
+  ],
+  "reps": 1,
+  "runs": [
+    {
+      "engine": "rek",
+      "health_after": {
+        "contaminated": true,
+        "loadavg": "1.47 1.36 1.48 2/323 12392",
+        "ps_top": "%CPU COMMAND\n61.9 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n51.4 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 0.4 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 /usr/bin/containerd\n 0.0 /sbin/init\n 0.0 ./scripts/iotrunner/iotrunner\n 0.0 /usr/lib/systemd/systemd-udevd\n 0.0 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 8bf5a4d36a9831e1676f7908c31756c3e45956cdddd4f3ee46da",
+        "t": "23:16:02",
+        "windows_free_ram_gb": 1.7,
+        "windows_host_cpu_pct": 13.0,
+        "wsl_offenders": [
+          "61.9 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po"
+        ]
+      },
+      "health_before": {
+        "contaminated": true,
+        "loadavg": "0.85 1.19 1.43 6/332 12066",
+        "ps_top": "%CPU COMMAND\n 1.3 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 0.4 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.3 ./scripts/iotrunner/iotrunner\n 0.2 /usr/bin/containerd\n 0.0 /sbin/init\n 0.0 /usr/lib/systemd/systemd-udevd\n 0.0 /usr/lib/systemd/systemd-journald\n 0.0 /usr/lib/polkit-1/polkitd --no-debug",
+        "t": "23:14:54",
+        "windows_free_ram_gb": 1.72,
+        "windows_host_cpu_pct": 35.0,
+        "wsl_offenders": []
+      },
+      "life": {
+        "image": "rekuiper-bench:local",
+        "image_id": "sha256:d7322a7db037ab0c4cbc3a64570e354d081f45659160a6fd7e2324be664dc296",
+        "limits": "1000000000 2 1073741824",
+        "started": "23:14:55"
+      },
+      "rep": 1,
+      "steps": [
+        {
+          "complete": true,
+          "cpu": {
+            "cpu_max": 98.8,
+            "cpu_mean_all": 58.4,
+            "cpu_mean_send_window": 86.7,
+            "cpu_per_sec": [
+              65.0,
+              85.2,
+              91.3,
+              96.8,
+              94.4,
+              98.4,
+              98.8,
+              88.3,
+              92.9,
+              86.4,
+              87.8,
+              96.1,
+              88.0,
+              87.9,
+              87.0,
+              88.2,
+              94.2,
+              91.7,
+              87.1,
+              86.7,
+              92.6,
+              86.6,
+              86.6,
+              96.5,
+              86.4,
+              61.7,
+              61.4,
+              58.8,
+              86.3,
+              91.5,
+              92.0,
+              94.4,
+              10.1,
+              2.8,
+              0.5,
+              0.1,
+              0.1,
+              0.1,
+              0.2,
+              0.1,
+              0.1,
+              0.1,
+              0.1,
+              2.8,
+              0.2,
+              0.1,
+              0.2,
+              0.1
+            ],
+            "cpu_source": "cgroup-v2-host",
+            "peak_anon_mb": 6.0,
+            "peak_rss_mb": 7.3
+          },
+          "devices_seen": 2000,
+          "exceptions_delta": 0,
+          "generator_on_schedule": true,
+          "health_t": "23:16:00",
+          "lag_after_send_s": 4.0,
+          "loss_pct": 0.0,
+          "rate": 126000,
+          "rep": 1,
+          "secs": 30,
+          "sent": 3780000,
+          "source_in_delta": 3780000,
+          "source_in_end_send_delta": 3484761,
+          "sum_n": 3780000,
+          "sustained": false,
+          "tag": "PEAK_W5_1KREK1W5R126000",
+          "unparsable_lines": 0,
+          "upstream_gap_at_send_end": 295239,
+          "workload": "w5"
+        }
+      ]
+    }
+  ],
+  "secs": 30,
+  "sink_dir": "/tmp/iot_lat",
+  "started": "23:14:50",
+  "summary": {
+    "eku-def/w1/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/126000": {
+      "complete": 1,
+      "cpu_median": 86.7,
+      "lag_median_s": 4.0,
+      "reps": 1,
+      "rss_median_mb": 7.3,
+      "sustained": 0
+    },
+    "rpconnect/w1/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/126000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    }
+  },
+  "tag_prefix": "PEAK_W5_1K",
+  "tool": "scripts/iotrunner (Rust) + scripts/mqttgen (Rust std-only) + eclipse-mosquitto:2",
+  "topology": "broker cores 8,9 | mqttgen cores 10,11 | engine core 2 (cpuset, 1 CPU, 1 GB, no swap) | runner cores 0,1,4-7",
+  "workloads": [
+    "w5"
+  ]
+}

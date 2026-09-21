@@ -1,0 +1,608 @@
+{
+  "broker_config": "/mnt/c/Users/paanday/Documents/idacs/rekuiper/ekuiper/test/benchmark/iiot-mqtt/scripts/mosquitto/mosquitto-bounded.conf",
+  "conns": 8,
+  "devices": 1000,
+  "engines": [
+    "rek"
+  ],
+  "finished": "23:02:54",
+  "memory_note": "peak_rss_mb = cgroup memory.current (includes page cache from writing the sink file); peak_anon_mb = cgroup anon memory (engine heap)",
+  "rates": [
+    152500,
+    155000
+  ],
+  "reps": 1,
+  "runs": [
+    {
+      "engine": "rek",
+      "health_after": {
+        "contaminated": true,
+        "loadavg": "1.76 1.63 1.60 2/315 8287",
+        "ps_top": "%CPU COMMAND\n67.4 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n16.5 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n 4.3 ./scripts/iotrunner/iotrunner\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 /usr/bin/containerd\n 0.0 /sbin/init\n 0.0 /usr/lib/systemd/systemd-udevd\n 0.0 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 32f9ae1f9d3c775b111ab14a76bc88923121e02ceb848a28d663",
+        "t": "23:02:53",
+        "windows_free_ram_gb": 1.45,
+        "windows_host_cpu_pct": 53.0,
+        "wsl_offenders": [
+          "16.5 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po"
+        ]
+      },
+      "health_before": {
+        "contaminated": true,
+        "loadavg": "0.64 1.32 1.51 1/328 7819",
+        "ps_top": "%CPU COMMAND\n 3.3 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 0.8 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 32f9ae1f9d3c775b111ab14a76bc88923121e02ceb848a28d663\n 0.6 ./scripts/iotrunner/iotrunner\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 /usr/bin/containerd\n 0.2 (udev-worker)\n 0.0 /sbin/init\n 0.0 /usr/lib/systemd/systemd-udevd",
+        "t": "23:00:45",
+        "windows_free_ram_gb": 1.89,
+        "windows_host_cpu_pct": 45.0,
+        "wsl_offenders": []
+      },
+      "life": {
+        "image": "rekuiper-bench:local",
+        "image_id": "sha256:d7322a7db037ab0c4cbc3a64570e354d081f45659160a6fd7e2324be664dc296",
+        "limits": "1000000000 2 1073741824",
+        "started": "23:00:46"
+      },
+      "rep": 1,
+      "steps": [
+        {
+          "complete": false,
+          "cpu": {
+            "cpu_max": 100.4,
+            "cpu_mean_all": 87.6,
+            "cpu_mean_send_window": 99.3,
+            "cpu_per_sec": [
+              80.3,
+              99.7,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              99.9,
+              99.9,
+              100.1,
+              100.0,
+              100.0,
+              99.8,
+              100.1,
+              99.9,
+              100.1,
+              100.1,
+              99.9,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              99.9,
+              100.4,
+              100.0,
+              99.9,
+              100.2,
+              99.7,
+              100.2,
+              100.0,
+              100.1,
+              99.7,
+              100.2,
+              22.6,
+              0.2,
+              0.2,
+              0.2,
+              0.2
+            ],
+            "cpu_source": "cgroup-v2-host",
+            "peak_anon_mb": 57.5,
+            "peak_rss_mb": 348.3
+          },
+          "exceptions_delta": 0,
+          "file_rows": 4028964,
+          "generator_on_schedule": true,
+          "health_t": "23:01:42",
+          "lag_after_send_s": 6.0,
+          "loss_pct": 11.940000000000001,
+          "rate": 152500,
+          "rep": 1,
+          "secs": 30,
+          "sent": 4575000,
+          "source_in_delta": 4028964,
+          "source_in_end_send_delta": 3382938,
+          "sustained": false,
+          "tag": "PEAK_W3_25KREK1W3R152500",
+          "topics_seen": 10000,
+          "unparsable_lines": 0,
+          "upstream_gap_at_send_end": 1192062,
+          "workload": "w3"
+        },
+        {
+          "complete": false,
+          "cpu": {
+            "cpu_max": 100.3,
+            "cpu_mean_all": 89.0,
+            "cpu_mean_send_window": 99.3,
+            "cpu_per_sec": [
+              79.6,
+              100.2,
+              100.1,
+              99.8,
+              99.8,
+              100.2,
+              100.0,
+              100.1,
+              99.9,
+              100.1,
+              99.9,
+              100.1,
+              99.9,
+              100.2,
+              99.9,
+              100.0,
+              100.1,
+              99.9,
+              100.0,
+              99.8,
+              99.9,
+              100.3,
+              100.0,
+              100.1,
+              99.9,
+              100.0,
+              100.1,
+              99.9,
+              100.3,
+              99.8,
+              100.2,
+              99.9,
+              100.1,
+              99.9,
+              100.1,
+              99.8,
+              100.1,
+              100.0,
+              100.1,
+              99.9,
+              99.7,
+              15.5,
+              0.2,
+              0.2,
+              0.3,
+              0.2
+            ],
+            "cpu_source": "cgroup-v2-host",
+            "peak_anon_mb": 58.8,
+            "peak_rss_mb": 368.0
+          },
+          "exceptions_delta": 0,
+          "file_rows": 4311246,
+          "generator_on_schedule": false,
+          "health_t": "23:02:47",
+          "lag_after_send_s": 11.0,
+          "loss_pct": 7.290000000000001,
+          "rate": 155000,
+          "rep": 1,
+          "secs": 30,
+          "sent": 4650000,
+          "source_in_delta": 4311246,
+          "source_in_end_send_delta": 3053204,
+          "sustained": false,
+          "tag": "PEAK_W3_25KREK1W3R155000",
+          "topics_seen": 10000,
+          "unparsable_lines": 0,
+          "upstream_gap_at_send_end": 1596796,
+          "workload": "w3"
+        }
+      ]
+    }
+  ],
+  "secs": 30,
+  "sink_dir": "/tmp/iot_lat",
+  "started": "23:00:40",
+  "summary": {
+    "eku-def/w1/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w1/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/152500": {
+      "complete": 0,
+      "cpu_median": 99.3,
+      "lag_median_s": 6.0,
+      "reps": 1,
+      "rss_median_mb": 348.3,
+      "sustained": 0
+    },
+    "rek/w3/155000": {
+      "complete": 0,
+      "cpu_median": 99.3,
+      "lag_median_s": 11.0,
+      "reps": 1,
+      "rss_median_mb": 368.0,
+      "sustained": 0
+    },
+    "rek/w4/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/152500": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/155000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    }
+  },
+  "tag_prefix": "PEAK_W3_25K",
+  "tool": "scripts/iotrunner (Rust) + scripts/mqttgen (Rust std-only) + eclipse-mosquitto:2",
+  "topology": "broker cores 8,9 | mqttgen cores 10,11 | engine core 2 (cpuset, 1 CPU, 1 GB, no swap) | runner cores 0,1,4-7",
+  "workloads": [
+    "w3"
+  ]
+}

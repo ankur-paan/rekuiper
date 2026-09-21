@@ -1,0 +1,885 @@
+{
+  "broker_config": "/mnt/c/Users/paanday/Documents/idacs/rekuiper/ekuiper/test/benchmark/iiot-mqtt/scripts/mosquitto/mosquitto-bounded.conf",
+  "conns": 8,
+  "devices": 1000,
+  "engines": [
+    "rek"
+  ],
+  "finished": "23:00:15",
+  "memory_note": "peak_rss_mb = cgroup memory.current (includes page cache from writing the sink file); peak_anon_mb = cgroup anon memory (engine heap)",
+  "rates": [
+    160000,
+    170000,
+    180000,
+    190000
+  ],
+  "reps": 1,
+  "runs": [
+    {
+      "engine": "rek",
+      "health_after": {
+        "contaminated": true,
+        "loadavg": "0.85 1.42 1.54 1/280 7583",
+        "ps_top": "%CPU COMMAND\n 200 ps -eo pcpu,args --sort=-pcpu\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 /usr/bin/containerd\n 0.1 ./scripts/iotrunner/iotrunner\n 0.0 /sbin/init\n 0.0 /usr/lib/systemd/systemd-udevd\n 0.0 /usr/lib/systemd/systemd-journald\n 0.0 /usr/lib/systemd/systemd --user",
+        "t": "23:00:15",
+        "windows_free_ram_gb": 1.91,
+        "windows_host_cpu_pct": 55.0,
+        "wsl_offenders": []
+      },
+      "health_before": {
+        "contaminated": false,
+        "loadavg": "1.47 1.60 1.61 1/328 7244",
+        "ps_top": "%CPU COMMAND\n 3.4 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 1.2 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 5e442fcb0ddabaca66d62b4a3394b191b777f23a617e66d0ca19\n 0.7 (udev-worker)\n 0.4 /usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 11883 -container-ip 172.18.0.2 -container-port 18\n 0.4 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 ./scripts/iotrunner/iotrunner\n 0.2 /usr/bin/containerd",
+        "t": "22:59:30",
+        "windows_free_ram_gb": 1.82,
+        "windows_host_cpu_pct": 24.0,
+        "wsl_offenders": []
+      },
+      "life": {
+        "image": "rekuiper-bench:local",
+        "image_id": "sha256:d7322a7db037ab0c4cbc3a64570e354d081f45659160a6fd7e2324be664dc296",
+        "limits": "1000000000 2 1073741824",
+        "started": "22:59:31"
+      },
+      "rep": 1,
+      "steps": [
+        {
+          "complete": false,
+          "error": "subscription not confirmed (warm-up not counted by rule status)",
+          "rate": 160000,
+          "source_in_after_warmup": 0,
+          "workload": "w3"
+        },
+        {
+          "complete": false,
+          "error": "create stream http 0: ",
+          "rate": 170000,
+          "workload": "w3"
+        },
+        {
+          "complete": false,
+          "error": "create stream http 0: ",
+          "rate": 180000,
+          "workload": "w3"
+        },
+        {
+          "complete": false,
+          "error": "create stream http 0: ",
+          "rate": 190000,
+          "workload": "w3"
+        }
+      ]
+    }
+  ],
+  "secs": 30,
+  "sink_dir": "/tmp/iot_lat",
+  "started": "22:59:25",
+  "summary": {
+    "eku-def/w1/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w1/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w1/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w1/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 1,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 1,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 1,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 1,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/160000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/170000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/180000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/190000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    }
+  },
+  "tag_prefix": "PEAK_W3_10K",
+  "tool": "scripts/iotrunner (Rust) + scripts/mqttgen (Rust std-only) + eclipse-mosquitto:2",
+  "topology": "broker cores 8,9 | mqttgen cores 10,11 | engine core 2 (cpuset, 1 CPU, 1 GB, no swap) | runner cores 0,1,4-7",
+  "workloads": [
+    "w3"
+  ]
+}

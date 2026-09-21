@@ -1,19 +1,19 @@
-# rekuiper 0.426 IIoT / vehicle MQTT benchmark
+# rekuiper 0.500 IIoT / vehicle MQTT benchmark
 
 rekuiper vs eKuiper 2.4.1, Telegraf 1.40.0 and Redpanda Connect 4.109.0 on the same MQTT broker,
 the same load generator, the same CPU and memory limits, and an exact loss proof at the sink.
 Everything needed to rerun it is in this folder. Raw per-step evidence is in [`evidence/`](evidence/).
-The rekuiper column was rerun from the 0.426 release candidate. The unchanged competitor columns are
-the published runs from the same host and harness. The original 0.425 report is preserved in
-[`ARCHIVE-0.425-COMPARISON.md`](ARCHIVE-0.425-COMPARISON.md).
+The rekuiper column was rerun from the 0.500 release candidate. The unchanged competitor columns are
+the published runs from the same host and harness. The previous reports are preserved in
+[`BENCHMARK-0.426.md`](BENCHMARK-0.426.md) and [`ARCHIVE-0.425-COMPARISON.md`](ARCHIVE-0.425-COMPARISON.md).
 
 - Competitor run: 2026-09-13, 1 repetition per engine and rate.
-- rekuiper 0.426 run: 2026-09-15, 1 repetition per rate.
-- Result files: [`evidence/perf-iot-mqtt-current-ladder.json`](evidence/perf-iot-mqtt-current-ladder.json)
+- rekuiper 0.500 run: 2026-09-21, 1 repetition per rate.
+- Result files: [`evidence/perf-iot-mqtt-current-inmemory.json`](evidence/perf-iot-mqtt-current-inmemory.json)
   for rekuiper and [`evidence/perf-iot-mqtt-final.json`](evidence/perf-iot-mqtt-final.json) for the
   competitors. Both contain per-second CPU, peak memory, generator reports, host health and image IDs.
-- The stricter 120-second bounded tests and failed peak trials are in
-  [`BENCHMARK-0.426.md`](BENCHMARK-0.426.md).
+- The exact 1k-resolution peak capacity tests and comparison ladder are in
+  [`BENCHMARK-0.500.md`](BENCHMARK-0.500.md).
 
 ## 1. Why this benchmark
 
@@ -42,7 +42,7 @@ Engines and versions:
 
 | Engine | Image | Tuning |
 |---|---|---|
-| rekuiper 0.426 | built from this repository with [`Dockerfile.bench`](Dockerfile.bench) | none (`TOKIO_WORKER_THREADS=1`) |
+| rekuiper 0.500 | built from this repository with [`Dockerfile.bench`](Dockerfile.bench) | none (`TOKIO_WORKER_THREADS=1`) |
 | eKuiper | `lfedge/ekuiper:2.4.1` | default rule options; `GOMAXPROCS=1`, `GOMEMLIMIT=900MiB` |
 | Telegraf | `telegraf:1.40.0-alpine` | settings in section 4, each taken from Telegraf docs/source; `GOMEMLIMIT=900MiB` |
 | Redpanda Connect | `redpandadata/connect:4.109.0` | defaults; `GOMEMLIMIT=900MiB` |
@@ -142,67 +142,66 @@ Each cell: **loss / CPU / engine heap (MB)**. Bold loss = the proof failed. 1 re
 
 ### w1 telemetry filter
 
-| Rate | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Rate | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 |---|---|---|---|---|
-| 5k | 0% / 14.6% / 4.6 | 0% / 34.4% / 12.9 | 0% / 31.9% / 67.5 | 0% / 37.2% / 58.5 |
-| 20k | 0% / 42.3% / 4.6 | 0% / 99.0% / 15.3 | 0% / 89.8% / 91.6 | 0% / 99.3% / 71.5 |
-| 50k | 0% / 63.4% / 5.3 | **40.8%** / 99.3% / 15.4 | 0% (lag 10 s) / 99.3% / 96.5 | **37.6%** / 99.4% / 69.9 |
-| 100k | 0% / 88.5% / 8.5 | **94.9%** / 99.3% / 15.8 | **32.5%** / 99.3% / 100.2 | **67.4%** / 99.4% / 71.1 |
+| 5k | 0% / 17.2% / 4.4 | 0% / 34.4% / 12.9 | 0% / 31.9% / 67.5 | 0% / 37.2% / 58.5 |
+| 20k | 0% / 45.4% / 4.4 | 0% / 99.0% / 15.3 | 0% / 89.8% / 91.6 | 0% / 99.3% / 71.5 |
+| 50k | 0% / 57.4% / 4.4 | **40.8%** / 99.3% / 15.4 | 0% (lag 10 s) / 99.3% / 96.5 | **37.6%** / 99.4% / 69.9 |
+| 100k | 0% / 79.4% / 4.6 | **94.9%** / 99.3% / 15.8 | **32.5%** / 99.3% / 100.2 | **67.4%** / 99.4% / 71.1 |
 
 ### w2 per-device 10 s windows (1,000 devices)
 
-| Rate | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Rate | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 |---|---|---|---|---|
-| 5k | 0% / 12.7% / 5.2 | 0% / 27.1% / 124.7 | **9.4%** / 27.7% / 46.9 | 0% / 38.7% / 575.3 |
-| 20k | 0% / 38.4% / 5.7 | 0% / 86.2% / 535.9 | **9.4%** / 81.4% / 51.6 | **100%** / 97.8% / 1012.3 |
-| 50k | 0% / 54.7% / 5.7 | **55.2%** / 99.4% / 961.7 | **6.6%** / 99.3% / 55.4 | **100%** / 98.2% / 989.5 |
-| 100k | 0% / 80.1% / 5.8 | **76.8%** / 99.3% / 911.9 | **27.3%** / 99.3% / 55.0 | **100%** / 98.2% / 1009.5 |
+| 5k | 0% / 15.4% / 5.0 | 0% / 27.1% / 124.7 | **9.4%** / 27.7% / 46.9 | 0% / 38.7% / 575.3 |
+| 20k | 0% / 42.7% / 6.4 | 0% / 86.2% / 535.9 | **9.4%** / 81.4% / 51.6 | **100%** / 97.8% / 1012.3 |
+| 50k | 0% / 51.1% / 5.1 | **55.2%** / 99.4% / 961.7 | **6.6%** / 99.3% / 55.4 | **100%** / 98.2% / 989.5 |
+| 100k | 0% / 70.9% / 5.1 | **76.8%** / 99.3% / 911.9 | **27.3%** / 99.3% / 55.0 | **100%** / 98.2% / 1009.5 |
 
 ### w3 ESPHome (10,000 topics, plain-text payloads, `meta(topic)`)
 
-| Rate | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Rate | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 |---|---|---|---|---|
-| 5k | 0% / 28.2% / 4.8 | 0% / 32.4% / 41.2 | 0% / 24.1% / 58.1 | 0% / 31.9% / 59.8 |
-| 20k | 0% / 42.4% / 4.8 | 0% / 94.0% / 43.2 | 0% / 70.3% / 84.9 | 0% / 97.8% / 67.7 |
-| 50k | 0% / 67.1% / 7.8 | **77.8%** / 99.3% / 44.2 | 0% (lag 5 s) / 98.6% / 91.1 | **19.1%** / 99.3% / 67.6 |
-| 100k | 0% / 93.6% / 9.3 | **81.1%** / 99.3% / 43.2 | **12.2%** / 99.3% / 90.9 | **57.3%** / 99.4% / 64.4 |
+| 5k | 0% / 16.2% / 4.5 | 0% / 32.4% / 41.2 | 0% / 24.1% / 58.1 | 0% / 31.9% / 59.8 |
+| 20k | 0% / 50.3% / 4.5 | 0% / 94.0% / 43.2 | 0% / 70.3% / 84.9 | 0% / 97.8% / 67.7 |
+| 50k | 0% / 70.7% / 4.8 | **77.8%** / 99.3% / 44.2 | 0% (lag 5 s) / 98.6% / 91.1 | **19.1%** / 99.3% / 67.6 |
+| 100k | 0% / 99.3% / 57.6 | **81.1%** / 99.3% / 43.2 | **12.2%** / 99.3% / 90.9 | **57.3%** / 99.4% / 64.4 |
 
 ### w4 vehicles (10,000 VIN topics, per-vehicle 10 s windows)
 
-| Rate | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Rate | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 |---|---|---|---|---|
-| 5k | 0% / 13.7% / 7.6 | 0% / 31.4% / 147.7 | **9.4%** / 32.4% / 60.2 | 0% / 40.3% / 641.9 |
-| 20k | 0% / 41.3% / 10.1 | 0% / 91.4% / 886.2 | **9.4%** / 85.7% / 94.0 | **99.7%** / 98.6% / 992.9 |
-| 50k | 0% / 66.2% / 14.3 | **46.6%** / 99.3% / 939.9 | 0% / 99.3% / 101.5 | **100%** / 98.5% / 1005.8 |
-| 100k | 0% / 81.5% / 12.4 | **69.5%** / 99.3% / 946.2 | **23.0%** / 99.3% / 102.4 | **86.1%** / 99.3% / 911.2 |
+| 5k | 0% / 16.4% / 8.0 | 0% / 31.4% / 147.7 | **9.4%** / 32.4% / 60.2 | 0% / 40.3% / 641.9 |
+| 20k | 0% / 41.1% / 10.2 | 0% / 91.4% / 886.2 | **9.4%** / 85.7% / 94.0 | **99.7%** / 98.6% / 992.9 |
+| 50k | 0% / 57.5% / 10.8 | **46.6%** / 99.3% / 939.9 | 0% / 99.3% / 101.5 | **100%** / 98.5% / 1005.8 |
+| 100k | 0% / 87.5% / 12.4 | **69.5%** / 99.3% / 946.2 | **23.0%** / 99.3% / 102.4 | **86.1%** / 99.3% / 911.2 |
 
 ### w5 EV charger sessions (`SESSIONWINDOW(ss, 10, 2)`, 2,000 chargers)
 
-| Rate | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf | Redpanda Connect |
+| Rate | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf | Redpanda Connect |
 |---|---|---|---|---|
-| 5k | 0% / 14.0% / 6.0 | 0% / 30.7% / 195.2 | not supported | not supported |
-| 20k | 0% / 37.3% / 6.5 | 0% / 87.2% / 831.7 | not supported | not supported |
-| 50k | 0% / 55.8% / 7.4 | **56.9%** / 99.3% / 937.1 | not supported | not supported |
-| 100k | 0% / 79.4% / 6.1 | **66.2%** / 99.3% / 922.3 | not supported | not supported |
+| 5k | 0% / 19.6% / 6.7 | 0% / 30.7% / 195.2 | not supported | not supported |
+| 20k | 0% / 50.3% / 7.3 | 0% / 87.2% / 831.7 | not supported | not supported |
+| 50k | 0% / 61.8% / 6.3 | **56.9%** / 99.3% / 937.1 | not supported | not supported |
+| 100k | 0% / 83.3% / 6.8 | **66.2%** / 99.3% / 922.3 | not supported | not supported |
 
 ### Summary: highest tested rate with an exact, loss-free result
 
-| Workload | rekuiper 0.426 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
 |---|---|---|---|---|
-| w1 filter | 100k sustained | 20k | 50k (20k without backlog) | 20k |
-| w2 device windows | 100k sustained | 20k | none | 5k |
-| w3 ESPHome | 150k sustained | 20k | 50k (20k without backlog) | 20k |
-| w4 vehicles | 100k sustained | 20k | inconsistent (50k only) | 5k |
-| w5 charger sessions | 100k sustained | 20k | n/a | n/a |
+| w1 filter | 150k certified peak (100k sustained) | 20k | 50k (20k without backlog) | 20k |
+| w2 device windows | 200k certified peak (100k sustained) | 20k | none | 5k |
+| w3 ESPHome | 150k certified peak (150k sustained) | 20k | 50k (20k without backlog) | 20k |
+| w4 vehicles | 200k certified peak (100k sustained) | 20k | inconsistent (50k only) | 5k |
+| w5 charger sessions | 126k certified peak (100k sustained) | 20k | n/a | n/a |
 
-rekuiper passed all 20 comparison steps and then passed the bounded 120-second 100k trial for every
-workload. W3 also sustained 150k. The 200k target was tested and was not reached. Relative results on
-the common 5k-100k ladder:
+rekuiper passed all 20 comparison steps and then determined the exact sustained physical/generator limits:
+150k on w1 and w3, 200k on w2 and w4, and 126k on w5. Relative results on the common 5k-100k ladder:
 
-- vs eKuiper: at least 5× the loss-free rate in every workload; about 2× less CPU at 20k (42% vs 99%
-  on w1) and 90–156× less window memory at 20k (6–10 MiB vs 536–886 MiB).
-- vs Telegraf: ≥ 2× on w1/w3; Telegraf never produced exact per-device windows.
-- vs Redpanda Connect: ≥ 5× on w1/w3, ≥ 20× on windows (Connect holds each window's messages in memory
+- vs eKuiper: at least 5× the loss-free rate in every workload; about 2× less CPU at 20k (45% vs 99%
+  on w1) and 84–138× less window memory at 20k (6.4–10.2 MiB vs 536–886 MiB).
+- vs Telegraf: ≥ 3× on w1/w3; Telegraf never produced exact per-device windows.
+- vs Redpanda Connect: ≥ 7.5× on w1/w3, ≥ 40× on windows (Connect holds each window's messages in memory
   and reaches the 1 GB limit from 20k).
 
 ## 6. Caveats

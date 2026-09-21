@@ -1,0 +1,637 @@
+{
+  "broker_config": "/mnt/c/Users/paanday/Documents/idacs/rekuiper/ekuiper/test/benchmark/iiot-mqtt/scripts/mosquitto/mosquitto-bounded.conf",
+  "conns": 8,
+  "devices": 1000,
+  "engines": [
+    "rek"
+  ],
+  "finished": "23:12:00",
+  "memory_note": "peak_rss_mb = cgroup memory.current (includes page cache from writing the sink file); peak_anon_mb = cgroup anon memory (engine heap)",
+  "rates": [
+    130000,
+    140000
+  ],
+  "reps": 1,
+  "runs": [
+    {
+      "engine": "rek",
+      "health_after": {
+        "contaminated": true,
+        "loadavg": "0.77 1.29 1.51 2/315 11104",
+        "ps_top": "%CPU COMMAND\n63.6 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 5.1 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 11883 -container-ip 172.18.0.2 -container-po\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.2 /usr/bin/containerd\n 0.0 ./scripts/iotrunner/iotrunner\n 0.0 /sbin/init\n 0.0 /usr/lib/systemd/systemd-udevd\n 0.0 /usr/lib/polkit-1/polkitd --no-debug",
+        "t": "23:11:59",
+        "windows_free_ram_gb": 1.83,
+        "windows_host_cpu_pct": 36.0,
+        "wsl_offenders": []
+      },
+      "health_before": {
+        "contaminated": true,
+        "loadavg": "1.07 1.56 1.61 6/333 10590",
+        "ps_top": "%CPU COMMAND\n 1.3 /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\n 0.4 /usr/bin/containerd-shim-runc-v2 -namespace moby -id 2a3c1568ab3d1dcc9adc66c1892c3a0a713bf3b1e53c27380e37\n 0.3 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock\n 0.3 ./scripts/iotrunner/iotrunner\n 0.2 /usr/bin/containerd\n 0.0 /sbin/init\n 0.0 /usr/lib/polkit-1/polkitd --no-debug\n 0.0 /usr/lib/systemd/systemd-udevd",
+        "t": "23:09:23",
+        "windows_free_ram_gb": 1.75,
+        "windows_host_cpu_pct": 83.0,
+        "wsl_offenders": []
+      },
+      "life": {
+        "image": "rekuiper-bench:local",
+        "image_id": "sha256:d7322a7db037ab0c4cbc3a64570e354d081f45659160a6fd7e2324be664dc296",
+        "limits": "1000000000 2 1073741824",
+        "started": "23:09:25"
+      },
+      "rep": 1,
+      "steps": [
+        {
+          "complete": false,
+          "cpu": {
+            "cpu_max": 100.0,
+            "cpu_mean_all": 62.5,
+            "cpu_mean_send_window": 87.1,
+            "cpu_per_sec": [
+              66.6,
+              97.0,
+              97.1,
+              98.0,
+              82.6,
+              95.9,
+              96.6,
+              96.8,
+              98.2,
+              97.9,
+              98.0,
+              93.2,
+              72.6,
+              95.5,
+              87.6,
+              91.5,
+              92.5,
+              91.8,
+              92.5,
+              98.6,
+              99.1,
+              98.6,
+              99.3,
+              99.0,
+              87.0,
+              57.5,
+              58.6,
+              59.0,
+              57.7,
+              56.4,
+              56.3,
+              58.0,
+              57.3,
+              63.8,
+              63.6,
+              88.6,
+              99.7,
+              100.0,
+              99.7,
+              98.5,
+              98.7,
+              99.7,
+              77.9,
+              3.6,
+              0.6,
+              0.1,
+              0.1,
+              0.1,
+              0.1,
+              0.1,
+              0.2,
+              0.2,
+              0.1,
+              4.4,
+              0.3,
+              0.2,
+              0.2,
+              0.2,
+              0.2
+            ],
+            "cpu_source": "cgroup-v2-host",
+            "peak_anon_mb": 6.6,
+            "peak_rss_mb": 7.9
+          },
+          "devices_seen": 2000,
+          "exceptions_delta": 0,
+          "generator_on_schedule": false,
+          "health_t": "23:10:41",
+          "lag_after_send_s": 8.0,
+          "loss_pct": 0.0,
+          "rate": 130000,
+          "rep": 1,
+          "secs": 30,
+          "sent": 3900000,
+          "source_in_delta": 3900000,
+          "source_in_end_send_delta": 3354231,
+          "sum_n": 3900000,
+          "sustained": false,
+          "tag": "PEAK_W5_10KREK1W5R130000",
+          "unparsable_lines": 0,
+          "upstream_gap_at_send_end": 545769,
+          "workload": "w5"
+        },
+        {
+          "complete": false,
+          "cpu": {
+            "cpu_max": 101.0,
+            "cpu_mean_all": 67.5,
+            "cpu_mean_send_window": 89.7,
+            "cpu_per_sec": [
+              73.9,
+              99.1,
+              98.3,
+              99.0,
+              96.2,
+              94.0,
+              92.0,
+              91.2,
+              92.2,
+              91.5,
+              92.0,
+              90.8,
+              96.8,
+              100.2,
+              99.4,
+              99.5,
+              99.8,
+              99.2,
+              100.0,
+              100.0,
+              99.6,
+              100.1,
+              99.7,
+              101.0,
+              86.0,
+              60.5,
+              60.0,
+              60.7,
+              59.2,
+              60.0,
+              99.0,
+              100.1,
+              99.9,
+              99.2,
+              100.1,
+              99.8,
+              97.0,
+              93.3,
+              92.4,
+              92.0,
+              93.6,
+              92.8,
+              55.2,
+              0.2,
+              4.0,
+              0.2,
+              0.3,
+              0.2,
+              0.3,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.1,
+              3.8,
+              0.2,
+              0.2,
+              0.2
+            ],
+            "cpu_source": "cgroup-v2-host",
+            "peak_anon_mb": 11.5,
+            "peak_rss_mb": 12.9
+          },
+          "devices_seen": 2000,
+          "exceptions_delta": 0,
+          "generator_on_schedule": false,
+          "health_t": "23:11:56",
+          "lag_after_send_s": 8.0,
+          "loss_pct": 0.0,
+          "rate": 140000,
+          "rep": 1,
+          "secs": 30,
+          "sent": 4200000,
+          "source_in_delta": 4200000,
+          "source_in_end_send_delta": 3623165,
+          "sum_n": 4200000,
+          "sustained": false,
+          "tag": "PEAK_W5_10KREK1W5R140000",
+          "unparsable_lines": 0,
+          "upstream_gap_at_send_end": 576835,
+          "workload": "w5"
+        }
+      ]
+    }
+  ],
+  "secs": 30,
+  "sink_dir": "/tmp/iot_lat",
+  "started": "23:09:19",
+  "summary": {
+    "eku-def/w1/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w1/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w2/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w3/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w4/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-def/w5/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w1/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w2/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w3/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w4/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "eku-tun/w5/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w1/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w2/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w3/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w4/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rek/w5/130000": {
+      "complete": 0,
+      "cpu_median": 87.1,
+      "lag_median_s": 8.0,
+      "reps": 1,
+      "rss_median_mb": 7.9,
+      "sustained": 0
+    },
+    "rek/w5/140000": {
+      "complete": 0,
+      "cpu_median": 89.7,
+      "lag_median_s": 8.0,
+      "reps": 1,
+      "rss_median_mb": 12.9,
+      "sustained": 0
+    },
+    "rpconnect/w1/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w1/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w2/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w3/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w4/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "rpconnect/w5/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w1/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w2/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w3/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w4/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/130000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    },
+    "telegraf/w5/140000": {
+      "complete": 0,
+      "cpu_median": null,
+      "lag_median_s": null,
+      "reps": 0,
+      "rss_median_mb": null,
+      "sustained": 0
+    }
+  },
+  "tag_prefix": "PEAK_W5_10K",
+  "tool": "scripts/iotrunner (Rust) + scripts/mqttgen (Rust std-only) + eclipse-mosquitto:2",
+  "topology": "broker cores 8,9 | mqttgen cores 10,11 | engine core 2 (cpuset, 1 CPU, 1 GB, no swap) | runner cores 0,1,4-7",
+  "workloads": [
+    "w5"
+  ]
+}

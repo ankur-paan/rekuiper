@@ -49,6 +49,14 @@ impl SqliteKvStore {
             .connect(&db_url)
             .await
             .with_context(|| format!("Failed to open KV database at {:?}", path))?;
+
+        // Tune SQLite for high-throughput in-memory caching and non-blocking WAL concurrency
+        if path.as_os_str() != ":memory:" {
+            let _ = sqlx::query("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -32000; PRAGMA temp_store = MEMORY;")
+                .execute(&pool)
+                .await;
+        }
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS kv (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (namespace, key))",
         )

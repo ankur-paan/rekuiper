@@ -2,11 +2,11 @@
   "tool": "mqttgen 0.1.0 std-only QoS0",
   "host": "127.0.0.1", "port": 11883, "topic": "bench/telemetry", "mode": "json",
   "nominal_rate": 100000, "secs": 30, "conns": 8, "devices": 1000, "tag": "REK1W2R100000",
-  "clock_start_epoch_ms": 1789327751463,
+  "clock_start_epoch_ms": 1790024984338,
   "nominal_messages": 3000000, "sent_messages": 3000000,
-  "actual_rate_over_schedule": 100000.0, "send_window_s": 30.001, "wall_s": 30.001,
-  "per_sec_sent": [99976, 100000, 100009, 99990, 100001, 99996, 100006, 99984, 100018, 99980, 100010, 100003, 99992, 100026, 99976, 100020, 99993, 99992, 99994, 100005, 99996, 100011, 99994, 100009, 99999, 99984, 100008, 100001, 99995, 100006, 26],
-  "per_sec_core_min": 99976, "per_sec_core_max": 100026,
+  "actual_rate_over_schedule": 100000.0, "send_window_s": 30.000, "wall_s": 30.000,
+  "per_sec_sent": [99977, 99997, 99993, 100012, 100003, 99987, 99989, 100021, 100019, 99979, 99999, 100002, 99958, 100043, 99979, 99998, 100010, 100006, 100001, 100015, 99973, 100009, 99998, 100007, 100007, 100001, 99999, 99999, 100004, 99980, 35],
+  "per_sec_core_min": 99958, "per_sec_core_max": 100043,
   "on_schedule": true,
   "errors": []
 }
