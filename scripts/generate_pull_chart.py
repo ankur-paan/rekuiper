@@ -158,31 +158,22 @@ def render_svg(rows, output_path):
     <stop offset="100%" stop-color="#58a6ff" stop-opacity="0.0" />
   </linearGradient>
   <style>
-    .bg { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 10px; }
-    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 600; fill: #e6edf3; }
-    .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; fill: #7d8590; }
-    .stat-pill { fill: #1f6feb; rx: 12px; }
-    .stat-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #ffffff; }
+    .bg { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 6px; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #e6edf3; }
+    .stat-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 500; fill: #8b949e; }
     .grid { stroke: #21262d; stroke-width: 1px; stroke-dasharray: 4,4; }
     .axis-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 11px; fill: #7d8590; }
-    .spark-line { fill: none; stroke: #58a6ff; stroke-width: 3px; stroke-linecap: round; stroke-linejoin: round; }
-    .spark-point { fill: #0d1117; stroke: #58a6ff; stroke-width: 2.5px; cursor: pointer; transition: r 0.2s; }
-    .spark-point:hover { r: 6px; fill: #58a6ff; }
+    .spark-line { fill: none; stroke: #58a6ff; stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; }
+    .spark-point { fill: #0d1117; stroke: #58a6ff; stroke-width: 2px; }
   </style>
 </defs>""")
 
     # Background
     svg_elements.append(f'<rect width="{width}" height="{height}" class="bg" />')
 
-    # Header
-    svg_elements.append(f'<text x="{pad_left}" y="36" class="title">rekuiper · Docker Hub Cumulative Pulls</text>')
-    svg_elements.append(f'<text x="{pad_left}" y="54" class="subtitle">Daily growth history · tracked automatically via GitHub Actions</text>')
-
-    # Stats badge top right
-    pill_w = 110
-    pill_x = width - pad_right - pill_w
-    svg_elements.append(f'<rect x="{pill_x}" y="24" width="{pill_w}" height="26" class="stat-pill" />')
-    svg_elements.append(f'<text x="{pill_x + pill_w/2}" y="42" text-anchor="middle" class="stat-text">{latest_pulls:,} pulls</text>')
+    # Header: clean title on left, plain pull count on right
+    svg_elements.append(f'<text x="{pad_left}" y="36" class="title">Docker Pulls</text>')
+    svg_elements.append(f'<text x="{width - pad_right}" y="36" text-anchor="end" class="stat-text">{latest_pulls:,} total</text>')
 
     # Y grid lines and labels
     for y, label in y_ticks:

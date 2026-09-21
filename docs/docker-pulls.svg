@@ -5,23 +5,18 @@
     <stop offset="100%" stop-color="#58a6ff" stop-opacity="0.0" />
   </linearGradient>
   <style>
-    .bg { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 10px; }
-    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 600; fill: #e6edf3; }
-    .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; fill: #7d8590; }
-    .stat-pill { fill: #1f6feb; rx: 12px; }
-    .stat-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #ffffff; }
+    .bg { fill: #0d1117; stroke: #30363d; stroke-width: 1px; rx: 6px; }
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #e6edf3; }
+    .stat-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 500; fill: #8b949e; }
     .grid { stroke: #21262d; stroke-width: 1px; stroke-dasharray: 4,4; }
     .axis-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 11px; fill: #7d8590; }
-    .spark-line { fill: none; stroke: #58a6ff; stroke-width: 3px; stroke-linecap: round; stroke-linejoin: round; }
-    .spark-point { fill: #0d1117; stroke: #58a6ff; stroke-width: 2.5px; cursor: pointer; transition: r 0.2s; }
-    .spark-point:hover { r: 6px; fill: #58a6ff; }
+    .spark-line { fill: none; stroke: #58a6ff; stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; }
+    .spark-point { fill: #0d1117; stroke: #58a6ff; stroke-width: 2px; }
   </style>
 </defs>
 <rect width="800" height="320" class="bg" />
-<text x="65" y="36" class="title">rekuiper · Docker Hub Cumulative Pulls</text>
-<text x="65" y="54" class="subtitle">Daily growth history · tracked automatically via GitHub Actions</text>
-<rect x="650" y="24" width="110" height="26" class="stat-pill" />
-<text x="705.0" y="42" text-anchor="middle" class="stat-text">3,241 pulls</text>
+<text x="65" y="36" class="title">Docker Pulls</text>
+<text x="760" y="36" text-anchor="end" class="stat-text">3,241 total</text>
 <line x1="65" y1="265.0" x2="760" y2="265.0" class="grid" />
 <text x="55" y="269.0" text-anchor="end" class="axis-text">0</text>
 <line x1="65" y1="216.2" x2="760" y2="216.2" class="grid" />
