@@ -1,0 +1,37 @@
+name: Track Docker Pulls
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  track-pulls:
+    name: Update Docker Pull Statistics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch and Render Docker Pull Graph
+        run: python3 scripts/generate_pull_chart.py --fetch
+
+      - name: Commit and Push Updated Chart
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/docker-pulls.csv docs/docker-pulls.svg
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(stats): update Docker pull history [skip ci]"
+            git push
+          fi

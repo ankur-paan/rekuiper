@@ -80,6 +80,8 @@ To run rekuiper together with Mosquitto and Redis:
 docker compose -f deploy/docker/docker-compose.yml up -d
 ```
 
+[![Docker Pull History](docs/docker-pulls.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+
 ### Prebuilt binaries
 
 Download a build for Linux, macOS or Windows from
