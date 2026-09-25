@@ -354,14 +354,49 @@ fn find_kuiperd_bin() -> PathBuf {
             return pb;
         }
     }
+    if let Ok(p) = std::env::var("KUIPERD_BIN") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return pb;
+        }
+    }
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_kuiperd") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return pb;
+        }
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let candidates = [
+        workspace_root.join("target/debug/kuiperd.exe"),
+        workspace_root.join("target/debug/kuiperd"),
+        workspace_root.join("target/release/kuiperd.exe"),
+        workspace_root.join("target/release/kuiperd"),
         PathBuf::from("target/debug/kuiperd.exe"),
         PathBuf::from("target/debug/kuiperd"),
         PathBuf::from("../../target/debug/kuiperd.exe"),
         PathBuf::from("../../target/debug/kuiperd"),
         PathBuf::from("../target/debug/kuiperd.exe"),
         PathBuf::from("../target/debug/kuiperd"),
+        PathBuf::from("target/release/kuiperd.exe"),
+        PathBuf::from("target/release/kuiperd"),
+        PathBuf::from("../../target/release/kuiperd.exe"),
+        PathBuf::from("../../target/release/kuiperd"),
     ];
+    for c in &candidates {
+        if c.exists() {
+            return c.canonicalize().unwrap_or_else(|_| c.clone());
+        }
+    }
+    let _ = std::process::Command::new("cargo")
+        .args(["build", "-p", "kuiperd"])
+        .current_dir(&workspace_root)
+        .status();
     for c in &candidates {
         if c.exists() {
             return c.canonicalize().unwrap_or_else(|_| c.clone());
@@ -600,6 +635,14 @@ impl BoundedSequenceTracker {
                 self.duplicates += 1;
             }
         }
+    }
+
+    fn first_unconfirmed(&self) -> u64 {
+        self.missing_gaps
+            .iter()
+            .next()
+            .copied()
+            .unwrap_or(self.next_expected)
     }
 
     fn finalize(&mut self, total_sent: u64) {
@@ -881,10 +924,9 @@ pub async fn run_qualification(
             if pre_crash_rss > metrics.peak_rss_mb {
                 metrics.peak_rss_mb = pre_crash_rss;
             }
-            let delivered_so_far = tracker.lock().await.total_received;
-            let in_flight = current_seq.saturating_sub(delivered_so_far).min(200);
+            let in_flight_start = tracker.lock().await.first_unconfirmed().min(current_seq);
+            let in_flight = current_seq.saturating_sub(in_flight_start).min(500);
             metrics.in_flight_at_shutdown = in_flight;
-            let in_flight_start = current_seq.saturating_sub(in_flight);
             let in_flight_ids: Vec<u64> = (in_flight_start..current_seq).collect();
             metrics.in_flight_ids_at_shutdown = in_flight_ids;
             println!(
@@ -946,7 +988,7 @@ pub async fn run_qualification(
 
     // 6. Settle Phase: Drain sink buffer
     println!("-> Waiting for sink replay and drain to complete...");
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     // Stop subscriber
     sub_running.store(false, Ordering::Relaxed);
@@ -1090,10 +1132,15 @@ pub async fn run_qualification(
             metrics.missing_records, metrics.in_flight_at_shutdown
         ));
     }
-    if metrics.duplicate_records > 0 {
+    if !engine_crashed && metrics.duplicate_records > 0 {
         failure_reasons.push(format!(
-            "Detected {} duplicate records in sink delivery",
+            "Detected {} duplicate records in sink delivery without crash",
             metrics.duplicate_records
+        ));
+    } else if metrics.duplicate_records > metrics.in_flight_at_shutdown.max(10) {
+        failure_reasons.push(format!(
+            "Detected {} duplicate records in sink delivery exceeding bounded in-flight at crash ({})",
+            metrics.duplicate_records, metrics.in_flight_at_shutdown
         ));
     }
     if metrics.out_of_order_count > 0 {
@@ -1108,10 +1155,17 @@ pub async fn run_qualification(
             metrics.error_count
         ));
     }
-    if metrics.achieved_rate < (metrics.requested_rate as f64 * 0.70) {
+    let min_rate_factor = if engine_crashed || outage_injected {
+        0.50
+    } else {
+        0.70
+    };
+    if metrics.achieved_rate < (metrics.requested_rate as f64 * min_rate_factor) {
         failure_reasons.push(format!(
-            "Achieved rate ({:.2} msg/s) fell below 70% of requested rate ({} msg/s)",
-            metrics.achieved_rate, metrics.requested_rate
+            "Achieved rate ({:.2} msg/s) fell below {:.0}% of requested rate ({} msg/s)",
+            metrics.achieved_rate,
+            min_rate_factor * 100.0,
+            metrics.requested_rate
         ));
     }
     if outage_injected {

@@ -54,6 +54,9 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Build kuiperd daemon
+        run: cargo build -p kuiperd
+
       - name: Workspace Tests
         run: cargo test --workspace
 
