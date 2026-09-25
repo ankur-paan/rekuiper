@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.501.0-beta] - 2026-09-25
+
+### Added
+- Atomic multi-operation storage transactions (`KvOperation`, `apply_transaction`) for `SqliteKvStore` ensuring ACID atomicity for multi-key updates.
+- Serde aliases for MQTT connection configuration keys (`clientId`, `cleanSession`, `protocolVersion`, `keepAlive`).
+- Bounded in-flight record tracking in the reliability qualification harness, rejecting any unaccounted record loss during process crashes.
+
+### Fixed
+- Fixed connection configuration rollback handling: storage write/delete errors now rollback atomically in a single transaction, and storage read failures reliably propagate HTTP 500 without leaving inconsistent state.
+- Fixed stream data ingestion endpoint to return HTTP 200 when no subscribers are active or all rules have been deleted, strictly adhering to eKuiper drop-in semantics.
+- Resolved asynchronous mutex contention in the reliability qualification harness.
+
+### Verified
+- Re-certified the full 20-step IIoT MQTT benchmark suite (Workloads W1–W5 across 5k, 20k, 50k, and 100k msg/s) with 0.00% packet loss and verified exact sink output.
+- Measured improved CPU efficiency (up to 22.2% reduction in core utilization) with zero regressions across all workloads.
+
 ## [0.500.0-beta] - 2026-09-21
 
 ### Added

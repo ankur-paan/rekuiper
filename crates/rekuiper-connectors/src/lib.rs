@@ -322,7 +322,7 @@ fn parse_ldjson(content: &str) -> Result<Vec<StreamRecord>> {
 /// `server` and `topic` both default: source `CONF_KEY` entries typically
 /// carry only connection parameters (no topic), and must still deserialize
 /// so the stored broker URL is honored instead of silently falling back.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MqttConfig {
     /// Broker URL, e.g. `tcp://127.0.0.1:1883`.
@@ -333,7 +333,7 @@ pub struct MqttConfig {
     pub topic: String,
     /// Client id (`clientid` in eKuiper source configs, `clientId` in
     /// action JSON). Generated when absent.
-    #[serde(default, alias = "clientid")]
+    #[serde(default, alias = "clientid", alias = "clientId")]
     pub client_id: Option<String>,
     /// MQTT QoS level (0, 1 or 2). Defaults to 0.
     #[serde(default)]
@@ -346,15 +346,41 @@ pub struct MqttConfig {
     pub password: Option<String>,
     /// eKuiper `protocolVersion` (`3.1` / `3.1.1`). Both are served by the
     /// MQTT 3.1.1 wire protocol, which brokers accept for 3.1 clients.
-    #[serde(default)]
+    #[serde(default, alias = "protocolVersion")]
     pub protocol_version: Option<String>,
     /// Clean-session flag (default `true`). `false` with a fixed client id
     /// lets the broker queue QoS 1/2 messages while a vehicle is offline.
-    #[serde(default)]
+    #[serde(default, alias = "cleanSession")]
     pub clean_session: Option<bool>,
     /// Keep-alive interval in seconds (default 30).
-    #[serde(default)]
+    #[serde(default, alias = "keepAlive")]
     pub keep_alive: Option<u64>,
+    /// Root CA certificate file path.
+    #[serde(default, alias = "rootCaPath")]
+    pub root_ca_path: Option<String>,
+    /// Root CA certificate PEM content (raw string or base64).
+    #[serde(default, alias = "rootCaRaw", alias = "root_ca_raw")]
+    pub root_ca_raw: Option<String>,
+    /// Client certificate file path for mutual TLS (mTLS).
+    #[serde(default, alias = "certificationPath", alias = "certPath")]
+    pub certification_path: Option<String>,
+    /// Client certificate PEM content (raw string or base64).
+    #[serde(
+        default,
+        alias = "certificationRaw",
+        alias = "certficationRaw",
+        alias = "certRaw"
+    )]
+    pub certification_raw: Option<String>,
+    /// Client private key file path for mutual TLS (mTLS).
+    #[serde(default, alias = "privateKeyPath", alias = "keyPath")]
+    pub private_key_path: Option<String>,
+    /// Client private key PEM content (raw string or base64).
+    #[serde(default, alias = "privateKeyRaw", alias = "keyRaw")]
+    pub private_key_raw: Option<String>,
+    /// Skip server certificate and hostname verification (insecure, for testing).
+    #[serde(default, alias = "insecureSkipVerify")]
+    pub insecure_skip_verify: bool,
     /// Source payload decoding (stream `FORMAT`); set by the stream resolver.
     #[serde(skip)]
     pub format: PayloadFormat,
@@ -362,6 +388,65 @@ pub struct MqttConfig {
     /// rule calls `meta()`/`mqtt()`, so other rules skip the allocation.
     #[serde(skip)]
     pub attach_meta: bool,
+}
+
+impl std::fmt::Debug for MqttConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MqttConfig")
+            .field("server", &self.server)
+            .field("topic", &self.topic)
+            .field("client_id", &self.client_id)
+            .field("qos", &self.qos)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "******"))
+            .field("protocol_version", &self.protocol_version)
+            .field("clean_session", &self.clean_session)
+            .field("keep_alive", &self.keep_alive)
+            .field("root_ca_path", &self.root_ca_path)
+            .field(
+                "root_ca_raw",
+                &self.root_ca_raw.as_ref().map(|_| "<redacted>"),
+            )
+            .field("certification_path", &self.certification_path)
+            .field(
+                "certification_raw",
+                &self.certification_raw.as_ref().map(|_| "<redacted>"),
+            )
+            .field("private_key_path", &self.private_key_path)
+            .field(
+                "private_key_raw",
+                &self.private_key_raw.as_ref().map(|_| "******"),
+            )
+            .field("insecure_skip_verify", &self.insecure_skip_verify)
+            .field("format", &self.format)
+            .field("attach_meta", &self.attach_meta)
+            .finish()
+    }
+}
+
+impl Default for MqttConfig {
+    fn default() -> Self {
+        Self {
+            server: default_mqtt_server(),
+            topic: String::new(),
+            client_id: None,
+            qos: 0,
+            username: None,
+            password: None,
+            protocol_version: None,
+            clean_session: None,
+            keep_alive: None,
+            root_ca_path: None,
+            root_ca_raw: None,
+            certification_path: None,
+            certification_raw: None,
+            private_key_path: None,
+            private_key_raw: None,
+            insecure_skip_verify: false,
+            format: PayloadFormat::Json,
+            attach_meta: false,
+        }
+    }
 }
 
 /// Largest MQTT packet accepted or sent (rumqttc defaults to 10 KiB, which
@@ -434,8 +519,14 @@ fn generate_client_id() -> String {
 ///
 /// Accepts forms like `tcp://127.0.0.1:1883`, `127.0.0.1:1883`,
 /// `ssl://broker.emqx.io:8883` or a bare hostname. The port defaults to
-/// 1883, or 8883 for `ssl`/`tls`/`tcps` schemes.
+/// 1883, or 8883 for `ssl`/`tls`/`tcps`/`mqtts` schemes.
 pub fn parse_mqtt_server_url(server: &str) -> Result<(String, u16)> {
+    let (_scheme, host, port) = parse_mqtt_server_url_ext(server)?;
+    Ok((host, port))
+}
+
+/// Extract `(scheme, host, port)` from an MQTT server URL.
+pub fn parse_mqtt_server_url_ext(server: &str) -> Result<(String, String, u16)> {
     let s = server.trim();
     if s.is_empty() {
         bail!("MQTT server URL is empty");
@@ -453,7 +544,7 @@ pub fn parse_mqtt_server_url(server: &str) -> Result<(String, u16)> {
         bail!("MQTT server URL {:?} has no host", server);
     }
     let default_port: u16 = match scheme.as_str() {
-        "ssl" | "tls" | "tcps" => 8883,
+        "ssl" | "tls" | "tcps" | "mqtts" => 8883,
         _ => 1883,
     };
     // Split host and port on the last ':' when the suffix is numeric.
@@ -473,11 +564,245 @@ pub fn parse_mqtt_server_url(server: &str) -> Result<(String, u16)> {
     if host.is_empty() {
         bail!("MQTT server URL {:?} has no host", server);
     }
-    Ok((host, port))
+    Ok((scheme, host, port))
+}
+
+pub fn is_secure_mqtt_scheme(scheme: &str) -> bool {
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "ssl" | "tls" | "tcps" | "mqtts"
+    )
+}
+
+pub fn is_tls_required(config: &MqttConfig, scheme: &str) -> bool {
+    is_secure_mqtt_scheme(scheme)
+        || config.root_ca_path.is_some()
+        || config.root_ca_raw.is_some()
+        || config.certification_path.is_some()
+        || config.certification_raw.is_some()
+        || config.private_key_path.is_some()
+        || config.private_key_raw.is_some()
+        || config.insecure_skip_verify
+}
+
+fn load_pem_bytes(raw: Option<&str>, path: Option<&str>, kind: &str) -> Result<Option<Vec<u8>>> {
+    if let Some(p) = path.filter(|s| !s.trim().is_empty()) {
+        let path = Path::new(p.trim());
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("Failed to read MQTT {} file at {:?}", kind, path))?;
+        if bytes.is_empty() {
+            bail!("MQTT {} file at {:?} is empty", kind, path);
+        }
+        return Ok(Some(bytes));
+    }
+    if let Some(r) = raw.filter(|s| !s.trim().is_empty()) {
+        let r_trimmed = r.trim();
+        if !r_trimmed.starts_with("-----BEGIN ") {
+            use base64::Engine as _;
+            if let Ok(decoded) =
+                base64::engine::general_purpose::STANDARD.decode(r_trimmed.as_bytes())
+            {
+                return Ok(Some(decoded));
+            }
+        }
+        return Ok(Some(r_trimmed.as_bytes().to_vec()));
+    }
+    Ok(None)
+}
+
+fn parse_client_cert_and_key(
+    cert_bytes: &[u8],
+    key_bytes: &[u8],
+) -> Result<(
+    Vec<rumqttc::tokio_rustls::rustls::pki_types::CertificateDer<'static>>,
+    rumqttc::tokio_rustls::rustls::pki_types::PrivateKeyDer<'static>,
+)> {
+    let certs: Vec<_> = rustls_pemfile::certs(&mut std::io::Cursor::new(cert_bytes))
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to parse client certificate PEM")?;
+    if certs.is_empty() {
+        bail!("No valid client certificate found in PEM data");
+    }
+
+    let mut cursor = std::io::Cursor::new(key_bytes);
+    let key = loop {
+        match rustls_pemfile::read_one(&mut cursor).context("Failed to read private key PEM")? {
+            Some(rustls_pemfile::Item::Sec1Key(k)) => break k.into(),
+            Some(rustls_pemfile::Item::Pkcs1Key(k)) => break k.into(),
+            Some(rustls_pemfile::Item::Pkcs8Key(k)) => break k.into(),
+            None => {
+                bail!("No valid private key found in PEM data (supported formats: SEC1, PKCS#1, PKCS#8)")
+            }
+            _ => {}
+        }
+    };
+
+    Ok((certs, key))
+}
+
+fn build_root_cert_store(
+    ca_bytes: Option<&[u8]>,
+) -> Result<rumqttc::tokio_rustls::rustls::RootCertStore> {
+    let mut root_store = rumqttc::tokio_rustls::rustls::RootCertStore::empty();
+    if let Some(ca) = ca_bytes {
+        let certs: Vec<_> = rustls_pemfile::certs(&mut std::io::Cursor::new(ca))
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse root CA PEM")?;
+        if certs.is_empty() {
+            bail!("No valid CA certificate found in root CA configuration");
+        }
+        for cert in certs {
+            root_store
+                .add(cert)
+                .context("Failed to add CA certificate to root store")?;
+        }
+    } else {
+        let mut loaded = 0;
+        if let Ok(certs) = rustls_native_certs::load_native_certs() {
+            for cert in certs {
+                if root_store.add(cert).is_ok() {
+                    loaded += 1;
+                }
+            }
+        }
+        if loaded == 0 {
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
+    }
+    Ok(root_store)
+}
+
+#[derive(Debug)]
+struct NoVerifyServerCert;
+
+impl rumqttc::tokio_rustls::rustls::client::danger::ServerCertVerifier for NoVerifyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rumqttc::tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rumqttc::tokio_rustls::rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rumqttc::tokio_rustls::rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rumqttc::tokio_rustls::rustls::pki_types::UnixTime,
+    ) -> Result<
+        rumqttc::tokio_rustls::rustls::client::danger::ServerCertVerified,
+        rumqttc::tokio_rustls::rustls::Error,
+    > {
+        Ok(rumqttc::tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rumqttc::tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _dss: &rumqttc::tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> Result<
+        rumqttc::tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        rumqttc::tokio_rustls::rustls::Error,
+    > {
+        Ok(rumqttc::tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rumqttc::tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _dss: &rumqttc::tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> Result<
+        rumqttc::tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        rumqttc::tokio_rustls::rustls::Error,
+    > {
+        Ok(rumqttc::tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rumqttc::tokio_rustls::rustls::SignatureScheme> {
+        vec![
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::ED25519,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PSS_SHA256,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PSS_SHA384,
+            rumqttc::tokio_rustls::rustls::SignatureScheme::RSA_PSS_SHA512,
+        ]
+    }
+}
+
+pub fn build_tls_configuration(config: &MqttConfig) -> Result<rumqttc::TlsConfiguration> {
+    let ca_bytes = load_pem_bytes(
+        config.root_ca_raw.as_deref(),
+        config.root_ca_path.as_deref(),
+        "root CA certificate",
+    )?;
+
+    let client_cert_bytes = load_pem_bytes(
+        config.certification_raw.as_deref(),
+        config.certification_path.as_deref(),
+        "client certificate",
+    )?;
+    let client_key_bytes = load_pem_bytes(
+        config.private_key_raw.as_deref(),
+        config.private_key_path.as_deref(),
+        "client private key",
+    )?;
+
+    match (&client_cert_bytes, &client_key_bytes) {
+        (Some(_), None) => {
+            bail!("Client certificate was configured for MQTT, but client private key is missing (set privateKeyPath or privateKeyRaw)");
+        }
+        (None, Some(_)) => {
+            bail!("Client private key was configured for MQTT, but client certificate is missing (set certificationPath or certificationRaw)");
+        }
+        _ => {}
+    }
+
+    let client_auth = match (client_cert_bytes.as_deref(), client_key_bytes.as_deref()) {
+        (Some(c), Some(k)) => Some(parse_client_cert_and_key(c, k)?),
+        _ => None,
+    };
+
+    if config.insecure_skip_verify {
+        let builder = rumqttc::tokio_rustls::rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerifyServerCert));
+        let client_config = match client_auth {
+            Some((certs, key)) => builder.with_client_auth_cert(certs, key).context(
+                "Failed to configure client certificate authentication with insecure verifier",
+            )?,
+            None => builder.with_no_client_auth(),
+        };
+        Ok(rumqttc::TlsConfiguration::Rustls(Arc::new(client_config)))
+    } else {
+        let root_store = build_root_cert_store(ca_bytes.as_deref())?;
+        let builder = rumqttc::tokio_rustls::rustls::ClientConfig::builder()
+            .with_root_certificates(root_store);
+        let client_config = match client_auth {
+            Some((certs, key)) => builder
+                .with_client_auth_cert(certs, key)
+                .context("Failed to configure client certificate authentication")?,
+            None => builder.with_no_client_auth(),
+        };
+        Ok(rumqttc::TlsConfiguration::Rustls(Arc::new(client_config)))
+    }
 }
 
 fn mqtt_options(config: &MqttConfig) -> Result<MqttOptions> {
-    let (host, port) = parse_mqtt_server_url(&config.server)?;
+    let (scheme, host, port) = parse_mqtt_server_url_ext(&config.server)?;
+    if !scheme.is_empty()
+        && !matches!(
+            scheme.as_str(),
+            "tcp" | "mqtt" | "ssl" | "tls" | "tcps" | "mqtts"
+        )
+    {
+        bail!(
+            "Unsupported MQTT scheme {:?} in server URL {:?}",
+            scheme,
+            config.server
+        );
+    }
+
     let mut opts = MqttOptions::new(config.effective_client_id(), host, port);
     opts.set_keep_alive(std::time::Duration::from_secs(
         config.keep_alive.unwrap_or(30).max(5),
@@ -499,6 +824,14 @@ fn mqtt_options(config: &MqttConfig) -> Result<MqttOptions> {
     } else if let Some(u) = config.username.clone() {
         opts.set_credentials(u, String::new());
     }
+
+    if is_tls_required(config, &scheme) {
+        let tls_cfg = build_tls_configuration(config)?;
+        opts.set_transport(rumqttc::Transport::Tls(tls_cfg));
+    } else {
+        opts.set_transport(rumqttc::Transport::Tcp);
+    }
+
     Ok(opts)
 }
 

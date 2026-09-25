@@ -25,6 +25,7 @@ The action is used for publish output message into an MQTT server.
 | connectionSelector   | true     | reuse the connection to mqtt broker. [more info](../../sources/builtin/mqtt.md#connectionselector)                                                                                                                                                                                                                                                        |
 
 Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+For detailed TLS and mTLS setup, certificate formats, and secret handling, refer to the [Secure MQTT with TLS Guide](../../connectors/mqtt_tls.md).
 
 Below is sample configuration for connecting to Azure IoT Hub by using SAS authentication.
 

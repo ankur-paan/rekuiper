@@ -2,11 +2,11 @@
   "tool": "mqttgen 0.1.0 std-only QoS0",
   "host": "127.0.0.1", "port": 11883, "topic": "bench/esphome/{dev}/sensor/temperature/state", "mode": "esphome",
   "nominal_rate": 100000, "secs": 30, "conns": 8, "devices": 10000, "tag": "REK1W3R100000",
-  "clock_start_epoch_ms": 1790025204972,
+  "clock_start_epoch_ms": 1790350263445,
   "nominal_messages": 3000000, "sent_messages": 3000000,
-  "actual_rate_over_schedule": 100000.0, "send_window_s": 30.001, "wall_s": 30.001,
-  "per_sec_sent": [99977, 99996, 99998, 99976, 100037, 99974, 99999, 100013, 100009, 99983, 100000, 100013, 99987, 100010, 99997, 100015, 100002, 99987, 100003, 99988, 100027, 99975, 100015, 99991, 99996, 100010, 99877, 100108, 99998, 100005, 34],
-  "per_sec_core_min": 99877, "per_sec_core_max": 100108,
+  "actual_rate_over_schedule": 100000.0, "send_window_s": 30.000, "wall_s": 30.001,
+  "per_sec_sent": [99972, 99991, 100015, 99986, 100020, 99970, 100013, 100016, 100007, 99988, 99994, 100012, 99994, 99972, 100014, 100001, 100009, 99990, 100020, 99993, 99991, 100020, 99990, 99979, 100012, 100000, 100022, 99989, 99980, 99997, 43],
+  "per_sec_core_min": 99970, "per_sec_core_max": 100022,
   "on_schedule": true,
   "errors": []
 }

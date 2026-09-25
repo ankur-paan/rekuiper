@@ -1,3 +1,20 @@
+# Release Notes - rekuiper v0.501-beta
+
+`rekuiper` v0.501-beta delivers transactional storage guarantees, strict configuration consistency, and process-level crash qualification.
+
+Key highlights:
+- **Atomic Multi-Operation Transactions**: `SqliteKvStore` implements atomic multi-operation batch mutations (`KvOperation`, `apply_transaction`) under transactional rollback to ensure catalog and configuration integrity even under abrupt failure.
+- **Strict Configuration Consistency**: Configuration key mutations operate under atomic transaction guarantees, and configuration read errors reliably propagate HTTP 500 without leaving inconsistent memory state.
+- **Reliability Qualification**: Includes the verified process-level qualification test harness with bounded in-flight message accounting, engine crash simulation, and immediate recovery verification.
+- **eKuiper Parity**: Ingestion endpoints seamlessly return HTTP 200 when no active subscribers are attached to a stream, preserving exact drop-in compatibility.
+- **Re-Certified Performance**: Re-verified the full 20-step IIoT MQTT ladder (W1–W5 across 5k–100k msg/s) with 0.00% packet loss and up to 22.2% reduction in CPU utilization.
+
+- Reliability documentation: [`docs/en_US/reliability/qualification_and_scope.md`](docs/en_US/reliability/qualification_and_scope.md)
+- Docker image: `ankurkrp/rekuiper:0.501-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.501-beta`)
+
+---
+
 # Release Notes - rekuiper v0.500-beta
 
 `rekuiper` v0.500-beta introduces an in-memory Redis-style catalog and zero-disk

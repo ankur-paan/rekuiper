@@ -8,12 +8,14 @@ use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
 #[derive(Clone, Default)]
 pub struct StreamManager {
     streams: Arc<RwLock<HashMap<String, StreamDefinition>>>,
     kv: Option<Arc<dyn KvStore>>,
+    op_lock: Arc<AsyncMutex<()>>,
 }
 
 impl StreamManager {
@@ -25,38 +27,49 @@ impl StreamManager {
         Self {
             streams: Arc::new(RwLock::new(HashMap::new())),
             kv: Some(kv),
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
-    async fn persist(&self, namespace: &str, key: &str, val: &str) {
+    async fn persist(&self, namespace: &str, key: &str, val: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.set(namespace, key, val).await {
-                tracing::warn!("KV persist {}/{} failed: {}", namespace, key, e);
-            }
+            kv.set(namespace, key, val).await?;
         }
+        Ok(())
     }
 
-    async fn unpersist(&self, namespace: &str, key: &str) {
+    async fn unpersist(&self, namespace: &str, key: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.delete(namespace, key).await {
-                tracing::warn!("KV delete {}/{} failed: {}", namespace, key, e);
-            }
+            kv.delete(namespace, key).await?;
         }
+        Ok(())
     }
 
     pub async fn create_stream(&self, def: StreamDefinition) -> Result<()> {
-        let (name, snapshot) = {
-            let mut map = self.streams.write();
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.streams.read();
             if map.contains_key(&def.name) {
                 bail!("Stream {} already exists", def.name);
             }
-            map.insert(def.name.clone(), def.clone());
-            (
-                def.name.clone(),
-                serde_json::to_string(&def).unwrap_or_default(),
-            )
-        };
-        self.persist("streams", &name, &snapshot).await;
+        }
+        let snapshot = serde_json::to_string(&def)?;
+        self.persist("streams", &def.name, &snapshot).await?;
+        self.streams.write().insert(def.name.clone(), def);
+        Ok(())
+    }
+
+    pub async fn update_stream(&self, def: StreamDefinition) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.streams.read();
+            if !map.contains_key(&def.name) {
+                bail!("Stream {} not found", def.name);
+            }
+        }
+        let snapshot = serde_json::to_string(&def)?;
+        self.persist("streams", &def.name, &snapshot).await?;
+        self.streams.write().insert(def.name.clone(), def);
         Ok(())
     }
 
@@ -69,13 +82,15 @@ impl StreamManager {
     }
 
     pub async fn delete_stream(&self, name: &str) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
         {
-            let mut map = self.streams.write();
-            if map.remove(name).is_none() {
+            let map = self.streams.read();
+            if !map.contains_key(name) {
                 bail!("Stream {} not found", name);
             }
         }
-        self.unpersist("streams", name).await;
+        self.unpersist("streams", name).await?;
+        self.streams.write().remove(name);
         Ok(())
     }
 
@@ -103,6 +118,7 @@ pub struct TableManager {
     tables: Arc<RwLock<HashMap<String, TableDefinition>>>,
     rows: Arc<RwLock<HashMap<String, Vec<TableRow>>>>,
     kv: Option<Arc<dyn KvStore>>,
+    op_lock: Arc<AsyncMutex<()>>,
 }
 
 impl TableManager {
@@ -115,23 +131,22 @@ impl TableManager {
             tables: Arc::new(RwLock::new(HashMap::new())),
             rows: Arc::new(RwLock::new(HashMap::new())),
             kv: Some(kv),
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
-    async fn persist(&self, namespace: &str, key: &str, val: &str) {
+    async fn persist(&self, namespace: &str, key: &str, val: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.set(namespace, key, val).await {
-                tracing::warn!("KV persist {}/{} failed: {}", namespace, key, e);
-            }
+            kv.set(namespace, key, val).await?;
         }
+        Ok(())
     }
 
-    async fn unpersist(&self, namespace: &str, key: &str) {
+    async fn unpersist(&self, namespace: &str, key: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.delete(namespace, key).await {
-                tracing::warn!("KV delete {}/{} failed: {}", namespace, key, e);
-            }
+            kv.delete(namespace, key).await?;
         }
+        Ok(())
     }
 
     /// Appends a lookup row to a table (creates the row list on demand,
@@ -150,18 +165,30 @@ impl TableManager {
     }
 
     pub async fn create_table(&self, def: TableDefinition) -> Result<()> {
-        let (name, snapshot) = {
-            let mut map = self.tables.write();
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.tables.read();
             if map.contains_key(&def.name) {
                 bail!("Table {} already exists", def.name);
             }
-            map.insert(def.name.clone(), def.clone());
-            (
-                def.name.clone(),
-                serde_json::to_string(&def).unwrap_or_default(),
-            )
-        };
-        self.persist("tables", &name, &snapshot).await;
+        }
+        let snapshot = serde_json::to_string(&def)?;
+        self.persist("tables", &def.name, &snapshot).await?;
+        self.tables.write().insert(def.name.clone(), def);
+        Ok(())
+    }
+
+    pub async fn update_table(&self, def: TableDefinition) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.tables.read();
+            if !map.contains_key(&def.name) {
+                bail!("Table {} not found", def.name);
+            }
+        }
+        let snapshot = serde_json::to_string(&def)?;
+        self.persist("tables", &def.name, &snapshot).await?;
+        self.tables.write().insert(def.name.clone(), def);
         Ok(())
     }
 
@@ -178,13 +205,16 @@ impl TableManager {
     }
 
     pub async fn delete_table(&self, name: &str) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
         {
-            let mut map = self.tables.write();
-            if map.remove(name).is_none() {
+            let map = self.tables.read();
+            if !map.contains_key(name) {
                 bail!("Table {} not found", name);
             }
         }
-        self.unpersist("tables", name).await;
+        self.unpersist("tables", name).await?;
+        self.tables.write().remove(name);
+        self.rows.write().remove(name);
         Ok(())
     }
 
@@ -210,6 +240,7 @@ impl TableManager {
 pub struct SchemaManager {
     schemas: Arc<RwLock<HashMap<String, SchemaDefinition>>>,
     kv: Option<Arc<dyn KvStore>>,
+    op_lock: Arc<AsyncMutex<()>>,
 }
 
 impl SchemaManager {
@@ -221,6 +252,7 @@ impl SchemaManager {
         Self {
             schemas: Arc::new(RwLock::new(HashMap::new())),
             kv: Some(kv),
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
@@ -229,14 +261,13 @@ impl SchemaManager {
     }
 
     pub async fn register_schema(&self, def: SchemaDefinition) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
         let key = Self::storage_key(&def.kind, &def.name);
-        let snapshot = serde_json::to_string(&def).unwrap_or_default();
-        self.schemas.write().insert(key.clone(), def);
+        let snapshot = serde_json::to_string(&def)?;
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.set("schemas", &key, &snapshot).await {
-                tracing::warn!("KV persist schemas/{} failed: {}", key, e);
-            }
+            kv.set("schemas", &key, &snapshot).await?;
         }
+        self.schemas.write().insert(key, def);
         Ok(())
     }
 
@@ -261,15 +292,18 @@ impl SchemaManager {
     }
 
     pub async fn delete_schema(&self, kind: &str, name: &str) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
         let key = Self::storage_key(kind, name);
-        if self.schemas.write().remove(&key).is_none() {
-            bail!("Schema {}/{} not found", kind, name);
-        }
-        if let Some(kv) = &self.kv {
-            if let Err(e) = kv.delete("schemas", &key).await {
-                tracing::warn!("KV delete schemas/{} failed: {}", key, e);
+        {
+            let map = self.schemas.read();
+            if !map.contains_key(&key) {
+                bail!("Schema {}/{} not found", kind, name);
             }
         }
+        if let Some(kv) = &self.kv {
+            kv.delete("schemas", &key).await?;
+        }
+        self.schemas.write().remove(&key);
         Ok(())
     }
 
@@ -429,6 +463,7 @@ pub struct RuleManager {
     rules: Arc<RwLock<HashMap<String, Arc<RwLock<ActiveRule>>>>>,
     pub stream_bus: StreamBus,
     kv: Option<Arc<dyn KvStore>>,
+    op_lock: Arc<AsyncMutex<()>>,
 }
 
 /// Persisted rule envelope: the definition plus the last known lifecycle
@@ -445,6 +480,7 @@ impl RuleManager {
             rules: Arc::new(RwLock::new(HashMap::new())),
             stream_bus,
             kv: None,
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
@@ -453,52 +489,51 @@ impl RuleManager {
             rules: Arc::new(RwLock::new(HashMap::new())),
             stream_bus,
             kv: Some(kv),
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
-    async fn persist_rule(&self, id: &str, def: &RuleDefinition, status: &str) {
+    async fn persist_rule(&self, id: &str, def: &RuleDefinition, status: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
             let envelope = serde_json::json!({ "def": def, "status": status }).to_string();
-            if let Err(e) = kv.set("rules", id, &envelope).await {
-                tracing::warn!("KV persist rules/{} failed: {}", id, e);
-            }
+            kv.set("rules", id, &envelope).await?;
         }
+        Ok(())
     }
 
-    async fn unpersist_rule(&self, id: &str) {
+    async fn unpersist_rule(&self, id: &str) -> Result<()> {
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.delete("rules", id).await {
-                tracing::warn!("KV delete rules/{} failed: {}", id, e);
-            }
+            kv.delete("rules", id).await?;
         }
+        Ok(())
     }
 
     pub async fn create_rule(&self, def: RuleDefinition) -> Result<()> {
-        let snapshot = def.clone();
+        let _guard = self.op_lock.lock().await;
         {
-            let mut map = self.rules.write();
+            let map = self.rules.read();
             if map.contains_key(&def.id) {
                 bail!("Rule {} already exists", def.id);
             }
-
-            let rule_id = def.id.clone();
-            let active = ActiveRule {
-                def,
-                status: Arc::new(RwLock::new(RuleStatus {
-                    status: "running".to_string(),
-                    message: "".to_string(),
-                    source_records_in_total: 0,
-                    sink_records_out_total: 0,
-                    exceptions_total: 0,
-                    ..RuleStatus::default()
-                })),
-                handle: None,
-                counters: Arc::new(RuleCounters::default()),
-            };
-
-            map.insert(rule_id, Arc::new(RwLock::new(active)));
         }
-        self.persist_rule(&snapshot.id, &snapshot, "running").await;
+        self.persist_rule(&def.id, &def, "running").await?;
+        let rule_id = def.id.clone();
+        let active = ActiveRule {
+            def,
+            status: Arc::new(RwLock::new(RuleStatus {
+                status: "running".to_string(),
+                message: "".to_string(),
+                source_records_in_total: 0,
+                sink_records_out_total: 0,
+                exceptions_total: 0,
+                ..RuleStatus::default()
+            })),
+            handle: None,
+            counters: Arc::new(RuleCounters::default()),
+        };
+        self.rules
+            .write()
+            .insert(rule_id, Arc::new(RwLock::new(active)));
         Ok(())
     }
 
@@ -506,25 +541,60 @@ impl RuleManager {
         self.rules.read().get(id).map(|r| r.read().def.clone())
     }
 
+    pub async fn update_rule(&self, def: RuleDefinition) -> Result<bool> {
+        let _guard = self.op_lock.lock().await;
+        let rule_arc = {
+            let map = self.rules.read();
+            map.get(&def.id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", def.id))?
+        };
+        let was_running = {
+            let active = rule_arc.read();
+            let is_running = active.status.read().status == "running";
+            is_running
+        };
+        let status_str = if was_running { "running" } else { "stopped" };
+        self.persist_rule(&def.id, &def, status_str).await?;
+        {
+            let mut active = rule_arc.write();
+            active.def = def;
+            if was_running {
+                if let Some(old) = active.handle.take() {
+                    old.abort();
+                }
+            }
+        }
+        Ok(was_running)
+    }
+
     pub async fn update_rule_tags<F>(&self, id: &str, update_fn: F) -> Result<Vec<String>>
     where
         F: FnOnce(&mut Vec<String>),
     {
-        let (snapshot, status_str) = {
+        let _guard = self.op_lock.lock().await;
+        let rule_arc = {
             let map = self.rules.read();
-            let rule = map
-                .get(id)
-                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
-            let mut active = rule.write();
-            update_fn(&mut active.def.tags);
-            active.def.tags.sort();
-            active.def.tags.dedup();
+            map.get(id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?
+        };
+        let (mut def, status_str) = {
+            let active = rule_arc.read();
             let status = active.status.read().status.clone();
             (active.def.clone(), status)
         };
-        self.persist_rule(&snapshot.id, &snapshot, &status_str)
-            .await;
-        Ok(snapshot.tags)
+        update_fn(&mut def.tags);
+        def.tags.sort();
+        def.tags.dedup();
+        self.persist_rule(id, &def, &status_str).await?;
+        {
+            let map = self.rules.read();
+            if let Some(rule) = map.get(id) {
+                rule.write().def.tags = def.tags.clone();
+            }
+        }
+        Ok(def.tags)
     }
 
     pub fn list_rules(&self) -> Vec<RuleDefinition> {
@@ -602,6 +672,11 @@ impl RuleManager {
         let map = self.rules.read();
         if let Some(rule) = map.get(id) {
             let mut active = rule.write();
+            if active.status.read().status != "running" {
+                handle.abort();
+                active.handle = None;
+                return;
+            }
             if let Some(old) = active.handle.replace(handle) {
                 old.abort();
             }
@@ -611,45 +686,76 @@ impl RuleManager {
     }
 
     pub async fn start_rule(&self, id: &str) -> Result<()> {
-        let snapshot = {
+        let _guard = self.op_lock.lock().await;
+        let rule_arc = {
             let map = self.rules.read();
-            let rule_arc = map
-                .get(id)
-                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
-            let rule = rule_arc.write();
-            rule.status.write().status = "running".to_string();
-            rule.def.clone()
+            map.get(id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?
         };
-        self.persist_rule(id, &snapshot, "running").await;
+        let snapshot = rule_arc.read().def.clone();
+        self.persist_rule(id, &snapshot, "running").await?;
+        {
+            if let Some(rule_arc) = self.rules.read().get(id) {
+                rule_arc.read().status.write().status = "running".to_string();
+            }
+        }
         Ok(())
     }
 
     pub async fn stop_rule(&self, id: &str) -> Result<()> {
-        let snapshot = {
+        let _guard = self.op_lock.lock().await;
+        let rule_arc = {
             let map = self.rules.read();
-            let rule_arc = map
-                .get(id)
-                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?;
+            map.get(id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?
+        };
+        let snapshot = rule_arc.read().def.clone();
+        self.persist_rule(id, &snapshot, "stopped").await?;
+        {
+            if let Some(rule_arc) = self.rules.read().get(id) {
+                let mut rule = rule_arc.write();
+                if let Some(handle) = rule.handle.take() {
+                    handle.abort();
+                }
+                rule.status.write().status = "stopped".to_string();
+            }
+        }
+        Ok(())
+    }
+
+    /// Atomic restart lifecycle transition: sets and persists the rule as `running`,
+    /// aborting any previous task under the mutation lock.
+    pub async fn restart_rule(&self, id: &str) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
+        let rule_arc = {
+            let map = self.rules.read();
+            map.get(id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Rule {} not found", id))?
+        };
+        let snapshot = rule_arc.read().def.clone();
+        self.persist_rule(id, &snapshot, "running").await?;
+        {
             let mut rule = rule_arc.write();
             if let Some(handle) = rule.handle.take() {
                 handle.abort();
             }
-            rule.status.write().status = "stopped".to_string();
-            rule.def.clone()
-        };
-        self.persist_rule(id, &snapshot, "stopped").await;
-        Ok(())
-    }
-
-    /// Stop-then-start lifecycle transition: aborts any running task and
-    /// leaves the rule `running` (persisted as such).
-    pub async fn restart_rule(&self, id: &str) -> Result<()> {
-        self.stop_rule(id).await?;
-        self.start_rule(id).await?;
+            rule.status.write().status = "running".to_string();
+        }
         Ok(())
     }
 
     pub async fn delete_rule(&self, id: &str) -> Result<()> {
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.rules.read();
+            if !map.contains_key(id) {
+                bail!("Rule {} not found", id);
+            }
+        }
+        self.unpersist_rule(id).await?;
         {
             let mut map = self.rules.write();
             if let Some(rule_arc) = map.remove(id) {
@@ -657,11 +763,8 @@ impl RuleManager {
                 if let Some(handle) = rule.handle.take() {
                     handle.abort();
                 }
-            } else {
-                bail!("Rule {} not found", id);
             }
         }
-        self.unpersist_rule(id).await;
         Ok(())
     }
 

@@ -37,3 +37,5 @@ ring = { workspace = true }
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }
 sqlx = { workspace = true }
+async-trait = { workspace = true }
+rumqttc = { workspace = true }

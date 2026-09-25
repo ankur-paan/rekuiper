@@ -2,11 +2,11 @@
   "tool": "mqttgen 0.1.0 std-only QoS0",
   "host": "127.0.0.1", "port": 11883, "topic": "bench/chargers/{dev}/session", "mode": "json",
   "nominal_rate": 50000, "secs": 30, "conns": 8, "devices": 2000, "tag": "REK1W5R50000",
-  "clock_start_epoch_ms": 1790025654710,
+  "clock_start_epoch_ms": 1790350678189,
   "nominal_messages": 1500000, "sent_messages": 1500000,
-  "actual_rate_over_schedule": 50000.0, "send_window_s": 30.000, "wall_s": 30.001,
-  "per_sec_sent": [49991, 49997, 49998, 50007, 49991, 50013, 49992, 50002, 49997, 49998, 50006, 49995, 50005, 49998, 50001, 49995, 50000, 50002, 50001, 49951, 50040, 50010, 49997, 50002, 50008, 49989, 50000, 50004, 49995, 50001, 14],
-  "per_sec_core_min": 49951, "per_sec_core_max": 50040,
+  "actual_rate_over_schedule": 50000.0, "send_window_s": 30.001, "wall_s": 30.001,
+  "per_sec_sent": [49993, 49989, 50001, 50007, 49993, 50002, 50005, 49989, 50009, 49990, 50011, 50001, 49994, 49992, 50008, 50006, 49992, 50004, 49997, 50009, 50002, 49997, 49996, 50005, 49998, 50002, 49999, 49996, 50005, 49992, 16],
+  "per_sec_core_min": 49989, "per_sec_core_max": 50011,
   "on_schedule": true,
   "errors": []
 }

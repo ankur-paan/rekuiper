@@ -55,6 +55,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         connections: Arc::new(RwLock::new(HashMap::new())),
         source_configs: Arc::new(RwLock::new(HashMap::new())),
         sink_configs: Arc::new(RwLock::new(HashMap::new())),
+        config_op_lock: Arc::new(tokio::sync::Mutex::new(())),
         ruletests: Arc::new(RwLock::new(HashMap::new())),
         source_cancels: Arc::new(RwLock::new(HashMap::new())),
         http_client: reqwest::Client::builder()
@@ -73,7 +74,7 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
     // Restored connection/source/sink configs must precede rule restore so
     // resumed rules resolve their CONF_KEYs (brokers, DB URLs) instead of
     // falling back to loopback defaults with silent zero-delivery.
-    load_config_maps(&state).await;
+    load_config_maps(&state).await?;
     restore_running_rules(&state).await;
 
     // Dedicated ruletest SSE listener serving the documented

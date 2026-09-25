@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
+use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginDefinition {
@@ -40,6 +41,7 @@ pub struct PluginManager {
     plugins: Arc<RwLock<HashMap<String, PluginDefinition>>>,
     handlers: Arc<RwLock<HashMap<String, UdfFn>>>,
     kv: Option<Arc<dyn KvStore>>,
+    op_lock: Arc<AsyncMutex<()>>,
 }
 
 impl PluginManager {
@@ -52,6 +54,7 @@ impl PluginManager {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             kv: Some(kv),
+            op_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 
@@ -59,13 +62,12 @@ impl PluginManager {
         if def.name.trim().is_empty() {
             bail!("Plugin name must not be empty");
         }
-        let snapshot = serde_json::to_string(&def).unwrap_or_default();
-        self.plugins.write().insert(def.name.clone(), def.clone());
+        let _guard = self.op_lock.lock().await;
+        let snapshot = serde_json::to_string(&def)?;
         if let Some(kv) = &self.kv {
-            if let Err(e) = kv.set("plugins", &def.name, &snapshot).await {
-                tracing::warn!("KV persist plugins/{} failed: {}", def.name, e);
-            }
+            kv.set("plugins", &def.name, &snapshot).await?;
         }
+        self.plugins.write().insert(def.name.clone(), def);
         Ok(())
     }
 
@@ -87,14 +89,17 @@ impl PluginManager {
     }
 
     pub async fn delete_plugin(&self, name: &str) -> Result<()> {
-        if self.plugins.write().remove(name).is_none() {
-            bail!("Plugin {} not found", name);
-        }
-        if let Some(kv) = &self.kv {
-            if let Err(e) = kv.delete("plugins", name).await {
-                tracing::warn!("KV delete plugins/{} failed: {}", name, e);
+        let _guard = self.op_lock.lock().await;
+        {
+            let map = self.plugins.read();
+            if !map.contains_key(name) {
+                bail!("Plugin {} not found", name);
             }
         }
+        if let Some(kv) = &self.kv {
+            kv.delete("plugins", name).await?;
+        }
+        self.plugins.write().remove(name);
         Ok(())
     }
 

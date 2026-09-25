@@ -62,6 +62,8 @@ Users can specify the global MQTT configurations here. The configuration items s
 - `rootCARaw`: base64 encoded original text of CA, use `rootCaPath` first if both defined.
 - `insecureSkipVerify`: Controls whether to skip certificate verification. If set to `true`, verification is skipped; otherwise, the certificate is verified.
 
+For comprehensive configuration guides, mTLS examples, and secure secret handling, see the [Secure MQTT with TLS Guide](../../connectors/mqtt_tls.md).
+
 ### **Connection Reusability**
 
 - `connectionSelector`: Specify the stream to reuse the connection to the MQTT broker, for example, `mqtt.localConnection` in the below example.  Note: The connection profile is located in `connections/connection.yaml`. For a detailed explanation of the connection selection, see [Connection Selector](../../connector.md#connection-selector).

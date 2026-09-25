@@ -1,8 +1,11 @@
+use async_trait::async_trait;
 use rekuiper_core::{
-    KvStore, MemKvStore, RuleDefinition, RuleManager, SqliteKvStore, StreamBus, StreamDefinition,
-    StreamField, StreamManager, TableDefinition, TableManager,
+    KvStore, MemKvStore, PluginDefinition, PluginManager, RuleDefinition, RuleManager,
+    SchemaDefinition, SchemaManager, SqliteKvStore, StreamBus, StreamDefinition, StreamField,
+    StreamManager, TableDefinition, TableManager,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 fn temp_db_path(tag: &str) -> std::path::PathBuf {
@@ -150,6 +153,334 @@ async fn test_manager_persistence_and_restart() {
     assert!(streams3.get_stream("demo").is_none());
     assert!(rules3.get_rule("rule_paused").is_none());
     assert!(rules3.get_rule("rule_running").is_some());
+
+    let _ = tokio::fs::remove_file(&path).await;
+}
+
+struct FailingKvStore {
+    inner: MemKvStore,
+    fail_set: AtomicBool,
+    fail_delete: AtomicBool,
+}
+
+impl FailingKvStore {
+    fn new() -> Self {
+        Self {
+            inner: MemKvStore::new(),
+            fail_set: AtomicBool::new(false),
+            fail_delete: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait]
+impl KvStore for FailingKvStore {
+    async fn get(&self, namespace: &str, key: &str) -> anyhow::Result<Option<String>> {
+        self.inner.get(namespace, key).await
+    }
+
+    async fn set(&self, namespace: &str, key: &str, val: &str) -> anyhow::Result<()> {
+        if self.fail_set.load(Ordering::SeqCst) {
+            anyhow::bail!("Injected I/O failure on KV set: {}/{}", namespace, key);
+        }
+        self.inner.set(namespace, key, val).await
+    }
+
+    async fn delete(&self, namespace: &str, key: &str) -> anyhow::Result<()> {
+        if self.fail_delete.load(Ordering::SeqCst) {
+            anyhow::bail!("Injected I/O failure on KV delete: {}/{}", namespace, key);
+        }
+        self.inner.delete(namespace, key).await
+    }
+
+    async fn list_all(&self, namespace: &str) -> anyhow::Result<Vec<(String, String)>> {
+        self.inner.list_all(namespace).await
+    }
+}
+
+#[tokio::test]
+async fn test_stream_persistence_failure_injection() {
+    let failing_kv = Arc::new(FailingKvStore::new());
+    let kv_trait: Arc<dyn KvStore> = failing_kv.clone();
+    let streams = StreamManager::new_with_kv(kv_trait.clone());
+
+    // 1. Injected write failure during create
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    let create_err = streams.create_stream(stream_def("s_fail")).await;
+    assert!(
+        create_err.is_err(),
+        "create_stream must fail on KV write error"
+    );
+    assert!(
+        streams.get_stream("s_fail").is_none(),
+        "stream must not exist in memory after failed create"
+    );
+    assert!(!streams.list_streams().contains(&"s_fail".to_string()));
+
+    // Verify KV is also empty
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    let streams_reload = StreamManager::new_with_kv(kv_trait.clone());
+    streams_reload.load_from_kv(&kv_trait).await.unwrap();
+    assert!(streams_reload.get_stream("s_fail").is_none());
+
+    // 2. Successful create
+    streams.create_stream(stream_def("s_fail")).await.unwrap();
+    assert!(streams.get_stream("s_fail").is_some());
+
+    // 3. Injected write failure during update
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    let mut updated_def = stream_def("s_fail");
+    updated_def.stream_fields.push(StreamField {
+        name: "temp".to_string(),
+        field_type: "float".to_string(),
+    });
+    let update_err = streams.update_stream(updated_def).await;
+    assert!(
+        update_err.is_err(),
+        "update_stream must fail on KV write error"
+    );
+    // Verify memory still holds original definition
+    let current = streams.get_stream("s_fail").unwrap();
+    assert_eq!(
+        current.stream_fields.len(),
+        1,
+        "in-memory definition must not be corrupted by failed update"
+    );
+
+    // 4. Injected failure during delete
+    failing_kv.fail_delete.store(true, Ordering::SeqCst);
+    let delete_err = streams.delete_stream("s_fail").await;
+    assert!(
+        delete_err.is_err(),
+        "delete_stream must fail on KV delete error"
+    );
+    assert!(
+        streams.get_stream("s_fail").is_some(),
+        "stream must remain in memory when delete fails"
+    );
+
+    // 5. Successful delete
+    failing_kv.fail_delete.store(false, Ordering::SeqCst);
+    streams.delete_stream("s_fail").await.unwrap();
+    assert!(streams.get_stream("s_fail").is_none());
+}
+
+#[tokio::test]
+async fn test_table_persistence_failure_injection() {
+    let failing_kv = Arc::new(FailingKvStore::new());
+    let kv_trait: Arc<dyn KvStore> = failing_kv.clone();
+    let tables = TableManager::new_with_kv(kv_trait.clone());
+
+    // Injected create failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(tables.create_table(table_def("t_fail")).await.is_err());
+    assert!(tables.get_table("t_fail").is_none());
+
+    // Successful create
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    tables.create_table(table_def("t_fail")).await.unwrap();
+    assert!(tables.get_table("t_fail").is_some());
+
+    // Injected update failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    let mut updated = table_def("t_fail");
+    updated.sql = "CREATE TABLE t_fail () WITH (FORMAT=\"binary\")".to_string();
+    assert!(tables.update_table(updated).await.is_err());
+    assert_eq!(
+        tables.get_table("t_fail").unwrap().sql,
+        "CREATE TABLE t_fail () WITH (FORMAT=\"json\")"
+    );
+
+    // Injected delete failure
+    failing_kv.fail_delete.store(true, Ordering::SeqCst);
+    assert!(tables.delete_table("t_fail").await.is_err());
+    assert!(tables.get_table("t_fail").is_some());
+
+    // Successful delete
+    failing_kv.fail_delete.store(false, Ordering::SeqCst);
+    tables.delete_table("t_fail").await.unwrap();
+    assert!(tables.get_table("t_fail").is_none());
+}
+
+#[tokio::test]
+async fn test_schema_persistence_failure_injection() {
+    let failing_kv = Arc::new(FailingKvStore::new());
+    let kv_trait: Arc<dyn KvStore> = failing_kv.clone();
+    let schemas = SchemaManager::new_with_kv(kv_trait.clone());
+
+    let def = SchemaDefinition {
+        name: "device".to_string(),
+        kind: "protobuf".to_string(),
+        content: Some("syntax = \"proto3\";".to_string()),
+        file: None,
+    };
+
+    // Injected register failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(schemas.register_schema(def.clone()).await.is_err());
+    assert!(schemas.get_schema("protobuf", "device").is_none());
+
+    // Successful register
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    schemas.register_schema(def).await.unwrap();
+    assert!(schemas.get_schema("protobuf", "device").is_some());
+
+    // Injected delete failure
+    failing_kv.fail_delete.store(true, Ordering::SeqCst);
+    assert!(schemas.delete_schema("protobuf", "device").await.is_err());
+    assert!(schemas.get_schema("protobuf", "device").is_some());
+
+    // Successful delete
+    failing_kv.fail_delete.store(false, Ordering::SeqCst);
+    schemas.delete_schema("protobuf", "device").await.unwrap();
+    assert!(schemas.get_schema("protobuf", "device").is_none());
+}
+
+#[tokio::test]
+async fn test_rule_persistence_failure_injection() {
+    let failing_kv = Arc::new(FailingKvStore::new());
+    let kv_trait: Arc<dyn KvStore> = failing_kv.clone();
+    let bus = StreamBus::new();
+    let rules = RuleManager::new_with_kv(bus, kv_trait.clone());
+
+    let def = rule_def("r_fail");
+
+    // Injected create failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(rules.create_rule(def.clone()).await.is_err());
+    assert!(rules.get_rule("r_fail").is_none());
+
+    // Successful create
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    rules.create_rule(def.clone()).await.unwrap();
+    assert!(rules.get_rule("r_fail").is_some());
+    assert_eq!(rules.get_rule_status("r_fail").unwrap().status, "running");
+
+    // Injected stop failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(rules.stop_rule("r_fail").await.is_err());
+    assert_eq!(
+        rules.get_rule_status("r_fail").unwrap().status,
+        "running",
+        "status must stay running on failed stop"
+    );
+
+    // Successful stop
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    rules.stop_rule("r_fail").await.unwrap();
+    assert_eq!(rules.get_rule_status("r_fail").unwrap().status, "stopped");
+
+    // Injected start failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(rules.start_rule("r_fail").await.is_err());
+    assert_eq!(
+        rules.get_rule_status("r_fail").unwrap().status,
+        "stopped",
+        "status must stay stopped on failed start"
+    );
+
+    // Injected update_rule_tags failure
+    assert!(rules
+        .update_rule_tags("r_fail", |tags| tags.push("sensor".to_string()))
+        .await
+        .is_err());
+    assert!(
+        rules.get_rule("r_fail").unwrap().tags.is_empty(),
+        "tags must not be updated if persist fails"
+    );
+
+    // Successful tag update
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    rules
+        .update_rule_tags("r_fail", |tags| tags.push("sensor".to_string()))
+        .await
+        .unwrap();
+    assert_eq!(
+        rules.get_rule("r_fail").unwrap().tags,
+        vec!["sensor".to_string()]
+    );
+
+    // Injected delete failure
+    failing_kv.fail_delete.store(true, Ordering::SeqCst);
+    assert!(rules.delete_rule("r_fail").await.is_err());
+    assert!(
+        rules.get_rule("r_fail").is_some(),
+        "rule must remain in memory when delete fails"
+    );
+
+    // Successful delete
+    failing_kv.fail_delete.store(false, Ordering::SeqCst);
+    rules.delete_rule("r_fail").await.unwrap();
+    assert!(rules.get_rule("r_fail").is_none());
+}
+
+#[tokio::test]
+async fn test_plugin_persistence_failure_injection() {
+    let failing_kv = Arc::new(FailingKvStore::new());
+    let kv_trait: Arc<dyn KvStore> = failing_kv.clone();
+    let plugins = PluginManager::new_with_kv(kv_trait.clone());
+
+    let def = PluginDefinition {
+        name: "math_udf".to_string(),
+        plugin_type: "function".to_string(),
+        file: None,
+        description: Some("math".to_string()),
+        functions: vec!["sqrt".to_string()],
+    };
+
+    // Injected register failure
+    failing_kv.fail_set.store(true, Ordering::SeqCst);
+    assert!(plugins.register_plugin(def.clone()).await.is_err());
+    assert!(plugins.get_plugin("math_udf").is_none());
+
+    // Successful register
+    failing_kv.fail_set.store(false, Ordering::SeqCst);
+    plugins.register_plugin(def).await.unwrap();
+    assert!(plugins.get_plugin("math_udf").is_some());
+
+    // Injected delete failure
+    failing_kv.fail_delete.store(true, Ordering::SeqCst);
+    assert!(plugins.delete_plugin("math_udf").await.is_err());
+    assert!(plugins.get_plugin("math_udf").is_some());
+
+    // Successful delete
+    failing_kv.fail_delete.store(false, Ordering::SeqCst);
+    plugins.delete_plugin("math_udf").await.unwrap();
+    assert!(plugins.get_plugin("math_udf").is_none());
+}
+
+#[tokio::test]
+async fn test_concurrent_mutations_consistency() {
+    let path = temp_db_path("concurrent");
+    let _ = tokio::fs::remove_file(&path).await;
+    let kv: Arc<dyn KvStore> = Arc::new(SqliteKvStore::new(&path).await.unwrap());
+    let streams = StreamManager::new_with_kv(kv.clone());
+
+    // Spawn 20 tasks attempting to create streams with overlapping names
+    let mut handles = Vec::new();
+    for i in 0..20 {
+        let sm = streams.clone();
+        let name = format!("stream_{}", i % 5);
+        handles.push(tokio::spawn(async move {
+            let _ = sm.create_stream(stream_def(&name)).await;
+        }));
+    }
+    for h in handles {
+        let _ = h.await;
+    }
+
+    // Verify exactly 5 streams exist in memory
+    let in_mem = streams.list_streams();
+    assert_eq!(in_mem.len(), 5);
+
+    // Verify reload from KV store yields exactly the same 5 streams
+    let streams_reload = StreamManager::new_with_kv(kv.clone());
+    streams_reload.load_from_kv(&kv).await.unwrap();
+    let mut reloaded = streams_reload.list_streams();
+    let mut expected = in_mem.clone();
+    reloaded.sort();
+    expected.sort();
+    assert_eq!(reloaded, expected);
 
     let _ = tokio::fs::remove_file(&path).await;
 }

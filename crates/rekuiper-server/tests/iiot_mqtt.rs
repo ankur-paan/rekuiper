@@ -6,7 +6,8 @@
 //! `REKUIPER_TEST_MQTT=tcp://127.0.0.1:11883 cargo test -p rekuiper-server --test iiot_mqtt`.
 
 use rekuiper_conf::KuiperConfig;
-use rekuiper_connectors::{MqttConfig, MqttSink, MqttSource};
+use rekuiper_connectors::{MqttConfig, MqttSink, MqttSource, Sink};
+use rekuiper_core::model::StreamRecord;
 use rekuiper_core::{RuleManager, StreamBus, StreamManager, StreamReceiver, TableManager};
 use rekuiper_server::routes::{create_router, AppState};
 use serde_json::{json, Value};
@@ -14,10 +15,45 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
-fn broker() -> Option<String> {
-    std::env::var("REKUIPER_TEST_MQTT")
+fn host_port(server: &str) -> String {
+    let (host, port) = rekuiper_connectors::parse_mqtt_server_url(server).unwrap();
+    format!("{host}:{port}")
+}
+
+async fn broker() -> Option<String> {
+    let configured = std::env::var("REKUIPER_TEST_MQTT")
         .ok()
-        .filter(|s| !s.trim().is_empty())
+        .filter(|s| !s.trim().is_empty());
+    if configured.is_none() {
+        if std::env::var("REKUIPER_REQUIRE_MQTT").as_deref() == Ok("1")
+            || std::env::var("REKUIPER_REQUIRE_BROKER").as_deref() == Ok("1")
+        {
+            panic!(
+                "REKUIPER_REQUIRE_MQTT is set, but REKUIPER_TEST_MQTT is not configured! Failing integration test release gate."
+            );
+        }
+        return None;
+    }
+    let server = configured.unwrap();
+    if std::env::var("REKUIPER_REQUIRE_MQTT").as_deref() == Ok("1")
+        || std::env::var("REKUIPER_REQUIRE_BROKER").as_deref() == Ok("1")
+    {
+        let hp = host_port(&server);
+        match tokio::time::timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(&hp))
+            .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!(
+                "REKUIPER_REQUIRE_MQTT is set, but MQTT broker at {} is unreachable: {}",
+                hp, e
+            ),
+            Err(_) => panic!(
+                "REKUIPER_REQUIRE_MQTT is set, but connection to MQTT broker at {} timed out",
+                hp
+            ),
+        }
+    }
+    Some(server)
 }
 
 fn unique(prefix: &str) -> String {
@@ -94,7 +130,7 @@ async fn wait_rows(path: &std::path::Path, done: impl Fn(&[Value]) -> bool) -> V
 
 #[tokio::test]
 async fn esphome_binary_payload_with_topic_metadata() {
-    let Some(server) = broker() else { return };
+    let Some(server) = broker().await else { return };
     let base = spawn_server().await;
     let client = reqwest::Client::new();
     let id = unique("esp");
@@ -153,7 +189,7 @@ async fn esphome_binary_payload_with_topic_metadata() {
 
 #[tokio::test]
 async fn json_array_payloads_group_per_device_in_windows() {
-    let Some(server) = broker() else { return };
+    let Some(server) = broker().await else { return };
     let base = spawn_server().await;
     let client = reqwest::Client::new();
     let id = unique("veh");
@@ -285,11 +321,6 @@ impl Proxy {
     }
 }
 
-fn host_port(server: &str) -> String {
-    let (host, port) = rekuiper_connectors::parse_mqtt_server_url(server).unwrap();
-    format!("{host}:{port}")
-}
-
 async fn collect(
     rx: &mut StreamReceiver,
     want: usize,
@@ -308,7 +339,7 @@ async fn collect(
 
 #[tokio::test]
 async fn mqtt_sink_caches_through_broker_outage_and_resends_in_order() {
-    let Some(server) = broker() else { return };
+    let Some(server) = broker().await else { return };
     let base = spawn_server().await;
     let client = reqwest::Client::new();
     let id = unique("uplink");
@@ -398,5 +429,74 @@ async fn mqtt_sink_caches_through_broker_outage_and_resends_in_order() {
     assert!(
         collect(&mut rx, 1, Duration::from_secs(2)).await.is_empty(),
         "no duplicates after recovery"
+    );
+}
+
+#[tokio::test]
+async fn real_broker_tls_integration() {
+    let tls_server = std::env::var("REKUIPER_TEST_MQTT_TLS")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    if tls_server.is_none() {
+        if (std::env::var("REKUIPER_REQUIRE_MQTT").as_deref() == Ok("1")
+            || std::env::var("REKUIPER_REQUIRE_BROKER").as_deref() == Ok("1"))
+            && std::env::var("REKUIPER_REQUIRE_MQTT_TLS").as_deref() == Ok("1")
+        {
+            panic!(
+                "REKUIPER_REQUIRE_MQTT_TLS is set, but REKUIPER_TEST_MQTT_TLS is not configured!"
+            );
+        }
+        return;
+    }
+    let server = tls_server.unwrap();
+    let id = unique("tls_e2e");
+    let topic = format!("rk-it/{id}/telemetry");
+    let ca_path = std::env::var("REKUIPER_TEST_MQTT_CA")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+
+    let mut cfg = mqtt_config(&server, &topic);
+    cfg.root_ca_path = ca_path;
+    if cfg.root_ca_path.is_none()
+        && std::env::var("REKUIPER_TEST_MQTT_INSECURE").as_deref() == Ok("1")
+    {
+        cfg.insecure_skip_verify = true;
+    }
+
+    let sink = MqttSink::new(cfg.clone()).expect("Failed to create TLS sink");
+    for _ in 0..100 {
+        if sink.is_connected() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        sink.is_connected(),
+        "TLS sink failed to connect to real broker at {}",
+        server
+    );
+
+    let bus = StreamBus::new();
+    let mut rx = bus.subscribe("tls_cloud");
+    let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    MqttSource::new(cfg, bus.get_or_create("tls_cloud")).spawn(cancel_rx);
+
+    let mut data = HashMap::new();
+    data.insert("tls_status".to_string(), json!("verified"));
+    let record = StreamRecord::new(data);
+
+    let mut received = false;
+    for _ in 0..30 {
+        let _ = sink.send(&record).await;
+        let got = collect(&mut rx, 1, Duration::from_millis(200)).await;
+        if !got.is_empty() {
+            assert_eq!(got[0]["tls_status"], json!("verified"));
+            received = true;
+            break;
+        }
+    }
+    assert!(
+        received,
+        "TLS end-to-end publish/subscribe failed over real broker"
     );
 }

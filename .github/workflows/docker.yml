@@ -7,8 +7,79 @@ on:
     tags: [ 'v*', '[0-9]+.*' ]
 
 jobs:
+  gate-checks:
+    name: Mandatory Release Gates & Real-Broker Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository at exact revision
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting & Lint Checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Workspace Tests
+        run: cargo test --workspace
+
+      - name: Provision Isolated Mosquitto Broker (Plaintext & TLS)
+        run: |
+          mkdir -p /tmp/mosquitto_cfg
+          cp crates/rekuiper-connectors/tests/tls_fixtures/ca1.crt /tmp/mosquitto_cfg/
+          cp crates/rekuiper-connectors/tests/tls_fixtures/server_localhost.crt /tmp/mosquitto_cfg/
+          cp crates/rekuiper-connectors/tests/tls_fixtures/server_localhost.key /tmp/mosquitto_cfg/
+          chmod 644 /tmp/mosquitto_cfg/*
+          cat << 'EOF' > /tmp/mosquitto_cfg/mosquitto.conf
+          listener 1883
+          allow_anonymous true
+
+          listener 8883
+          allow_anonymous true
+          cafile /mosquitto/config/ca1.crt
+          certfile /mosquitto/config/server_localhost.crt
+          keyfile /mosquitto/config/server_localhost.key
+          EOF
+          docker run -d --name mosquitto-docker-broker \
+            -p 1883:1883 -p 8883:8883 \
+            -v /tmp/mosquitto_cfg:/mosquitto/config \
+            eclipse-mosquitto:2
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 1883 && nc -z 127.0.0.1 8883; then
+              echo "Mosquitto broker ready on 1883 and 8883"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run Required Real-Broker Integration Tests
+        env:
+          REKUIPER_REQUIRE_MQTT: "1"
+          REKUIPER_REQUIRE_BROKER: "1"
+          REKUIPER_REQUIRE_MQTT_TLS: "1"
+          REKUIPER_TEST_MQTT: "tcp://127.0.0.1:1883"
+          REKUIPER_TEST_MQTT_TLS: "ssl://127.0.0.1:8883"
+          REKUIPER_TEST_MQTT_CA: "${{ github.workspace }}/crates/rekuiper-connectors/tests/tls_fixtures/ca1.crt"
+        run: |
+          cargo test -p rekuiper-connectors --test test_mqtt_tls -- --nocapture
+          cargo test -p rekuiper-server --test iiot_mqtt -- --nocapture
+
+      - name: Teardown Isolated Broker
+        if: always()
+        run: |
+          docker rm -f mosquitto-docker-broker || true
+          rm -rf /tmp/mosquitto_cfg
+
   docker:
     name: Build & Push Docker Image
+    needs: gate-checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,5 +104,5 @@ jobs:
           file: ./deploy/docker/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.500-beta
+            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.501-beta
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:latest

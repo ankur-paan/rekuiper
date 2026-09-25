@@ -1,9 +1,9 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.500--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.501--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.500--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.501--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine for edge devices, written in Rust. It implements
@@ -71,7 +71,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.500-beta
+  ankurkrp/rekuiper:0.501-beta
 ```
 
 To run rekuiper together with Mosquitto and Redis:
@@ -213,7 +213,10 @@ performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHM
 
 ## Release history
 
-- **0.500-beta** (current): in-memory Redis-style catalog architecture, zero-disk hot path for
+- **0.501-beta** (current): transactional storage atomicity (`KvOperation`, `apply_transaction`),
+  strict configuration key consistency and 500 error propagation, process-level reliability qualification
+  harness with bounded in-flight crash tracking, and drop-in ingestion compatibility.
+- **0.500-beta**: in-memory Redis-style catalog architecture, zero-disk hot path for
   rule execution and REST dispatch, multi-row SQL batch insertions, hot-path connection pooling,
   and exact peak capacity benchmarks certifying up to 200,000 msg/s per core.
 - **0.426-beta**: truthful MQTT and sink delivery accounting, removal of fabricated

@@ -22,9 +22,9 @@ use rekuiper_core::{
     model::{
         compile_graph_to_sql_and_actions, RuleStatus, SchemaDefinition, StreamField, StreamRecord,
     },
-    KvStore, PluginDefinition, PluginManager, RuleCounters, RuleDefinition, RuleManager,
-    SchemaManager, StreamBus, StreamDefinition, StreamManager, StreamReceiver, TableDefinition,
-    TableManager, MAX_HTTP_BATCH_RECORDS,
+    KvOperation, KvStore, PluginDefinition, PluginManager, RuleCounters, RuleDefinition,
+    RuleManager, SchemaManager, StreamBus, StreamDefinition, StreamManager, StreamReceiver,
+    TableDefinition, TableManager, MAX_HTTP_BATCH_RECORDS,
 };
 use rekuiper_sql::{
     builtin_function_metadata, is_builtin_function, Evaluator, Expr, IncrementalWindow, JoinClause,
@@ -388,6 +388,7 @@ pub struct AppState {
     pub connections: Arc<RwLock<HashMap<String, Value>>>,
     pub source_configs: Arc<RwLock<HashMap<String, Value>>>,
     pub sink_configs: Arc<RwLock<HashMap<String, Value>>>,
+    pub config_op_lock: Arc<tokio::sync::Mutex<()>>,
     pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
     pub source_cancels: Arc<RwLock<HashMap<String, Vec<tokio::sync::watch::Sender<bool>>>>>,
     pub http_client: reqwest::Client,
@@ -474,6 +475,7 @@ impl AppState {
             connections: Arc::new(RwLock::new(HashMap::new())),
             source_configs: Arc::new(RwLock::new(HashMap::new())),
             sink_configs: Arc::new(RwLock::new(HashMap::new())),
+            config_op_lock: Arc::new(tokio::sync::Mutex::new(())),
             http_client: reqwest::Client::builder()
                 .tcp_nodelay(true)
                 .build()
@@ -496,52 +498,57 @@ impl AppState {
 /// Persist one connection/source/sink config entry so daemon restarts keep
 /// resolving CONF_KEYs (MQTT brokers, SQL URLs) instead of falling back to
 /// loopback defaults with silent zero-delivery.
-async fn persist_config_entry(state: &AppState, namespace: &str, key: &str, val: &Value) {
+async fn persist_config_entry(
+    state: &AppState,
+    namespace: &str,
+    key: &str,
+    val: &Value,
+) -> anyhow::Result<()> {
     if let Some(kv) = state.kv.as_ref() {
-        if let Err(e) = kv.set(namespace, key, &val.to_string()).await {
-            tracing::warn!("KV persist {}/{} failed: {}", namespace, key, e);
-        }
+        kv.set(namespace, key, &val.to_string()).await?;
     }
+    Ok(())
 }
 
-async fn unpersist_config_entry(state: &AppState, namespace: &str, key: &str) {
+async fn unpersist_config_entry(
+    state: &AppState,
+    namespace: &str,
+    key: &str,
+) -> anyhow::Result<()> {
     if let Some(kv) = state.kv.as_ref() {
-        if let Err(e) = kv.delete(namespace, key).await {
-            tracing::warn!("KV delete {}/{} failed: {}", namespace, key, e);
-        }
+        kv.delete(namespace, key).await?;
     }
+    Ok(())
 }
 
 /// Reload persisted connection/source/sink configs at daemon startup, ahead
 /// of [`restore_running_rules`].
-pub async fn load_config_maps(state: &AppState) {
+pub async fn load_config_maps(state: &AppState) -> anyhow::Result<()> {
     let Some(kv) = state.kv.as_ref() else {
-        return;
+        return Ok(());
     };
     for (namespace, map) in [
         ("source_configs", &state.source_configs),
         ("sink_configs", &state.sink_configs),
         ("connections", &state.connections),
     ] {
-        match kv.list_all(namespace).await {
-            Ok(entries) => {
-                let mut guard = map.write();
-                for (key, val) in entries {
-                    match serde_json::from_str::<Value>(&val) {
-                        Ok(parsed) => {
-                            guard.insert(key, parsed);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Skipping corrupt {} entry {}: {}", namespace, key, e);
-                        }
-                    }
+        let entries = kv
+            .list_all(namespace)
+            .await
+            .map_err(|e| anyhow::anyhow!("KV load {} failed: {}", namespace, e))?;
+        let mut guard = map.write();
+        for (key, val) in entries {
+            match serde_json::from_str::<Value>(&val) {
+                Ok(parsed) => {
+                    guard.insert(key, parsed);
                 }
-            }
-            Err(e) => {
-                tracing::warn!("KV load {} failed: {}", namespace, e);
+                Err(e) => {
+                    tracing::warn!("Skipping corrupt {} entry {}: {}", namespace, key, e);
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// JWT authorization guard for deployments with `basic.authentication:
@@ -1184,14 +1191,13 @@ async fn update_stream(
         Ok(s) => s,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
     };
-    let _ = state.stream_manager.delete_stream(&name).await;
     let stream_def = StreamDefinition {
         name: name.clone(),
         sql: sql.clone(),
         stream_fields: to_stream_fields(stmt.fields),
         options: stmt.options,
     };
-    if let Err(e) = state.stream_manager.create_stream(stream_def).await {
+    if let Err(e) = state.stream_manager.update_stream(stream_def).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
     state.stream_bus.get_or_create(&name);
@@ -1267,16 +1273,9 @@ async fn push_stream_data(
         return (StatusCode::OK, "Data ingested successfully.\n").into_response();
     }
     // Backpressure reaches HTTP here: await capacity on every subscriber.
-    // No subscribers (e.g. no rules yet) is fine for ingestion.
-    match sender.send_batch(records).await {
-        Ok(_) => (StatusCode::OK, "Data ingested successfully.\n").into_response(),
-        Err(rekuiper_core::PublishError::Closed) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Stream subscribers closed before admission; no records were admitted\n",
-        )
-            .into_response(),
-        Err(_) => (StatusCode::OK, "Data ingested successfully.\n").into_response(),
-    }
+    // No subscribers (e.g. no rules yet, or all rules stopped/deleted) is fine for ingestion.
+    let _ = sender.send_batch(records).await;
+    (StatusCode::OK, "Data ingested successfully.\n").into_response()
 }
 
 async fn list_tables(State(state): State<AppState>) -> impl IntoResponse {
@@ -1413,14 +1412,13 @@ async fn update_table(
         Ok(s) => s,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
     };
-    let _ = state.table_manager.delete_table(&name).await;
     let table_def = TableDefinition {
         name: name.clone(),
         sql: sql.clone(),
         stream_fields: to_stream_fields(stmt.fields),
         options: stmt.options,
     };
-    if let Err(e) = state.table_manager.create_table(table_def).await {
+    if let Err(e) = state.table_manager.update_table(table_def).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
     (StatusCode::OK, format!("Table {} is updated.\n", name)).into_response()
@@ -1595,19 +1593,7 @@ fn resolve_mqtt_source(
             return None;
         }
     }
-    let mut config = MqttConfig {
-        server: "tcp://127.0.0.1:1883".to_string(),
-        topic: String::new(),
-        client_id: None,
-        qos: 0,
-        username: None,
-        password: None,
-        protocol_version: None,
-        clean_session: None,
-        keep_alive: None,
-        format: rekuiper_connectors::PayloadFormat::Json,
-        attach_meta: false,
-    };
+    let mut config = MqttConfig::default();
     // CONF_KEY lookup is case-insensitive (`CONF_KEY`, `conf_key`,
     // `confKey`): SQL definitions and imported/JSON definitions disagree on
     // case. Stored configs typically carry only connection parameters, so a
@@ -5582,12 +5568,15 @@ async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> 
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    if state.rule_manager.get_rule(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
     match state.rule_manager.start_rule(&name).await {
         Ok(_) => {
             activate_rule(&state, &name);
             (StatusCode::OK, format!("Rule {} was started", name)).into_response()
         }
-        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -5595,13 +5584,16 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    if state.rule_manager.get_rule(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
     match state.rule_manager.stop_rule(&name).await {
         Ok(_) => {
             cancel_rule_source(&state, &name);
             state.trace_manager.stop_trace(&name);
             (StatusCode::OK, format!("Rule {} was stopped", name)).into_response()
         }
-        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -5609,14 +5601,17 @@ async fn restart_rule(State(state): State<AppState>, Path(name): Path<String>) -
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
-    let _ = state.rule_manager.stop_rule(&name).await;
-    cancel_rule_source(&state, &name);
-    match state.rule_manager.start_rule(&name).await {
+    if state.rule_manager.get_rule(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
+    match state.rule_manager.restart_rule(&name).await {
         Ok(_) => {
+            cancel_rule_source(&state, &name);
+            state.trace_manager.stop_trace(&name);
             activate_rule(&state, &name);
             (StatusCode::OK, format!("Rule {} was restarted", name)).into_response()
         }
-        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -5624,20 +5619,23 @@ async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) ->
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    if state.rule_manager.get_rule(&name).is_none() {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
     match state.rule_manager.delete_rule(&name).await {
         Ok(_) => {
             cancel_rule_source(&state, &name);
             state.trace_manager.stop_trace(&name);
             (StatusCode::OK, format!("Rule {} is dropped.\n", name)).into_response()
         }
-        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-/// Replace a rule definition (eKuiper `PUT /rules/:name`): the running worker
-/// and its sources are stopped, the definition is swapped, and the pipeline
-/// is restarted with the new SQL, actions and options. The path name is
-/// canonical. Missing rules 404.
+/// Replace a rule definition (eKuiper `PUT /rules/:name`): if running, the
+/// definition is swapped atomically and the worker resumes processing with the
+/// new SQL and actions. If stopped, the definition is updated in place while
+/// keeping the rule stopped. Missing rules 404.
 async fn update_rule(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -5680,30 +5678,30 @@ async fn update_rule(
     if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
         return resp;
     }
-    // Stop the running worker and its sources before replacing the definition.
-    let _ = state.rule_manager.stop_rule(&name).await;
+    let was_running = match state.rule_manager.update_rule(rule.clone()).await {
+        Ok(running) => running,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
     cancel_rule_source(&state, &name);
     state.trace_manager.stop_trace(&name);
-    if let Err(e) = state.rule_manager.delete_rule(&name).await {
-        return (StatusCode::NOT_FOUND, e.to_string()).into_response();
+    if was_running {
+        spawn_rule_task(
+            &state.rule_manager,
+            &state.stream_bus,
+            &state.stream_manager,
+            &state.table_manager,
+            &state.source_configs,
+            &state.http_client,
+            &state.trace_manager,
+            name.clone(),
+            select_stmt.clone(),
+            rule.actions.clone(),
+            rule.options.clone(),
+        );
+        bootstrap_rule_sources(&state, &name, &select_stmt);
     }
-    if let Err(e) = state.rule_manager.create_rule(rule.clone()).await {
-        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
-    }
-    spawn_rule_task(
-        &state.rule_manager,
-        &state.stream_bus,
-        &state.stream_manager,
-        &state.table_manager,
-        &state.source_configs,
-        &state.http_client,
-        &state.trace_manager,
-        name.clone(),
-        select_stmt.clone(),
-        rule.actions.clone(),
-        rule.options.clone(),
-    );
-    bootstrap_rule_sources(&state, &name, &select_stmt);
     (
         StatusCode::OK,
         format!("Rule {} was updated successfully.\n", name),
@@ -7679,10 +7677,15 @@ async fn get_connection_yaml(State(state): State<AppState>, Path(name): Path<Str
     }
 
     let prefix = format!("{}/", name);
+    let dot_prefix = format!("{}.", name);
     let configs = state.connections.read();
     for (k, v) in configs.iter() {
         if let Some(conf_key) = k.strip_prefix(&prefix) {
             result_map.insert(conf_key.to_string(), v.clone());
+        } else if let Some(conf_key) = k.strip_prefix(&dot_prefix) {
+            result_map
+                .entry(conf_key.to_string())
+                .or_insert_with(|| v.clone());
         }
     }
 
@@ -7905,17 +7908,16 @@ async fn save_source_conf_key(
     } else {
         serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
     };
-    state
-        .source_configs
-        .write()
-        .insert(format!("{}/{}", name, conf_key), payload.clone());
-    persist_config_entry(
-        &state,
-        "source_configs",
-        &format!("{}/{}", name, conf_key),
-        &payload,
-    )
-    .await;
+    let key = format!("{}/{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "source_configs", &key, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist configuration: {}", e),
+        )
+            .into_response();
+    }
+    state.source_configs.write().insert(key, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -7951,11 +7953,23 @@ async fn delete_source_conf_key(
     if let Err(resp) = check_valid_name(&conf_key) {
         return resp;
     }
-    state
-        .source_configs
-        .write()
-        .remove(&format!("{}/{}", name, conf_key));
-    unpersist_config_entry(&state, "source_configs", &format!("{}/{}", name, conf_key)).await;
+    let key = format!("{}/{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+    if !state.source_configs.read().contains_key(&key) {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Configuration key {} for {} not found", conf_key, name),
+        )
+            .into_response();
+    }
+    if let Err(e) = unpersist_config_entry(&state, "source_configs", &key).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to delete configuration: {}", e),
+        )
+            .into_response();
+    }
+    state.source_configs.write().remove(&key);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -7975,17 +7989,16 @@ async fn save_sink_conf_key(
     } else {
         serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
     };
-    state
-        .sink_configs
-        .write()
-        .insert(format!("{}/{}", name, conf_key), payload.clone());
-    persist_config_entry(
-        &state,
-        "sink_configs",
-        &format!("{}/{}", name, conf_key),
-        &payload,
-    )
-    .await;
+    let key = format!("{}/{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "sink_configs", &key, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist configuration: {}", e),
+        )
+            .into_response();
+    }
+    state.sink_configs.write().insert(key, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -8021,11 +8034,23 @@ async fn delete_sink_conf_key(
     if let Err(resp) = check_valid_name(&conf_key) {
         return resp;
     }
-    state
-        .sink_configs
-        .write()
-        .remove(&format!("{}/{}", name, conf_key));
-    unpersist_config_entry(&state, "sink_configs", &format!("{}/{}", name, conf_key)).await;
+    let key = format!("{}/{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+    if !state.sink_configs.read().contains_key(&key) {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Configuration key {} for {} not found", conf_key, name),
+        )
+            .into_response();
+    }
+    if let Err(e) = unpersist_config_entry(&state, "sink_configs", &key).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to delete configuration: {}", e),
+        )
+            .into_response();
+    }
+    state.sink_configs.write().remove(&key);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -8045,28 +8070,34 @@ async fn save_connection_conf_key(
     } else {
         serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}))
     };
-    state
-        .connections
-        .write()
-        .insert(format!("{}.{}", name, conf_key), payload.clone());
-    state
-        .connections
-        .write()
-        .insert(format!("{}/{}", name, conf_key), payload.clone());
-    persist_config_entry(
-        &state,
-        "connections",
-        &format!("{}.{}", name, conf_key),
-        &payload,
-    )
-    .await;
-    persist_config_entry(
-        &state,
-        "connections",
-        &format!("{}/{}", name, conf_key),
-        &payload,
-    )
-    .await;
+    let canonical_key = format!("{}/{}", name, conf_key);
+    let dot_key = format!("{}.{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+
+    if let Some(kv) = state.kv.as_ref() {
+        let ops = [
+            KvOperation::Set {
+                namespace: "connections".to_string(),
+                key: canonical_key.clone(),
+                val: payload.to_string(),
+            },
+            KvOperation::Delete {
+                namespace: "connections".to_string(),
+                key: dot_key.clone(),
+            },
+        ];
+        if let Err(e) = kv.apply_transaction(&ops).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to persist connection: {}", e),
+            )
+                .into_response();
+        }
+    }
+
+    let mut conns = state.connections.write();
+    conns.remove(&dot_key);
+    conns.insert(canonical_key, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -8080,20 +8111,60 @@ async fn get_connection_conf_key(
     if let Err(resp) = check_valid_name(&conf_key) {
         return resp;
     }
-    let conns = state.connections.read();
-    if let Some(val) = conns
-        .get(&format!("{}.{}", name, conf_key))
-        .or_else(|| conns.get(&format!("{}/{}", name, conf_key)))
-        .cloned()
-    {
-        Json(val).into_response()
-    } else {
-        (
-            StatusCode::NOT_FOUND,
-            format!("Connection conf_key {} for {} not found", conf_key, name),
-        )
-            .into_response()
+    let canonical_key = format!("{}/{}", name, conf_key);
+    let dot_key = format!("{}.{}", name, conf_key);
+
+    let mem_val = {
+        let conns = state.connections.read();
+        conns
+            .get(&canonical_key)
+            .or_else(|| conns.get(&dot_key))
+            .cloned()
+    };
+    if let Some(val) = mem_val {
+        return Json(val).into_response();
     }
+
+    if let Some(kv) = state.kv.as_ref() {
+        match kv.get("connections", &canonical_key).await {
+            Ok(Some(raw)) => {
+                if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                    state.connections.write().insert(canonical_key, val.clone());
+                    return Json(val).into_response();
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Storage read error: {}", e),
+                )
+                    .into_response();
+            }
+        }
+        match kv.get("connections", &dot_key).await {
+            Ok(Some(raw)) => {
+                if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                    state.connections.write().insert(dot_key, val.clone());
+                    return Json(val).into_response();
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Storage read error: {}", e),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        format!("Connection conf_key {} for {} not found", conf_key, name),
+    )
+        .into_response()
 }
 
 async fn delete_connection_conf_key(
@@ -8106,16 +8177,45 @@ async fn delete_connection_conf_key(
     if let Err(resp) = check_valid_name(&conf_key) {
         return resp;
     }
-    state
-        .connections
-        .write()
-        .remove(&format!("{}.{}", name, conf_key));
-    state
-        .connections
-        .write()
-        .remove(&format!("{}/{}", name, conf_key));
-    unpersist_config_entry(&state, "connections", &format!("{}.{}", name, conf_key)).await;
-    unpersist_config_entry(&state, "connections", &format!("{}/{}", name, conf_key)).await;
+    let canonical_key = format!("{}/{}", name, conf_key);
+    let dot_key = format!("{}.{}", name, conf_key);
+    let _guard = state.config_op_lock.lock().await;
+
+    let exists = {
+        let conns = state.connections.read();
+        conns.contains_key(&canonical_key) || conns.contains_key(&dot_key)
+    };
+    if !exists {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Connection conf_key {} for {} not found", conf_key, name),
+        )
+            .into_response();
+    }
+
+    if let Some(kv) = state.kv.as_ref() {
+        let ops = [
+            KvOperation::Delete {
+                namespace: "connections".to_string(),
+                key: canonical_key.clone(),
+            },
+            KvOperation::Delete {
+                namespace: "connections".to_string(),
+                key: dot_key.clone(),
+            },
+        ];
+        if let Err(e) = kv.apply_transaction(&ops).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete connection: {}", e),
+            )
+                .into_response();
+        }
+    }
+
+    let mut conns = state.connections.write();
+    conns.remove(&canonical_key);
+    conns.remove(&dot_key);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
 
@@ -8137,6 +8237,14 @@ async fn register_source_connection(
         .and_then(|v| v.as_str())
         .unwrap_or(&name)
         .to_string();
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "connections", &id, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist connection: {}", e),
+        )
+            .into_response();
+    }
     state.connections.write().insert(id, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
@@ -8159,6 +8267,14 @@ async fn register_sink_connection(
         .and_then(|v| v.as_str())
         .unwrap_or(&name)
         .to_string();
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "connections", &id, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist connection: {}", e),
+        )
+            .into_response();
+    }
     state.connections.write().insert(id, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
@@ -8181,6 +8297,14 @@ async fn register_lookup_connection(
         .and_then(|v| v.as_str())
         .unwrap_or(&name)
         .to_string();
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "connections", &id, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist connection: {}", e),
+        )
+            .into_response();
+    }
     state.connections.write().insert(id, payload);
     (StatusCode::OK, Json(json!({"message": "success"}))).into_response()
 }
@@ -8200,6 +8324,14 @@ async fn create_connection(State(state): State<AppState>, Json(payload): Json<Va
     if id.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing connection id").into_response();
     }
+    let _guard = state.config_op_lock.lock().await;
+    if let Err(e) = persist_config_entry(&state, "connections", &id, &payload).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist connection: {}", e),
+        )
+            .into_response();
+    }
     state.connections.write().insert(id.clone(), payload);
     (
         StatusCode::CREATED,
@@ -8209,27 +8341,98 @@ async fn create_connection(State(state): State<AppState>, Json(payload): Json<Va
 }
 
 async fn get_connection(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    if let Some(conn) = state.connections.read().get(&id).cloned() {
-        Json(conn).into_response()
-    } else {
-        (
-            StatusCode::NOT_FOUND,
-            format!("Connection {} not found", id),
-        )
-            .into_response()
+    let canonical = id.replace('.', "/");
+    let dot = id.replace('/', ".");
+    let mem_val = {
+        let conns = state.connections.read();
+        conns
+            .get(&id)
+            .or_else(|| conns.get(&canonical))
+            .or_else(|| conns.get(&dot))
+            .cloned()
+    };
+    if let Some(conn) = mem_val {
+        return Json(conn).into_response();
     }
+
+    if let Some(kv) = state.kv.as_ref() {
+        for candidate in [&id, &canonical, &dot] {
+            match kv.get("connections", candidate).await {
+                Ok(Some(raw)) => {
+                    if let Ok(val) = serde_json::from_str::<Value>(&raw) {
+                        state
+                            .connections
+                            .write()
+                            .insert(candidate.to_string(), val.clone());
+                        return Json(val).into_response();
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Storage read error: {}", e),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        format!("Connection {} not found", id),
+    )
+        .into_response()
 }
 
 async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    if state.connections.write().remove(&id).is_some() {
-        (StatusCode::OK, format!("Connection {} is dropped.\n", id)).into_response()
-    } else {
-        (
+    let _guard = state.config_op_lock.lock().await;
+    let canonical = id.replace('.', "/");
+    let dot = id.replace('/', ".");
+    let exists = {
+        let conns = state.connections.read();
+        conns.contains_key(&id) || conns.contains_key(&canonical) || conns.contains_key(&dot)
+    };
+    if !exists {
+        return (
             StatusCode::NOT_FOUND,
             format!("Connection {} not found", id),
         )
-            .into_response()
+            .into_response();
     }
+
+    if let Some(kv) = state.kv.as_ref() {
+        let mut ops = vec![KvOperation::Delete {
+            namespace: "connections".to_string(),
+            key: id.clone(),
+        }];
+        if canonical != id {
+            ops.push(KvOperation::Delete {
+                namespace: "connections".to_string(),
+                key: canonical.clone(),
+            });
+        }
+        if dot != id && dot != canonical {
+            ops.push(KvOperation::Delete {
+                namespace: "connections".to_string(),
+                key: dot.clone(),
+            });
+        }
+        if let Err(e) = kv.apply_transaction(&ops).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete connection: {}", e),
+            )
+                .into_response();
+        }
+    }
+
+    let mut conns = state.connections.write();
+    conns.remove(&id);
+    conns.remove(&canonical);
+    conns.remove(&dot);
+    (StatusCode::OK, format!("Connection {} is dropped.\n", id)).into_response()
 }
 
 /// Update-or-insert connection properties (eKuiper `PUT /connections/:id`):
@@ -8239,6 +8442,7 @@ async fn update_connection(
     Path(id): Path<String>,
     Json(payload): Json<Value>,
 ) -> Response {
+    let _guard = state.config_op_lock.lock().await;
     let mut stored = state
         .connections
         .read()
@@ -8248,6 +8452,13 @@ async fn update_connection(
     merge_json_object(&mut stored, &payload);
     if let Some(obj) = stored.as_object_mut() {
         obj.insert("id".to_string(), Value::String(id.clone()));
+    }
+    if let Err(e) = persist_config_entry(&state, "connections", &id, &stored).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist connection: {}", e),
+        )
+            .into_response();
     }
     state.connections.write().insert(id, stored.clone());
     Json(stored).into_response()
@@ -9382,14 +9593,16 @@ mod tests {
             "mqtt/evalmqtt",
             &json!({"server": "tcp://broker:1883"}),
         )
-        .await;
+        .await
+        .unwrap();
         persist_config_entry(
             &state,
             "source_configs",
             "sql/postgresql_config",
             &json!({"dburl": "postgres://u:p@h/db", "interval": 5000}),
         )
-        .await;
+        .await
+        .unwrap();
         // A fresh daemon with empty maps reloads everything from KV.
         let fresh = AppState {
             kv: Some(kv),
@@ -9402,7 +9615,7 @@ mod tests {
                 StreamBus::new(),
             )
         };
-        load_config_maps(&fresh).await;
+        load_config_maps(&fresh).await.unwrap();
         assert_eq!(
             fresh
                 .source_configs
@@ -9417,7 +9630,9 @@ mod tests {
             .read()
             .contains_key("sql/postgresql_config"));
         // Deletes propagate too.
-        unpersist_config_entry(&state, "source_configs", "mqtt/evalmqtt").await;
+        unpersist_config_entry(&state, "source_configs", "mqtt/evalmqtt")
+            .await
+            .unwrap();
         let fresh2 = AppState {
             kv: Some(state.kv.clone().unwrap()),
             ..AppState::new(
@@ -9429,7 +9644,7 @@ mod tests {
                 StreamBus::new(),
             )
         };
-        load_config_maps(&fresh2).await;
+        load_config_maps(&fresh2).await.unwrap();
         assert!(!fresh2.source_configs.read().contains_key("mqtt/evalmqtt"));
         assert!(fresh2
             .source_configs

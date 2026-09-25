@@ -28,3 +28,9 @@ chrono = { workspace = true }
 sqlx = { workspace = true }
 base64 = { workspace = true }
 rekuiper-core = { workspace = true }
+rustls-pemfile = "2.2"
+rustls-native-certs = "0.7"
+webpki-roots = "0.26"
+
+[dev-dependencies]
+tokio-rustls = "0.25"

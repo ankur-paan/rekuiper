@@ -10,12 +10,41 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Single operation within an atomic [`KvStore::apply_transaction`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KvOperation {
+    Set {
+        namespace: String,
+        key: String,
+        val: String,
+    },
+    Delete {
+        namespace: String,
+        key: String,
+    },
+}
+
 #[async_trait]
 pub trait KvStore: Send + Sync {
     async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>>;
     async fn set(&self, namespace: &str, key: &str, val: &str) -> Result<()>;
     async fn delete(&self, namespace: &str, key: &str) -> Result<()>;
     async fn list_all(&self, namespace: &str) -> Result<Vec<(String, String)>>;
+
+    /// Executes multiple operations atomically within a single storage transaction.
+    async fn apply_transaction(&self, ops: &[KvOperation]) -> Result<()> {
+        for op in ops {
+            match op {
+                KvOperation::Set {
+                    namespace,
+                    key,
+                    val,
+                } => self.set(namespace, key, val).await?,
+                KvOperation::Delete { namespace, key } => self.delete(namespace, key).await?,
+            }
+        }
+        Ok(())
+    }
 }
 
 /// SQLite-backed [`KvStore`].
@@ -108,6 +137,37 @@ impl KvStore for SqliteKvStore {
                 .await?;
         Ok(rows)
     }
+
+    async fn apply_transaction(&self, ops: &[KvOperation]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for op in ops {
+            match op {
+                KvOperation::Set {
+                    namespace,
+                    key,
+                    val,
+                } => {
+                    sqlx::query(
+                        "INSERT INTO kv (namespace, key, value) VALUES (?, ?, ?) ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value",
+                    )
+                    .bind(namespace)
+                    .bind(key)
+                    .bind(val)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                KvOperation::Delete { namespace, key } => {
+                    sqlx::query("DELETE FROM kv WHERE namespace = ? AND key = ?")
+                        .bind(namespace)
+                        .bind(key)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 /// In-memory [`KvStore`] for unit tests and ephemeral daemons.
@@ -156,5 +216,24 @@ impl KvStore for MemKvStore {
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
+    }
+
+    async fn apply_transaction(&self, ops: &[KvOperation]) -> Result<()> {
+        let mut data = self.data.write();
+        for op in ops {
+            match op {
+                KvOperation::Set {
+                    namespace,
+                    key,
+                    val,
+                } => {
+                    data.insert((namespace.clone(), key.clone()), val.clone());
+                }
+                KvOperation::Delete { namespace, key } => {
+                    data.remove(&(namespace.clone(), key.clone()));
+                }
+            }
+        }
+        Ok(())
     }
 }
