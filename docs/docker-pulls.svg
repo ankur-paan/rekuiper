@@ -29,34 +29,35 @@
 <text x="55" y="74.0" text-anchor="end" class="axis-text">4.0k</text>
 <line x1="65.0" y1="265" x2="65.0" y2="270" stroke="#30363d" stroke-width="1px" />
 <text x="65.0" y="285" text-anchor="middle" class="axis-text">Sep 09</text>
-<line x1="171.9" y1="265" x2="171.9" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="171.9" y="285" text-anchor="middle" class="axis-text">Sep 12</text>
-<line x1="278.8" y1="265" x2="278.8" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="278.8" y="285" text-anchor="middle" class="axis-text">Sep 16</text>
-<line x1="385.8" y1="265" x2="385.8" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="385.8" y="285" text-anchor="middle" class="axis-text">Sep 21</text>
-<line x1="492.7" y1="265" x2="492.7" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="492.7" y="285" text-anchor="middle" class="axis-text">Sep 23</text>
-<line x1="599.6" y1="265" x2="599.6" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="599.6" y="285" text-anchor="middle" class="axis-text">Sep 25</text>
-<line x1="706.5" y1="265" x2="706.5" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="706.5" y="285" text-anchor="middle" class="axis-text">Sep 27</text>
+<line x1="164.3" y1="265" x2="164.3" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="164.3" y="285" text-anchor="middle" class="axis-text">Sep 12</text>
+<line x1="263.6" y1="265" x2="263.6" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="263.6" y="285" text-anchor="middle" class="axis-text">Sep 16</text>
+<line x1="362.9" y1="265" x2="362.9" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="362.9" y="285" text-anchor="middle" class="axis-text">Sep 21</text>
+<line x1="462.1" y1="265" x2="462.1" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="462.1" y="285" text-anchor="middle" class="axis-text">Sep 23</text>
+<line x1="561.4" y1="265" x2="561.4" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="561.4" y="285" text-anchor="middle" class="axis-text">Sep 25</text>
+<line x1="660.7" y1="265" x2="660.7" y2="270" stroke="#30363d" stroke-width="1px" />
+<text x="660.7" y="285" text-anchor="middle" class="axis-text">Sep 27</text>
 <line x1="760.0" y1="265" x2="760.0" y2="270" stroke="#30363d" stroke-width="1px" />
-<text x="760.0" y="285" text-anchor="middle" class="axis-text">Sep 28</text>
-<path d="M 65.0 240.1 L 118.5 209.4 L 171.9 172.9 L 225.4 155.3 L 278.8 129.5 L 332.3 118.3 L 385.8 107.0 L 439.2 97.1 L 492.7 97.1 L 546.2 97.1 L 599.6 96.7 L 653.1 91.7 L 706.5 91.5 L 760.0 91.5 L 760.0 265.0 L 65.0 265.0 Z" fill="url(#lineGrad)" />
-<path d="M 65.0 240.1 L 118.5 209.4 L 171.9 172.9 L 225.4 155.3 L 278.8 129.5 L 332.3 118.3 L 385.8 107.0 L 439.2 97.1 L 492.7 97.1 L 546.2 97.1 L 599.6 96.7 L 653.1 91.7 L 706.5 91.5 L 760.0 91.5" class="spark-line" />
+<text x="760.0" y="285" text-anchor="middle" class="axis-text">Sep 29</text>
+<path d="M 65.0 240.1 L 114.6 209.4 L 164.3 172.9 L 213.9 155.3 L 263.6 129.5 L 313.2 118.3 L 362.9 107.0 L 412.5 97.1 L 462.1 97.1 L 511.8 97.1 L 561.4 96.7 L 611.1 91.7 L 660.7 91.5 L 710.4 91.5 L 760.0 91.5 L 760.0 265.0 L 65.0 265.0 Z" fill="url(#lineGrad)" />
+<path d="M 65.0 240.1 L 114.6 209.4 L 164.3 172.9 L 213.9 155.3 L 263.6 129.5 L 313.2 118.3 L 362.9 107.0 L 412.5 97.1 L 462.1 97.1 L 511.8 97.1 L 561.4 96.7 L 611.1 91.7 L 660.7 91.5 L 710.4 91.5 L 760.0 91.5" class="spark-line" />
 <circle cx="65.0" cy="240.1" r="4" class="spark-point"><title>2026-09-09: 510 pulls</title></circle>
-<circle cx="118.5" cy="209.4" r="4" class="spark-point"><title>2026-09-10: 1,140 pulls</title></circle>
-<circle cx="171.9" cy="172.9" r="4" class="spark-point"><title>2026-09-12: 1,890 pulls</title></circle>
-<circle cx="225.4" cy="155.3" r="4" class="spark-point"><title>2026-09-13: 2,250 pulls</title></circle>
-<circle cx="278.8" cy="129.5" r="4" class="spark-point"><title>2026-09-16: 2,780 pulls</title></circle>
-<circle cx="332.3" cy="118.3" r="4" class="spark-point"><title>2026-09-19: 3,010 pulls</title></circle>
-<circle cx="385.8" cy="107.0" r="4" class="spark-point"><title>2026-09-21: 3,241 pulls</title></circle>
-<circle cx="439.2" cy="97.1" r="4" class="spark-point"><title>2026-09-22: 3,445 pulls</title></circle>
-<circle cx="492.7" cy="97.1" r="4" class="spark-point"><title>2026-09-23: 3,445 pulls</title></circle>
-<circle cx="546.2" cy="97.1" r="4" class="spark-point"><title>2026-09-24: 3,445 pulls</title></circle>
-<circle cx="599.6" cy="96.7" r="4" class="spark-point"><title>2026-09-25: 3,452 pulls</title></circle>
-<circle cx="653.1" cy="91.7" r="4" class="spark-point"><title>2026-09-26: 3,555 pulls</title></circle>
-<circle cx="706.5" cy="91.5" r="4" class="spark-point"><title>2026-09-27: 3,558 pulls</title></circle>
-<circle cx="760.0" cy="91.5" r="4" class="spark-point"><title>2026-09-28: 3,558 pulls</title></circle>
+<circle cx="114.6" cy="209.4" r="4" class="spark-point"><title>2026-09-10: 1,140 pulls</title></circle>
+<circle cx="164.3" cy="172.9" r="4" class="spark-point"><title>2026-09-12: 1,890 pulls</title></circle>
+<circle cx="213.9" cy="155.3" r="4" class="spark-point"><title>2026-09-13: 2,250 pulls</title></circle>
+<circle cx="263.6" cy="129.5" r="4" class="spark-point"><title>2026-09-16: 2,780 pulls</title></circle>
+<circle cx="313.2" cy="118.3" r="4" class="spark-point"><title>2026-09-19: 3,010 pulls</title></circle>
+<circle cx="362.9" cy="107.0" r="4" class="spark-point"><title>2026-09-21: 3,241 pulls</title></circle>
+<circle cx="412.5" cy="97.1" r="4" class="spark-point"><title>2026-09-22: 3,445 pulls</title></circle>
+<circle cx="462.1" cy="97.1" r="4" class="spark-point"><title>2026-09-23: 3,445 pulls</title></circle>
+<circle cx="511.8" cy="97.1" r="4" class="spark-point"><title>2026-09-24: 3,445 pulls</title></circle>
+<circle cx="561.4" cy="96.7" r="4" class="spark-point"><title>2026-09-25: 3,452 pulls</title></circle>
+<circle cx="611.1" cy="91.7" r="4" class="spark-point"><title>2026-09-26: 3,555 pulls</title></circle>
+<circle cx="660.7" cy="91.5" r="4" class="spark-point"><title>2026-09-27: 3,558 pulls</title></circle>
+<circle cx="710.4" cy="91.5" r="4" class="spark-point"><title>2026-09-28: 3,558 pulls</title></circle>
+<circle cx="760.0" cy="91.5" r="4" class="spark-point"><title>2026-09-29: 3,558 pulls</title></circle>
 </svg>
