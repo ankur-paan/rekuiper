@@ -1,0 +1,150 @@
+{
+  "avg": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 30.0
+    }
+  },
+  "count": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 5
+    }
+  },
+  "count_wildcard": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 5
+    }
+  },
+  "max": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 50.0
+    }
+  },
+  "min": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 10.0
+    }
+  },
+  "sum": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 150.0
+    }
+  },
+  "collect": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+        50.0
+      ]
+    }
+  },
+  "collect_wildcard": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  },
+  "last_value": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 50.0
+    }
+  },
+  "merge_agg": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": {
+        "k": "v_50"
+      }
+    }
+  },
+  "deduplicate": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  },
+  "median": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 30.0
+    }
+  },
+  "stddev": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 14.142135623730951
+    }
+  },
+  "stddevs": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 15.811388300841896
+    }
+  },
+  "var": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 200.0
+    }
+  },
+  "vars": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 250.0
+    }
+  },
+  "percentile": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 30.0
+    }
+  },
+  "percentile_disc": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 30.0
+    }
+  },
+  "last_agg_hit_count": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 0
+    }
+  },
+  "last_agg_hit_time": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 0
+    }
+  }
+}

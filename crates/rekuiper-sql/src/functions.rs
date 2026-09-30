@@ -365,7 +365,31 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "2",
             "endswith('abc', 'c')"
         ),
-        // Array & object (39).
+        meta!(
+            "format_time",
+            "string",
+            "Format a datetime or epoch millis with a pattern.",
+            false,
+            "2",
+            "format_time(now(), 'yyyy-MM-dd HH:mm:ss')"
+        ),
+        meta!(
+            "indexof",
+            "string",
+            "0-based index of first substring occurrence; -1 if not found.",
+            false,
+            "2",
+            "indexof('hello', 'll')"
+        ),
+        meta!(
+            "format",
+            "string",
+            "Format number with decimal places and thousands grouping.",
+            false,
+            "2-3",
+            "format(1234.567, 2)"
+        ),
+        // Array & object (42).
         meta!(
             "array_contains",
             "array",
@@ -677,6 +701,30 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             false,
             "1",
             "kvpair_array_to_obj(pairs)"
+        ),
+        meta!(
+            "array_last_position",
+            "array",
+            "1-based index of last occurrence of value; 0 if absent.",
+            false,
+            "2",
+            "array_last_position([1, 2, 1], 1)"
+        ),
+        meta!(
+            "array_shuffle",
+            "array",
+            "Randomly permute the elements of an array.",
+            false,
+            "1",
+            "array_shuffle([1, 2, 3])"
+        ),
+        meta!(
+            "array_map",
+            "array",
+            "Apply a scalar function to each array element.",
+            false,
+            "2",
+            "array_map('abs', [-1, 2])"
         ),
         // DateTime (28).
         meta!(
@@ -1307,6 +1355,22 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "1",
             "vars(temp)"
         ),
+        meta!(
+            "last_agg_hit_count",
+            "aggregate",
+            "Accumulated trigger count of aggregate rule.",
+            true,
+            "0",
+            "last_agg_hit_count()"
+        ),
+        meta!(
+            "last_agg_hit_time",
+            "aggregate",
+            "Timestamp of last aggregate rule hit.",
+            true,
+            "0",
+            "last_agg_hit_time()"
+        ),
         // Analytic / stateful (11).
         meta!(
             "acc_avg",
@@ -1445,6 +1509,38 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "0",
             "window_start()"
         ),
+        meta!(
+            "rule_start",
+            "system",
+            "Rule start timestamp in int64 format.",
+            false,
+            "0",
+            "rule_start()"
+        ),
+        meta!(
+            "last_hit_count",
+            "system",
+            "Accumulated trigger count of continuous rule.",
+            false,
+            "0",
+            "last_hit_count()"
+        ),
+        meta!(
+            "last_hit_time",
+            "system",
+            "Timestamp of last continuous rule hit.",
+            false,
+            "0",
+            "last_hit_time()"
+        ),
+        meta!(
+            "get_keyed_state",
+            "system",
+            "Keyed state value from database with type casting and default.",
+            false,
+            "3",
+            "get_keyed_state('k', 'string', '')"
+        ),
     ];
     CATALOG
 }
@@ -1465,7 +1561,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 185, "catalog must list 185 functions");
+        assert_eq!(catalog.len(), 197, "catalog must list 197 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(

@@ -1,5 +1,9 @@
 # Manage connection
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine on **2026-09-30 22:15:00 UTC**.  
+> The `/connections` REST endpoints allow defining and managing independent connection objects (`mqtt`, `kafka`, `sql`, etc.). In stream, table, and rule definitions, connections can be referenced via `CONF_KEY` or `connectionSelector` (supported as a first-class alias), which resolves configuration properties directly or from `connections/{id}`.
+
 ## Connection management
 
 Source/Sink in rules can be created and managed independently in the form of connections.

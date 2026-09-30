@@ -1,0 +1,100 @@
+{
+  "isNull": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": false
+    }
+  },
+  "coalesce": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 42.0
+    }
+  },
+  "newuuid": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "a05599e4-7c7c-4e29-ad10-043f3c5357df"
+    }
+  },
+  "tstamp": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 1790802537627
+    }
+  },
+  "event_time": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 1790802538977
+    }
+  },
+  "rule_id": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "rule_other_rule_id"
+    }
+  },
+  "rule_start": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 1790802541372
+    }
+  },
+  "mqtt": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "devices/other_test"
+    }
+  },
+  "meta": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "devices/other_test"
+    }
+  },
+  "last_hit_count": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 0
+    }
+  },
+  "last_hit_time": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 0
+    }
+  },
+  "window_start": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  },
+  "window_end": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  },
+  "get_keyed_state": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 0.0
+    }
+  }
+}

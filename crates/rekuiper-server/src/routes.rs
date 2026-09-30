@@ -769,6 +769,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/rules/:name/reset_state", put(reset_rule_state))
         .route("/rules/:id/schema", get(get_rule_schema))
         .route("/rules/:id/cpu", get(get_rule_cpu))
+        .route("/rules/:name/scantables", get(get_rule_scantables))
         .route(
             "/rules/:name/tags",
             put(put_rule_tags)
@@ -1601,7 +1602,11 @@ fn resolve_mqtt_source(
     let conf_key = def
         .options
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("CONF_KEY") || k.eq_ignore_ascii_case("confKey"))
+        .find(|(k, _)| {
+            k.eq_ignore_ascii_case("CONF_KEY")
+                || k.eq_ignore_ascii_case("confKey")
+                || k.eq_ignore_ascii_case("connectionSelector")
+        })
         .map(|(_, v)| v.trim());
     if let Some(key) = conf_key {
         if !key.is_empty() {
@@ -1610,6 +1615,7 @@ fn resolve_mqtt_source(
             let conf_val = configs_guard
                 .get(&lookup1)
                 .or_else(|| configs_guard.get(key))
+                .or_else(|| configs_guard.get(&format!("connections/{}", key)))
                 .cloned();
             drop(configs_guard);
             if let Some(val) = conf_val {
@@ -3800,7 +3806,11 @@ fn resolve_sql_source(
     let conf_key = def
         .options
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("CONF_KEY") || k.eq_ignore_ascii_case("confKey"))
+        .find(|(k, _)| {
+            k.eq_ignore_ascii_case("CONF_KEY")
+                || k.eq_ignore_ascii_case("confKey")
+                || k.eq_ignore_ascii_case("connectionSelector")
+        })
         .map(|(_, v)| v.trim().to_string());
     if let Some(key) = conf_key {
         if !key.is_empty() {
@@ -3809,6 +3819,7 @@ fn resolve_sql_source(
             let conf_val = configs_guard
                 .get(&lookup)
                 .or_else(|| configs_guard.get(&key))
+                .or_else(|| configs_guard.get(&format!("connections/{}", key)))
                 .cloned();
             drop(configs_guard);
             if let Some(val) = conf_val {
@@ -4302,12 +4313,15 @@ async fn run_stateless_rule(
     // even for rows the WHERE filter later drops, mirroring eKuiper analytic
     // semantics); the input-row filter then decides emission.
     let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state.state.write().insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state.state.write().insert("__rule_start__".to_string(), Value::from(start_time_ms));
     // Stateless fast path: no table/stream joins, so skip the join machinery
     // and borrow the input map instead of cloning the full record.
     let has_joins = !select_stmt.joins.is_empty();
     // Channel close (all bus senders dropped) ends the loop; there is no
     // lossy Lagged path anymore — backpressure holds producers instead.
-    while let Some(record) = rx.recv().await {
+    while let Some(mut record) = rx.recv().await {
         if !is_rule_running(&running) {
             continue;
         }
@@ -4315,8 +4329,10 @@ async fn run_stateless_rule(
         if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
             continue;
         }
+        record.data.entry("__rule_id__".to_string()).or_insert_with(|| Value::String(rule_id.clone()));
+        record.data.entry("__rule_start__".to_string()).or_insert_with(|| Value::from(start_time_ms));
         if has_joins {
-            let Some(joined) =
+            let Some(mut joined) =
                 apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
                     .await
             else {
@@ -4324,6 +4340,8 @@ async fn run_stateless_rule(
                 counters.inc_filtered(1);
                 continue;
             };
+            joined.entry("__rule_id__".to_string()).or_insert_with(|| Value::String(rule_id.clone()));
+            joined.entry("__rule_start__".to_string()).or_insert_with(|| Value::from(start_time_ms));
             let output_opt = Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
             let passes = match &select_stmt.where_clause {
                 Some(cond) => Evaluator::eval_bool(cond, &joined),
@@ -5397,6 +5415,47 @@ async fn get_rule_explain(State(state): State<AppState>, Path(name): Path<String
         "actions": action_kinds,
     }))
     .into_response()
+}
+
+async fn get_rule_scantables(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(resp) = check_valid_name(&name) {
+        return resp;
+    }
+    let Some(rule) = state.rule_manager.get_rule(&name) else {
+        return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    };
+    let mut parser = Parser::new(&rule.sql);
+    let select_stmt = match parser.parse_select() {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
+        }
+    };
+    let mut results = Vec::new();
+    if state.table_manager.get_table(&select_stmt.from).is_some() {
+        let rows = state.table_manager.get_table_rows(&select_stmt.from);
+        for row in rows {
+            results.push(json!({
+                "emitter": select_stmt.from,
+                "content": row
+            }));
+        }
+    }
+    for join in &select_stmt.joins {
+        if state.table_manager.get_table(&join.target).is_some() {
+            let rows = state.table_manager.get_table_rows(&join.target);
+            for row in rows {
+                results.push(json!({
+                    "emitter": join.target,
+                    "content": row
+                }));
+            }
+        }
+    }
+    Json(results).into_response()
 }
 
 fn time_unit_to_string(unit: &TimeUnit) -> &'static str {

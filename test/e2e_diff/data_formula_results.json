@@ -1,0 +1,388 @@
+{
+  "timestamp": "2026-09-30 22:00:27 UTC",
+  "total_rules": 12,
+  "exact_or_high_parity": 12,
+  "compatible": 0,
+  "results": [
+    {
+      "rule_id": "rule_01_math_formulas",
+      "category": "Math & Arithmetic",
+      "sql": "SELECT abs(vibe) AS v_abs, ceil(temp) AS t_ceil, floor(temp) AS t_floor, round(temp, 1) AS t_round, sqrt(abs(voltage)) AS v_sqrt, power(voltage, 2) AS v_pow, (voltage * current) AS power_calc, (voltage + current) / 2.0 AS avg_calc, mod(cast(pressure, \"bigint\"), 10) AS p_mod FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 9,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "avg_calc": 5.6,
+        "p_mod": 1,
+        "power_calc": 7.35,
+        "t_ceil": 20,
+        "t_floor": 19,
+        "t_round": 19.2,
+        "v_abs": 4,
+        "v_pow": 110.25,
+        "v_sqrt": 3.24037034920393
+      },
+      "sample_rk": {
+        "avg_calc": 5.6,
+        "t_floor": 19.0,
+        "t_round": 19.2,
+        "v_sqrt": 3.24037034920393,
+        "power_calc": 7.35,
+        "v_pow": 110.25,
+        "p_mod": 1,
+        "v_abs": 4.0,
+        "t_ceil": 20.0
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 9 fields (v_abs, t_ceil, t_floor, t_round...)"
+    },
+    {
+      "rule_id": "rule_02_string_transforms",
+      "category": "String Manipulation",
+      "sql": "SELECT upper(status) AS s_upper, lower(device_id) AS d_lower, concat(device_id, \":\", status) AS d_concat, length(status) AS s_len, trim(padded_str) AS p_trim, ltrim(padded_str) AS p_ltrim, rtrim(padded_str) AS p_rtrim, regexp_replace(status, \"ACTIVE\", \"RUNNING\") AS s_rep, reverse(device_id) AS s_rev, split_value(tags_csv, \",\", 0) AS s_split_val, numbytes(device_id) AS s_numbytes, startswith(device_id, \"DEV\") AS s_starts, endswith(device_id, \"001\") AS s_ends, substring(device_id, 1, 3) AS s_sub, lpad(device_id, 10) AS s_lpad, rpad(device_id, 10) AS s_rpad, indexof(device_id, \"DEV\") AS s_indexof, format(pressure, 2) AS s_fmt, format_time(ts, \"yyyy-MM-dd\") AS s_fmttime FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 19,
+      "match_rate": 94.73684210526315,
+      "sample_ek": {
+        "d_concat": "DEV_001:IDLE",
+        "d_lower": "dev_001",
+        "p_ltrim": "Node_001 ",
+        "p_rtrim": " Node_001",
+        "p_trim": "Node_001",
+        "s_ends": true,
+        "s_fmt": "91.50",
+        "s_fmttime": "2024-09-30",
+        "s_indexof": 0,
+        "s_len": 4,
+        "s_lpad": "          DEV_001",
+        "s_numbytes": 7,
+        "s_rep": "IDLE",
+        "s_rev": "100_VED",
+        "s_rpad": "DEV_001          ",
+        "s_split_val": "edge",
+        "s_starts": true,
+        "s_sub": "EV",
+        "s_upper": "IDLE"
+      },
+      "sample_rk": {
+        "s_rpad": "DEV_001   ",
+        "s_fmt": "91.50",
+        "p_ltrim": "Node_001 ",
+        "s_fmttime": "2024-09-30",
+        "s_numbytes": 7,
+        "p_trim": "Node_001",
+        "d_lower": "dev_001",
+        "s_sub": "DEV",
+        "s_indexof": 0,
+        "d_concat": "DEV_001:IDLE",
+        "s_ends": true,
+        "s_lpad": "   DEV_001",
+        "s_rep": "IDLE",
+        "s_split_val": "edge",
+        "p_rtrim": " Node_001",
+        "s_len": 4,
+        "s_starts": true,
+        "s_upper": "IDLE",
+        "s_rev": "100_VED"
+      },
+      "verdict": "HIGH_PARITY",
+      "notes": "Tested 19 fields (s_upper, d_lower, d_concat, s_len...)"
+    },
+    {
+      "rule_id": "rule_03_conditionals",
+      "category": "Conditionals & Logic",
+      "sql": "SELECT device_id, CASE WHEN temp > 35.0 THEN \"CRITICAL\" WHEN temp > 22.0 THEN \"WARNING\" ELSE \"NORMAL\" END AS alert_level, coalesce(nullable_val, -999) AS val_coalesce, isNull(nullable_val) AS is_null_val, last_hit_count() AS hit_cnt, (last_hit_time() >= 0) AS has_hit_time, (rule_start() > 0) AS has_rule_start, get_keyed_state(\"dev_key\", \"float\", 0.0) AS keyed_st FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 8,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "alert_level": "NORMAL",
+        "device_id": "DEV_001",
+        "has_hit_time": true,
+        "has_rule_start": true,
+        "hit_cnt": 0,
+        "is_null_val": false,
+        "keyed_st": 0,
+        "val_coalesce": 10
+      },
+      "sample_rk": {
+        "val_coalesce": 10,
+        "keyed_st": 0.0,
+        "is_null_val": false,
+        "has_rule_start": true,
+        "device_id": "DEV_001",
+        "hit_cnt": 0,
+        "has_hit_time": true,
+        "alert_level": "NORMAL"
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 8 fields (device_id, alert_level, val_coalesce, is_null_val...)"
+    },
+    {
+      "rule_id": "rule_04_json_extraction",
+      "category": "Nested JSON & Path Query",
+      "sql": "SELECT geo.lat AS latitude, geo.lon AS longitude, config.level AS cfg_level, json_path_query(config, \"$.mode\") AS jp_mode, to_json(geo) AS geo_json FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 5,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "cfg_level": 2,
+        "geo_json": "{\"lat\":37.771,\"lon\":-122.411}",
+        "jp_mode": "manual",
+        "latitude": 37.771,
+        "longitude": -122.411
+      },
+      "sample_rk": {
+        "latitude": 37.771,
+        "cfg_level": 2,
+        "jp_mode": "manual",
+        "geo_json": "{\"lat\":37.771,\"lon\":-122.411}",
+        "longitude": -122.411
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 5 fields (latitude, longitude, cfg_level, jp_mode...)"
+    },
+    {
+      "rule_id": "rule_05_array_operations",
+      "category": "Array Operations",
+      "sql": "SELECT readings[0] AS elem_0, readings[1] AS elem_1, cardinality(readings) AS arr_len, array_contains(readings, 20.0) AS has_20, array_position(readings, 20.0) AS arr_pos, array_last_position(readings, 20.0) AS arr_last_pos, array_min(readings) AS arr_min, array_max(readings) AS arr_max, array_join(readings, \",\") AS arr_joined, array_sort(readings) AS arr_sorted, repeat(\"abc\", cast(2, \"bigint\")) AS rep_val, sequence(cast(1, \"bigint\"), cast(4, \"bigint\"), cast(1, \"bigint\")) AS seq_val FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 12,
+      "match_rate": 85.66666666666667,
+      "sample_ek": {
+        "arr_joined": "10,20,30",
+        "arr_last_pos": 1,
+        "arr_len": 3,
+        "arr_max": 30,
+        "arr_min": 10,
+        "arr_pos": 1,
+        "arr_sorted": [
+          10,
+          20,
+          30
+        ],
+        "elem_0": 10,
+        "elem_1": 20,
+        "has_20": true,
+        "rep_val": [
+          "abc",
+          "abc"
+        ],
+        "seq_val": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "sample_rk": {
+        "arr_sorted": [
+          10.0,
+          20.0,
+          30.0
+        ],
+        "elem_0": 10.0,
+        "arr_min": 10.0,
+        "has_20": true,
+        "elem_1": 20.0,
+        "arr_max": 30.0,
+        "arr_pos": 1,
+        "arr_joined": "10.0,20.0,30.0",
+        "rep_val": [
+          "abc",
+          "abc"
+        ],
+        "arr_last_pos": 1,
+        "seq_val": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "arr_len": 3
+      },
+      "verdict": "HIGH_PARITY",
+      "notes": "Tested 12 fields (elem_0, elem_1, arr_len, has_20...)"
+    },
+    {
+      "rule_id": "rule_06_type_conversions",
+      "category": "Casting & Conversions",
+      "sql": "SELECT cast(voltage, \"bigint\") AS v_int, cast(temp, \"string\") AS t_str, cast(1, \"boolean\") AS b_true, cast(0, \"boolean\") AS b_false FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 4,
+      "match_rate": 95.0,
+      "sample_ek": {
+        "b_false": false,
+        "b_true": true,
+        "t_str": "19.2",
+        "v_int": 10
+      },
+      "sample_rk": {
+        "t_str": "19.2",
+        "b_true": true,
+        "v_int": 10,
+        "b_false": false
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 4 fields (v_int, t_str, b_true, b_false...)"
+    },
+    {
+      "rule_id": "rule_07_filtering_predicates",
+      "category": "Filtering & WHERE Clauses",
+      "sql": "SELECT device_id, temp, status FROM telemetry WHERE (temp >= 25.0 AND status = \"ACTIVE\") OR (pressure < 95.0)",
+      "total_sent": 100,
+      "ek_received": 47,
+      "rk_received": 47,
+      "fields_tested": 3,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "device_id": "DEV_001",
+        "status": "IDLE",
+        "temp": 19.2
+      },
+      "sample_rk": {
+        "device_id": "DEV_001",
+        "temp": 19.2,
+        "status": "IDLE"
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 3 fields (device_id, temp, status...)"
+    },
+    {
+      "rule_id": "rule_08_pattern_membership",
+      "category": "Pattern Matching & Sets",
+      "sql": "SELECT device_id, status FROM telemetry WHERE device_id LIKE \"DEV%\" AND status IN (\"ACTIVE\", \"ERROR\")",
+      "total_sent": 100,
+      "ek_received": 66,
+      "rk_received": 66,
+      "fields_tested": 2,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "device_id": "DEV_002",
+        "status": "ERROR"
+      },
+      "sample_rk": {
+        "status": "ERROR",
+        "device_id": "DEV_002"
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 2 fields (device_id, status...)"
+    },
+    {
+      "rule_id": "rule_09_datetime_formulas",
+      "category": "Datetime & Timestamps",
+      "sql": "SELECT (tstamp() >= 0) AS has_tstamp, (length(now()) > 0) AS has_now, (event_time() > 0) AS has_evt_time FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 3,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "has_evt_time": true,
+        "has_now": true,
+        "has_tstamp": true
+      },
+      "sample_rk": {
+        "has_tstamp": true,
+        "has_now": true,
+        "has_evt_time": true
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 3 fields (has_tstamp, has_now, has_evt_time...)"
+    },
+    {
+      "rule_id": "rule_10_count_window",
+      "category": "Stateful Window Aggregation",
+      "sql": "SELECT count(*) AS win_cnt, sum(temp) AS win_sum, round(avg(temp), 2) AS win_avg, min(temp) AS win_min, max(temp) AS win_max, last_agg_hit_count() AS agg_hit_cnt, (last_agg_hit_time() >= 0) AS has_agg_hit_time FROM telemetry GROUP BY CountWindow(10)",
+      "total_sent": 100,
+      "ek_received": 10,
+      "rk_received": 10,
+      "fields_tested": 7,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "agg_hit_cnt": 0,
+        "has_agg_hit_time": true,
+        "win_avg": 22.6,
+        "win_cnt": 10,
+        "win_max": 32,
+        "win_min": 16.8,
+        "win_sum": 226
+      },
+      "sample_rk": {
+        "has_agg_hit_time": true,
+        "agg_hit_cnt": 0,
+        "win_min": 16.8,
+        "win_max": 32.0,
+        "win_cnt": 10,
+        "win_sum": 226.0,
+        "win_avg": 22.6
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 7 fields (win_cnt, win_sum, win_avg, win_min...)"
+    },
+    {
+      "rule_id": "rule_11_trig_and_advanced_math",
+      "category": "Trigonometry & Logarithms",
+      "sql": "SELECT round(sin(temp), 3) AS t_sin, round(cos(temp), 3) AS t_cos, round(ln(abs(voltage)), 3) AS v_ln, round(exp(1.0), 3) AS e_const, bitand(12, 5) AS b_and, bitor(12, 5) AS b_or, bitxor(12, 5) AS b_xor FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 7,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "b_and": 4,
+        "b_or": 13,
+        "b_xor": 9,
+        "e_const": 2.718,
+        "t_cos": 0.939,
+        "t_sin": 0.343,
+        "v_ln": 2.351
+      },
+      "sample_rk": {
+        "v_ln": 2.351,
+        "b_xor": 9,
+        "t_sin": 0.343,
+        "t_cos": 0.939,
+        "e_const": 2.718,
+        "b_and": 4,
+        "b_or": 13
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 7 fields (t_sin, t_cos, v_ln, e_const...)"
+    },
+    {
+      "rule_id": "rule_12_expression_aliasing",
+      "category": "Derived Metric Calculations",
+      "sql": "SELECT device_id, round((temp * 9.0 / 5.0 + 32.0), 2) AS temp_fahrenheit, round((voltage * current * 3600.0 / 1000.0), 2) AS energy_kwh FROM telemetry",
+      "total_sent": 100,
+      "ek_received": 100,
+      "rk_received": 100,
+      "fields_tested": 3,
+      "match_rate": 100.0,
+      "sample_ek": {
+        "device_id": "DEV_001",
+        "energy_kwh": 26.46,
+        "temp_fahrenheit": 66.56
+      },
+      "sample_rk": {
+        "energy_kwh": 26.46,
+        "device_id": "DEV_001",
+        "temp_fahrenheit": 66.56
+      },
+      "verdict": "EXACT_MATCH",
+      "notes": "Tested 3 fields (device_id, temp_fahrenheit, energy_kwh...)"
+    }
+  ]
+}

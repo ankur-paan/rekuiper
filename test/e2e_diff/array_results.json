@@ -1,0 +1,239 @@
+{
+  "cardinality": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 4
+    }
+  },
+  "array_position": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 2
+    }
+  },
+  "element_at": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 10
+    }
+  },
+  "array_contains": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": true
+    }
+  },
+  "array_create": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "array_remove": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        10,
+        30,
+        40
+      ]
+    }
+  },
+  "array_last_position": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 2
+    }
+  },
+  "array_contains_any": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": true
+    }
+  },
+  "array_intersect": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        20,
+        30
+      ]
+    }
+  },
+  "array_union": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        10,
+        20,
+        30,
+        40,
+        99,
+        100
+      ]
+    }
+  },
+  "array_max": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 40
+    }
+  },
+  "array_avg": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 25.0
+    }
+  },
+  "array_min": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 10
+    }
+  },
+  "array_except": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        10,
+        30,
+        40
+      ]
+    }
+  },
+  "repeat": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        "abc",
+        "abc",
+        "abc"
+      ]
+    }
+  },
+  "sequence": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  },
+  "array_cardinality": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": 4
+    }
+  },
+  "array_flatten": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "array_distinct": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "array_map": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "array_join": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "10,20,30,40"
+    }
+  },
+  "array_shuffle": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        40,
+        20,
+        30,
+        10
+      ]
+    }
+  },
+  "array_concat": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        10,
+        20,
+        30,
+        40,
+        99
+      ]
+    }
+  },
+  "array_sort": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "kvpair_array_to_obj": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": {
+        "k1": 10
+      }
+    }
+  }
+}

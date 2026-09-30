@@ -864,6 +864,10 @@
         {
           "title": "How to Debug Rules",
           "path": "getting_started/debug_rules"
+        },
+        {
+          "title": "Differential Qualification & Chaos Testing",
+          "path": "guide/differential_testing"
         }
       ]
     },

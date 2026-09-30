@@ -1,5 +1,9 @@
 # Date and Time Functions
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry load on **2026-09-30 18:45:00 UTC**.  
+> **Key Runtime Characteristic**: In `rekuiper`, `now()` returns Int64 Unix epoch milliseconds (e.g., `1790794146577`). This enables direct numerical comparisons and arithmetic in filters and SELECT clauses (e.g., `WHERE now() - ts < 60000`).
+
 Date and time functions are used to perform operations on date and time type data.
 
 ## NOW

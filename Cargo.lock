@@ -2291,6 +2291,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rekuiper-mcp"
+version = "0.501.0-beta"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rekuiper-sql",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rekuiper-server"
 version = "0.501.0-beta"
 dependencies = [

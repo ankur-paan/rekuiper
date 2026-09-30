@@ -92,6 +92,16 @@ impl SqliteKvStore {
         .execute(&pool)
         .await
         .context("Failed to migrate KV table")?;
+
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT key, value FROM kv WHERE namespace = 'keyed_state'")
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
+        for (k, v) in rows {
+            set_keyed_state(k, v);
+        }
+
         Ok(Self { pool })
     }
 }
@@ -117,6 +127,9 @@ impl KvStore for SqliteKvStore {
         .bind(val)
         .execute(&self.pool)
         .await?;
+        if namespace == "keyed_state" {
+            set_keyed_state(key, val);
+        }
         Ok(())
     }
 
@@ -126,6 +139,9 @@ impl KvStore for SqliteKvStore {
             .bind(key)
             .execute(&self.pool)
             .await?;
+        if namespace == "keyed_state" {
+            remove_keyed_state(key);
+        }
         Ok(())
     }
 
@@ -236,4 +252,26 @@ impl KvStore for MemKvStore {
         }
         Ok(())
     }
+}
+
+static KEYED_STATE_CACHE: std::sync::OnceLock<Arc<parking_lot::RwLock<HashMap<String, String>>>> =
+    std::sync::OnceLock::new();
+
+fn keyed_state_cache() -> &'static Arc<parking_lot::RwLock<HashMap<String, String>>> {
+    KEYED_STATE_CACHE.get_or_init(|| Arc::new(parking_lot::RwLock::new(HashMap::new())))
+}
+
+/// Retrieve a value from the keyed_state cache.
+pub fn get_keyed_state(key: &str) -> Option<String> {
+    keyed_state_cache().read().get(key).cloned()
+}
+
+/// Set a value in the keyed_state cache.
+pub fn set_keyed_state(key: impl Into<String>, val: impl Into<String>) {
+    keyed_state_cache().write().insert(key.into(), val.into());
+}
+
+/// Remove a value from the keyed_state cache.
+pub fn remove_keyed_state(key: &str) -> Option<String> {
+    keyed_state_cache().write().remove(key)
 }

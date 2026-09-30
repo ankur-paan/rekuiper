@@ -7,6 +7,7 @@ members = [
     "crates/rekuiper-server",
     "crates/rekuiper-cli",
     "crates/kuiperd",
+    "crates/rekuiper-mcp",
 ]
 resolver = "2"
 
