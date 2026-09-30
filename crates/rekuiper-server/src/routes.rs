@@ -4314,8 +4314,14 @@ async fn run_stateless_rule(
     // semantics); the input-row filter then decides emission.
     let rule_state = RuleState::default();
     let start_time_ms = chrono::Utc::now().timestamp_millis();
-    rule_state.state.write().insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
-    rule_state.state.write().insert("__rule_start__".to_string(), Value::from(start_time_ms));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     // Stateless fast path: no table/stream joins, so skip the join machinery
     // and borrow the input map instead of cloning the full record.
     let has_joins = !select_stmt.joins.is_empty();
@@ -4329,8 +4335,14 @@ async fn run_stateless_rule(
         if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
             continue;
         }
-        record.data.entry("__rule_id__".to_string()).or_insert_with(|| Value::String(rule_id.clone()));
-        record.data.entry("__rule_start__".to_string()).or_insert_with(|| Value::from(start_time_ms));
+        record
+            .data
+            .entry("__rule_id__".to_string())
+            .or_insert_with(|| Value::String(rule_id.clone()));
+        record
+            .data
+            .entry("__rule_start__".to_string())
+            .or_insert_with(|| Value::from(start_time_ms));
         if has_joins {
             let Some(mut joined) =
                 apply_lookup_joins(&table_manager, &source_configs, &select_stmt, &record.data)
@@ -4340,8 +4352,12 @@ async fn run_stateless_rule(
                 counters.inc_filtered(1);
                 continue;
             };
-            joined.entry("__rule_id__".to_string()).or_insert_with(|| Value::String(rule_id.clone()));
-            joined.entry("__rule_start__".to_string()).or_insert_with(|| Value::from(start_time_ms));
+            joined
+                .entry("__rule_id__".to_string())
+                .or_insert_with(|| Value::String(rule_id.clone()));
+            joined
+                .entry("__rule_start__".to_string())
+                .or_insert_with(|| Value::from(start_time_ms));
             let output_opt = Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
             let passes = match &select_stmt.where_clause {
                 Some(cond) => Evaluator::eval_bool(cond, &joined),
@@ -5417,10 +5433,7 @@ async fn get_rule_explain(State(state): State<AppState>, Path(name): Path<String
     .into_response()
 }
 
-async fn get_rule_scantables(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-) -> Response {
+async fn get_rule_scantables(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }

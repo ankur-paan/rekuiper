@@ -16,7 +16,10 @@ async fn test_initialize_handshake() {
         })),
     };
 
-    let resp = handler.handle_request(req).await.expect("Must produce response");
+    let resp = handler
+        .handle_request(req)
+        .await
+        .expect("Must produce response");
     assert_eq!(resp.id, Some(json!(1)));
     let result = resp.result.expect("Should have result");
     assert_eq!(result["protocolVersion"], "2024-11-05");
@@ -33,14 +36,14 @@ async fn test_tools_list() {
         params: None,
     };
 
-    let resp = handler.handle_request(req).await.expect("Must produce response");
+    let resp = handler
+        .handle_request(req)
+        .await
+        .expect("Must produce response");
     let result = resp.result.expect("Should have result");
     let tools = result["tools"].as_array().expect("Tools must be an array");
 
-    let tool_names: Vec<&str> = tools
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+    let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
     // SQL intelligence
     assert!(tool_names.contains(&"validate_sql"));

@@ -738,24 +738,26 @@ impl Evaluator {
         }
         if lowered == "last_hit_count" {
             let call_id = Self::column_name(expr, 0);
-            let state_key = format!("$$last_hit_count:{}:{}", call_id, partition_key.unwrap_or(""));
+            let state_key = format!(
+                "$$last_hit_count:{}:{}",
+                call_id,
+                partition_key.unwrap_or("")
+            );
             let mut guard = state.state.write();
-            let current = guard
-                .get(&state_key)
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            let current = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
             guard.insert(state_key, Value::from(current.saturating_add(1)));
             return Value::from(current);
         }
         if lowered == "last_hit_time" {
             let call_id = Self::column_name(expr, 0);
-            let state_key = format!("$$last_hit_time:{}:{}", call_id, partition_key.unwrap_or(""));
+            let state_key = format!(
+                "$$last_hit_time:{}:{}",
+                call_id,
+                partition_key.unwrap_or("")
+            );
             let event_time = Self::resolve_event_time(record).as_i64().unwrap_or(0);
             let mut guard = state.state.write();
-            let prev = guard
-                .get(&state_key)
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            let prev = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
             guard.insert(state_key, Value::from(event_time));
             return Value::from(prev);
         }
@@ -3536,8 +3538,13 @@ impl Evaluator {
         };
         let decimals = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0).max(0) as usize;
         let locale = args.get(2).and_then(|v| v.as_str()).unwrap_or("en_US");
-        let is_comma_decimal = locale.starts_with("de") || locale.starts_with("fr") || locale.starts_with("it");
-        let (thousand_sep, decimal_sep) = if is_comma_decimal { ('.', ',') } else { (',', '.') };
+        let is_comma_decimal =
+            locale.starts_with("de") || locale.starts_with("fr") || locale.starts_with("it");
+        let (thousand_sep, decimal_sep) = if is_comma_decimal {
+            ('.', ',')
+        } else {
+            (',', '.')
+        };
 
         let formatted_base = format!("{:.prec$}", num, prec = decimals);
         let parts: Vec<&str> = formatted_base.split('.').collect();
@@ -3553,7 +3560,11 @@ impl Evaluator {
             }
             with_commas.push(c);
         }
-        let res = if is_neg { format!("-{}", with_commas) } else { with_commas };
+        let res = if is_neg {
+            format!("-{}", with_commas)
+        } else {
+            with_commas
+        };
         if decimals > 0 && parts.len() > 1 {
             Value::String(format!("{}{}{}", res, decimal_sep, parts[1]))
         } else {
@@ -4686,7 +4697,7 @@ impl Evaluator {
         };
         let mapped: Vec<Value> = arr
             .iter()
-            .map(|item| Self::eval_call(func_name, &[item.clone()]))
+            .map(|item| Self::eval_call(func_name, std::slice::from_ref(item)))
             .collect();
         Value::Array(mapped)
     }

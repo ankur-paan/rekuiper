@@ -101,9 +101,13 @@ pub async fn read_resource(
         "rekuiper://udfs" => fetch_endpoint(client, base_url, "/udf/javascript").await?,
         "rekuiper://plugins" => fetch_endpoint(client, base_url, "/plugins/sources").await?,
         "rekuiper://configs" => fetch_endpoint(client, base_url, "/configs").await?,
-        "rekuiper://metadata/sources" => fetch_endpoint(client, base_url, "/metadata/sources").await?,
+        "rekuiper://metadata/sources" => {
+            fetch_endpoint(client, base_url, "/metadata/sources").await?
+        }
         "rekuiper://metadata/sinks" => fetch_endpoint(client, base_url, "/metadata/sinks").await?,
-        "rekuiper://metadata/functions" => fetch_endpoint(client, base_url, "/metadata/functions").await?,
+        "rekuiper://metadata/functions" => {
+            fetch_endpoint(client, base_url, "/metadata/functions").await?
+        }
         "rekuiper://metrics" => {
             let url = format!("{}/rules", base_url.trim_end_matches('/'));
             let resp = client.get(&url).send().await;

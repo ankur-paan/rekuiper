@@ -2268,11 +2268,17 @@ fn test_newly_implemented_functions() {
     rekuiper_core::set_keyed_state("sensor_cal", "100");
 
     assert_eq!(
-        eval_one("SELECT indexof('hello world', 'world') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT indexof('hello world', 'world') AS v FROM demo",
+            &empty()
+        ),
         json!(6)
     );
     assert_eq!(
-        eval_one("SELECT indexof('hello world', 'xyz') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT indexof('hello world', 'xyz') AS v FROM demo",
+            &empty()
+        ),
         json!(-1)
     );
     assert_eq!(
@@ -2280,26 +2286,44 @@ fn test_newly_implemented_functions() {
         json!("1,234,567.89")
     );
     assert_eq!(
-        eval_one("SELECT format_time(1704153600000, 'yyyy-MM-dd') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT format_time(1704153600000, 'yyyy-MM-dd') AS v FROM demo",
+            &empty()
+        ),
         json!("2024-01-02")
     );
     assert_eq!(
-        eval_one("SELECT array_last_position([10, 20, 30, 20, 50], 20) AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT array_last_position([10, 20, 30, 20, 50], 20) AS v FROM demo",
+            &empty()
+        ),
         json!(3)
     );
     assert_eq!(
-        eval_one("SELECT array_map('abs', [-10, 20, -30]) AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT array_map('abs', [-10, 20, -30]) AS v FROM demo",
+            &empty()
+        ),
         json!([10, 20, 30])
     );
-    let shuffled = eval_one("SELECT array_shuffle([1, 2, 3, 4, 5]) AS v FROM demo", &empty());
+    let shuffled = eval_one(
+        "SELECT array_shuffle([1, 2, 3, 4, 5]) AS v FROM demo",
+        &empty(),
+    );
     assert_eq!(shuffled.as_array().map(|a| a.len()), Some(5));
 
     assert_eq!(
-        eval_one("SELECT get_keyed_state('sensor_cal', 'bigint', 0) AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT get_keyed_state('sensor_cal', 'bigint', 0) AS v FROM demo",
+            &empty()
+        ),
         json!(100)
     );
     assert_eq!(
-        eval_one("SELECT get_keyed_state('missing_key', 'string', 'default_val') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT get_keyed_state('missing_key', 'string', 'default_val') AS v FROM demo",
+            &empty()
+        ),
         json!("default_val")
     );
 
@@ -2319,4 +2343,3 @@ fn test_newly_implemented_functions() {
     let agg2 = eval_agg_one("SELECT last_agg_hit_count() AS v FROM demo", &batch);
     assert_eq!(agg2, json!(1));
 }
-

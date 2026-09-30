@@ -817,7 +817,14 @@ pub async fn execute_tool(
                 return CallToolResult::err("Missing required parameter: 'sql'");
             };
             let body = json!({ "sql": sql });
-            forward_request(client, base_url, reqwest::Method::POST, "/streams", Some(body)).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::POST,
+                "/streams",
+                Some(body),
+            )
+            .await
         }
 
         "delete_stream" => {
@@ -855,7 +862,14 @@ pub async fn execute_tool(
                 return CallToolResult::err("Missing required parameter: 'sql'");
             };
             let body = json!({ "sql": sql });
-            forward_request(client, base_url, reqwest::Method::POST, "/tables", Some(body)).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::POST,
+                "/tables",
+                Some(body),
+            )
+            .await
         }
 
         "delete_table" => {
@@ -908,7 +922,14 @@ pub async fn execute_tool(
                 body["options"] = opts.clone();
             }
 
-            forward_request(client, base_url, reqwest::Method::POST, "/rules", Some(body)).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::POST,
+                "/rules",
+                Some(body),
+            )
+            .await
         }
 
         "update_rule" => {
@@ -992,7 +1013,14 @@ pub async fn execute_tool(
             };
             let path = format!("/rules/{}/trace/start", name);
             let strategy = args.get("strategy").cloned().unwrap_or(json!("always"));
-            forward_request(client, base_url, reqwest::Method::POST, &path, Some(strategy)).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::POST,
+                &path,
+                Some(strategy),
+            )
+            .await
         }
 
         "stop_rule_trace" => {
@@ -1055,7 +1083,14 @@ pub async fn execute_tool(
         }
 
         "list_javascript_udfs" => {
-            forward_request(client, base_url, reqwest::Method::GET, "/udf/javascript", None).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::GET,
+                "/udf/javascript",
+                None,
+            )
+            .await
         }
 
         "create_javascript_udf" => {
@@ -1135,7 +1170,12 @@ pub async fn execute_tool(
 
             let rule_list_url = format!("{}/rules", base_url.trim_end_matches('/'));
             let rules_count = match client.get(&rule_list_url).send().await {
-                Ok(resp) => resp.json::<Vec<String>>().await.ok().map(|v| v.len()).unwrap_or(0),
+                Ok(resp) => resp
+                    .json::<Vec<String>>()
+                    .await
+                    .ok()
+                    .map(|v| v.len())
+                    .unwrap_or(0),
                 Err(_) => 0,
             };
 
@@ -1156,7 +1196,9 @@ pub async fn execute_tool(
         // --- 10. Universal Escape Hatch ---
         "execute_rekuiper_api" => {
             let Some(method_str) = args.get("method").and_then(|v| v.as_str()) else {
-                return CallToolResult::err("Missing required parameter: 'method' (GET, POST, PUT, DELETE, PATCH)");
+                return CallToolResult::err(
+                    "Missing required parameter: 'method' (GET, POST, PUT, DELETE, PATCH)",
+                );
             };
             let Some(endpoint) = args.get("endpoint").and_then(|v| v.as_str()) else {
                 return CallToolResult::err("Missing required parameter: 'endpoint'");
@@ -1168,7 +1210,9 @@ pub async fn execute_tool(
                 "PUT" => reqwest::Method::PUT,
                 "DELETE" => reqwest::Method::DELETE,
                 "PATCH" => reqwest::Method::PATCH,
-                other => return CallToolResult::err(format!("Unsupported HTTP method: '{}'", other)),
+                other => {
+                    return CallToolResult::err(format!("Unsupported HTTP method: '{}'", other))
+                }
             };
 
             let body = args.get("body").cloned();

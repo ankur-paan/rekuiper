@@ -72,9 +72,10 @@ impl McpHandler {
                 let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
 
                 match resources::read_resource(&self.client, &self.base_url, uri).await {
-                    Ok(content) => {
-                        Some(JsonRpcResponse::success(id, json!({ "contents": [content] })))
-                    }
+                    Ok(content) => Some(JsonRpcResponse::success(
+                        id,
+                        json!({ "contents": [content] }),
+                    )),
                     Err(err) => Some(JsonRpcResponse::error(id, -32002, err)),
                 }
             }
@@ -93,9 +94,10 @@ impl McpHandler {
                 let arguments = params.get("arguments").cloned();
 
                 match prompts::get_prompt_messages(name, arguments) {
-                    Ok(messages) => {
-                        Some(JsonRpcResponse::success(id, json!({ "messages": messages })))
-                    }
+                    Ok(messages) => Some(JsonRpcResponse::success(
+                        id,
+                        json!({ "messages": messages }),
+                    )),
                     Err(err) => Some(JsonRpcResponse::error(id, -32002, err)),
                 }
             }
