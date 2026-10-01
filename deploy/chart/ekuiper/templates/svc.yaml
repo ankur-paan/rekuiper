@@ -34,6 +34,17 @@ spec:
     {{- else if eq .Values.service.type "ClusterIP" }}
     nodePort: null
     {{- end }}
+  {{- if .Values.service.ports.prometheus }}
+  - name: {{ .Values.service.ports.prometheus.name | default "prometheus" }}
+    port: {{ .Values.service.ports.prometheus.port | default 20499 }}
+    protocol: TCP
+    targetPort: prometheus
+    {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) (not (empty .Values.service.nodePorts.prometheus)) }}
+    nodePort: {{ .Values.service.nodePorts.prometheus }}
+    {{- else if eq .Values.service.type "ClusterIP" }}
+    nodePort: null
+    {{- end }}
+  {{- end }}
   selector:
     {{- include "ekuiper.selectorLabels" . | nindent 4 }}
 
@@ -56,5 +67,11 @@ spec:
     port: {{ .Values.service.ports.ekuiper.port | default 20498 }}
     protocol: TCP
     targetPort: ekuiper
+  {{- if .Values.service.ports.prometheus }}
+  - name: {{ .Values.service.ports.prometheus.name | default "prometheus" }}
+    port: {{ .Values.service.ports.prometheus.port | default 20499 }}
+    protocol: TCP
+    targetPort: prometheus
+  {{- end }}
   selector:
     {{- include "ekuiper.selectorLabels" . | nindent 4 }}
