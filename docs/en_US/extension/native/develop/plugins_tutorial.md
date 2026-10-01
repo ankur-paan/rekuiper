@@ -77,7 +77,7 @@ type mysqlConfig struct {
 
 type mysqlSink struct {
   conf *mysqlConfig
-  //数据库连接实例
+  // Database connection instance
   db *sql.DB
 }
 
@@ -113,14 +113,14 @@ func (m *mysqlSink) Connect(ctx api.StreamContext) error {
   return err
 }
 
-// 该函数为数据处理简化函数。
+// This function is a simplified data processing function.
 func (m *mysqlSink) Collect(ctx api.StreamContext, item api.MessageTuple) error {
   ctx.GetLogger().Debugf("mysql sink receive %s", item)
   v, ok := item.Value("name", "")
   if !ok {
     return fmt.Errorf("receive value does not have name field")
   }
-  //TODO 此处列名写死。生产环境中一般可从item中的键值对获取列名
+  // TODO: Hardcoded column name. In production, column names can be extracted from key-value pairs in the item.
   sql := fmt.Sprintf("INSERT INTO %s (`name`) VALUES ('%s')", m.conf.Table, v)
   ctx.GetLogger().Debugf(sql)
   insert, err := m.db.Query(sql)
@@ -131,7 +131,7 @@ func (m *mysqlSink) Collect(ctx api.StreamContext, item api.MessageTuple) error 
   return nil
 }
 
-// 该函数为数据处理简化函数。
+// This function is a simplified data processing function.
 func (m *mysqlSink) CollectList(ctx api.StreamContext, item api.MessageTupleList) error {
   ctx.GetLogger().Debugf("mysql sink receive %s", item)
   if item.Len() <= 0 {
@@ -142,7 +142,7 @@ func (m *mysqlSink) CollectList(ctx api.StreamContext, item api.MessageTupleList
     if !ok {
       return false
     }
-    //TODO 此处列名写死。生产环境中一般可从item中的键值对获取列名
+    // TODO: Hardcoded column name. In production, column names can be extracted from key-value pairs in the item.
     sql := fmt.Sprintf("INSERT INTO %s (`name`) VALUES ('%s')", m.conf.Table, v)
     ctx.GetLogger().Debugf(sql)
     insert, err := m.db.Query(sql)

@@ -258,7 +258,7 @@ def publish(client):
     while True:
         time.sleep(1)
         encoded = base64.b64encode(open('./1.png', 'rb').read()).decode()
-        # open('1.txt', 'wb').write(encoded)  # 保存
+        # open('1.txt', 'wb').write(encoded)  # Save
 
         request_data = {
             "image": encoded,

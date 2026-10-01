@@ -38,8 +38,6 @@ Launching Open Telemetry Collector and Jaeger Locally
 
 ### Start the Open Telemetry Collector and Jaeger using docker-compose
 
-通过 docker-compose 启动 open telemetry collector 和  Jaeger
-
 ```shell
 docker-compose up -d
 ```
@@ -98,7 +96,7 @@ networks:
     driver: bridge
 ```
 
-### 配置 eKuiper 开启将数据追踪发送到 Collector
+### Configure eKuiper to Send Trace Data to Collector
 
 ```yaml
 openTelemetry:

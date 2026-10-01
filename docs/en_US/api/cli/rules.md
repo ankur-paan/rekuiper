@@ -250,7 +250,7 @@ There are two ways to validate rules, which are the same as the two ways to crea
 
 - Specify the rule definition in command line.
 
-示例：
+Sample:
 
 ```shell
 # bin/kuiper validate rule rule1 '{"sql": "SELECT * from demo","actions": [{"log":  {}},{"mqtt":  {"server":"tcp://127.0.0.1:1883", "topic":"demoSink"}}]}'

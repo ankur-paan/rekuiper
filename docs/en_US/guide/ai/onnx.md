@@ -86,7 +86,7 @@ const TOPIC = "onnxPubImg"
 
 images := []string{
 "img.png",
-// 其他你需要的图像
+// Other images you need
 }
     opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
     client := mqtt.NewClient(opts)
