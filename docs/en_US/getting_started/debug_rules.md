@@ -18,7 +18,7 @@ Content-Type: application/json
 
 {
   "id": "rule1",
-  "sql": "SELECT values.tag1 AS temperature, values.tag2 AS humidity FROM neuronStream",
+  "sql": "SELECT values.tag1 AS temperature, values.tag2 AS humidity FROM sensorStream",
   "actions": [
     {
       "influx": {
@@ -91,7 +91,7 @@ this:
 ```text
 HTTP/1.1 400 Bad Request
 
-invalid rule json: Parse SQL SELECT temperature humidity FROM neuronStream error: found "humidity", expected FROM..
+invalid rule json: Parse SQL SELECT temperature humidity FROM sensorStream error: found "humidity", expected FROM..
 ```
 
 Missing comma between two fields, thus the SQL parser thinks `humidity` is a table name and expected from before it.

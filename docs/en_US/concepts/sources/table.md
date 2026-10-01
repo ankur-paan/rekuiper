@@ -2,7 +2,7 @@
 
 A table is a snapshot of the source data. We support two kinds of table: scan table and lookup table.
 
-- Scan table: Consume the stream data as changelog and update the table continuously. In contrast to the common static tables that represent batch data, scan tables can change over time. All stream sources like MQTT, neuron source can also be a scan table source. Scan table was supported since v1.2.0.
+- Scan table: Consume the stream data as changelog and update the table continuously. In contrast to common static tables that represent batch data, scan tables change over time. Stream sources like MQTT, Kafka, or HTTP can also be scan table sources. Scan table was supported since v1.2.0.
 - Lookup table: an external table whose content is usually never read entirely but queried for individual values when necessary. We support to bind physical table as table and generate lookup command(e.g. a SQL on db) on demand. Notice that, not all source type can be a lookup table source, only sources like SQL source which has an external storage can be a lookup source. Lookup table was supported since v1.7.0.
 
 ## Scan table

@@ -215,7 +215,7 @@ For the following rules:
   "actions": [
      {
       "mqtt": {
-        "server": "tcp://broker.emqx.io:1883",
+        "server": "tcp://127.0.0.1:1883",
         "topic": "devices/+/messages",
         "qos": 1,
         "clientId": "demo_001",

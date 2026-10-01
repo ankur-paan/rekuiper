@@ -85,7 +85,7 @@ Example for taosdb rest：
 
 ```json
 {"id": "rest1",
-  "sql": "SELECT tele[0].Tag00001 AS temperature, tele[0].Tag00002 AS humidity FROM neuron",
+  "sql": "SELECT tele[0].Tag00001 AS temperature, tele[0].Tag00002 AS humidity FROM demoStream",
   "actions": [
     {
       "rest": {
@@ -119,7 +119,7 @@ Then in the action, we set the `method` and `url` to be the value of the result 
 
 ```json
 {"id": "rest2",
-  "sql": "SELECT tele[0]->Tag00001 AS temperature, tele[0]->Tag00002 AS humidity, method, concat(\"http://xxx.xxx.xxx.xxx:6041/rest/sql\", urlPostfix) as url FROM neuron",
+  "sql": "SELECT tele[0]->Tag00001 AS temperature, tele[0]->Tag00002 AS humidity, method, concat(\"http://xxx.xxx.xxx.xxx:6041/rest/sql\", urlPostfix) as url FROM demoStream",
   "actions": [
     {
       "rest": {
@@ -155,7 +155,7 @@ To upload data as files to an HTTP server, use `bodyType=formdata` configuration
 ```json
 {
   "id": "restUpload",
-  "sql": "SELECT value1, value2 FROM neuron",
+  "sql": "SELECT value1, value2 FROM demoStream",
   "actions": [
     {
       "rest": {

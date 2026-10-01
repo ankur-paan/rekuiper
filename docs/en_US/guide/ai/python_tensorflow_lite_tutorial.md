@@ -212,7 +212,7 @@ Content-Type: application/json
   "actions": [
    {
       "mqtt":{
-        "server": "tcp://emqx.io:1883",
+        "server": "tcp://127.0.0.1:1883",
         "sendSingle": true,
         "topic": "ekuiper/labels"
       }

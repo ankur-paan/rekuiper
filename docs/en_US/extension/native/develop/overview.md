@@ -1,5 +1,7 @@
 # Native Plugin Development
 
+> **Notice**: Go native `.so` plugin compilation is unsupported in the current version of rekuiper and in the near future. rekuiper is built in Rust and is targeting portable plugin architectures through [WebAssembly (Wasm)](../../wasm/overview.md) and [External Services](../../external/external_func.md). The documentation below is retained as a reference for upstream eKuiper compatibility.
+
 Users can utilize the Go language native plugin system to write Source, Sink, and function implementations using Go.
 Regardless of the type of plugin being developed, the following steps are required:
 

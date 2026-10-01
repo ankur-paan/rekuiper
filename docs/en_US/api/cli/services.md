@@ -47,10 +47,10 @@ Example：
 {
   "About": {
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "Author Name",
+      "email": "developer@example.org",
+      "company": "Example Corp",
+      "website": "https://example.org"
     },
     "helpUrl": {
       "en_US": "https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/plugins/functions/functions.md",

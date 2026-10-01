@@ -1,76 +1,58 @@
-# Use of eKuiper management console
+# Management Web UI
 
 ## Overview
 
-From eKuiper version 0.9.1, whenever a new version of eKuiper is released, the corresponding version of the management console will be released. This article uses a practical example to illustrate how to use the management console to operate and manage eKuiper nodes. In the article, the data will be subscribed from the MQTT server, and be sent to the specified file after processing through the rules written by eKuiper. The demonstration is as follows:
+The web management console provides a browser-based dashboard to manage rekuiper nodes, streams, rules, and plugins. This guide walks through setting up the console, connecting to a rekuiper instance, and creating an end-to-end streaming rule.
 
-- Create a eKuiper node through the management console
-- Create a stream to subscribe to the data in the MQTT server. This example demonstrates subscribing to the MQTT server. The relevant information is shown below.
-  - Address: `tcp://broker.emqx.io:1883`，
-  - Topic: `devices/device_001/messages`，
-  - Data: `{"temperature": 40, "humidity" : 20}`
-- Create a rule to calculate the subscribed data and write the data to the sink "This example demonstrates writing the subscribed message to a file".
-- eKuiper currently supports multiple sources and sinks. Users only need to install the corresponding plugins to achieve the corresponding function. "The source of this example is MQTT source, which has built-in support without the need of installation; the sink is a file, which does not have built-in support and needs to be installed separately."
+The walkthrough covers:
+- Connecting the web console to a rekuiper node
+- Creating a stream that ingests data from an MQTT topic:
+  - Address: `tcp://127.0.0.1:1883`
+  - Topic: `devices/device_001/messages`
+  - Sample payload: `{"temperature": 40, "humidity": 20}`
+- Creating a SQL rule to filter sensor readings and write them to a file destination
 
-## Architecture design
+## Architecture
 
-- UI end: a visual interface, easy for users to operate
-- Kuiper-manager: Management console, which essentially is a reverse HTTP proxy service, providing the services of user management, permission verification. It can be deployed in the cloud or at the edge
-- eKuiper instance: managed eKuiper node instance, eKuiper-manager can manage multiple eKuiper nodes at the same time
+- **Web Browser UI**: Visual interface for rules, streams, schemas, and metrics.
+- **kuiper-manager**: Lightweight HTTP reverse proxy providing user authentication and node management. Can run on the edge gateway or in the cloud.
+- **rekuiper instance**: Stream processing engine exposing its REST API on port `9081`.
 
 ![construct](./resources/arch.png)
 
-## Install the management console
+## Installation
 
-In production, eKuiper is usually installed at the edge and eKuiper manager is installed at the gateway or cloud to manage one or more eKuiper instances at the edge. In this case, the two are deployed on different physical machines and need to be deployed separately. This chapter will use this approach for deployment.
+### 1. Run rekuiper
 
-During test, it is more handy to use docker compose to install and deploy both products with one click. Please refer to [Run with Management Console](../../installation.md#running-ekuiper-with-management-console) for details.
+Run rekuiper in Docker with ports `9081` (REST API), `20498` (NanoIPC), and `20499` (RPC/Prometheus) exposed:
 
-### Install eKuiper
+```shell
+docker run -d \
+  --name rekuiper \
+  -p 9081:9081 \
+  -p 20498:20498 \
+  -p 20499:20499 \
+  ankurkrp/rekuiper:0.502-beta
+```
 
-- Pull eKuiper's Docker image from [Docker Image Library](https://hub.docker.com/r/lfedge/ekuiper/tags). Since it is required to install the plugin in this article, you must use the `ekuiper:1.8-slim` image (`ekuiper:1.8-alpine` image is relatively small and easy to install, but due to the lack of some necessary library files, the plug-in cannot run normally. The `ekuiper:1.8-dev` image is the development version, which is suitable for use in the development phase).
+Verify that rekuiper is running:
 
-  ```shell
-  docker pull lfedge/ekuiper:1.8-slim
-  ```
+```shell
+curl http://localhost:9081/ping
+# Output: pong
+```
 
-- Run the eKuiper container (for convenience, we will use the public MQTT server provided by [EMQ](https://www.emqx.io), and the address can be set by the `-e` option when running the container). If you want to access the eKuiper instance through the host, you can expose port 9081 by adding the `-p 9081:9081` parameter when starting the container.
+### 2. Run the Management Console
 
-  ```shell
-  # docker run -d --name kuiper -e MQTT_SOURCE__DEFAULT__SERVER="tcp://broker.emqx.io:1883" lfedge/ekuiper:1.8-slim
-  ```
+Pull and start the open-source management console container:
 
-  When the container is running, the MQTT server address can be set through the `-e` option, and the data is written to the MQTT source configuration file, which can be viewed by the following command:
-
-  ```shell
-  # docker exec -it kuiper sh
-  # cat etc/mqtt_source.yaml
-  ```
-
-  Some output of this file is shown below, and the value of `server` is set to `tcp://broker.emqx.io:1883`.
-
-  ```yaml
-  default:
-    concurrency: 1
-    qos: 1
-    server: "tcp://broker.emqx.io:1883"
-    sharedSubscription: true
-  ....
-  ```
-
-### Install management console
-
-- Pull the Docker image of kuiper-manager from [Docker Image Library](https://hub.docker.com/r/emqx/ekuiper-manager/tags), and `1.8-ief` is a dedicated image for Huawei IEF users, This example uses the `1.8` image.
-
-  ```shell
-  docker pull emqx/ekuiper-manager:1.8
-  ```
-
-- Run the Kuiper-manager container and expose port 9082. Whereas DEFAULT_EKUIPER_ENDPOINT can be used to specify the default managed eKuiper address, which should be set to the actual ip of the machine where the eKuiper is located.
-
-  ```shell
-  docker run --name kuiperManager -d -p 9082:9082 -e DEFAULT_EKUIPER_ENDPOINT="http://$your_ekuiper_host:9081" emqx/ekuiper-manager:1.8
-  ```
+```shell
+docker run -d \
+  --name ekuiper-manager \
+  -p 9082:9082 \
+  -e DEFAULT_EKUIPER_ENDPOINT="http://localhost:9081" \
+  ankur-paan/ekuiper-manager:latest
+```
 
 ## Getting started
 
@@ -97,82 +79,53 @@ When creating a eKuiper service, you need to fill in the "service type", "servic
 - Endpoint URL: `http://$IP:9081`, the IP acquisition command is as follows:
 
   ```shell
-  docker inspect kuiper |  grep IPAddress
+  docker inspect rekuiper | grep IPAddress
   ```
 
-The example of creating a eKuiper service is shown in the figure below. If the port is exposed to the host, then the 9081 port address on the host can also be used directly.
+The example of creating a service is shown below. If port `9081` is exposed to the host, you can also use `http://localhost:9081`.
 
 ![addNode](./resources/add_service.png)
 
 ### Create a stream
 
-Create a stream named `demoStream`, as shown below:
+Create a stream named `demoStream`:
 
-- Used to subscribe to MQTT server messages with the address `tcp://broker.emqx.io:1883`
-
-- The message topic is `devices/device_001/messages`
-
-- The stream structure definition contains the following two fields.
-
-  - temperature: bigint
-  - humidity: bigint
-
-  Users can also remove "whether it is a stream with structure" to define a schemaless data source.
-
-- "Stream Type" can be left unselected. If not selected, it is "mqtt" by default, or you can directly select "mqtt" as shown in the figure below
-
-- "Configuration Group", similar to "Stream Type". If not selected, "default" is used by default
-
-- "Stream format", similar to "Stream Type". If not selected, the default "json" is used
+- Ingest from MQTT broker at `tcp://127.0.0.1:1883`
+- Topic: `devices/device_001/messages`
+- Stream schema fields:
+  - `temperature`: bigint
+  - `humidity`: bigint
 
 ![newStream](./resources/new_stream.png)
 
-As shown above, the "default" configuration group is used. Users can also write their own configuration according to their needs. The specific operation is to click `Source Configuration` on the page of creating a steam, Jump to the configuration page, expand the type of configuration you need, and click the plus sign to create source config and a dialog box will pop up as shown below.
-
-![sourceConf](./resources/source_conf.png)
-
-![sourceConf](./resources/create_conf.png)
-
 ### Create a rule
 
-As shown in the figure below, a rule named demoRule is created to filter out the data with temperature> 30 in the data. The SQL editor can give hints during the user's SQL writing process to facilitate the user to complete the SQL writing.
+Create a rule named `demoRule` to filter out records where `temperature > 30`. The SQL editor provides syntax highlighting and completion.
 
 ![newRule](./resources/new_rule.png)
 
-Click the "Add" button and a dialog box will pop up as shown below. The file path of `/ekuiper/demoFile` where the input result is stored is input . More information about the file sink can be found in [Help File](../../guide/sinks/builtin/file.md). The target file is in the `Beta` state and cannot be used as an actual production environment.
+Click the "Add" button to configure an action destination, such as writing results to `/tmp/demoFile`. For details on the file destination, refer to the [File sink guide](../../guide/sinks/builtin/file.md).
 
 ![sinkConf](./resources/sink_conf.png)
 
-After the rule is created, if everything goes well, the rule is running.
-
 ### View execution results
 
-Enter the eKuiper container to create a file:
+Publish test sensor data using `mosquitto_pub`:
 
 ```shell
-# docker exec -it kuiper sh
-# touch demoFile
-# tail -f demoFile
+mosquitto_pub -h 127.0.0.1 -m '{"temperature": 40, "humidity": 20}' -t devices/device_001/messages
 ```
 
-Use the MQTT client tool `mosquitto_pub` to send the sensor data to the topic `devices/device_001/messages` of the MQTT server `tcp://broker.emqx.io:1883`, and the command is as follows. If everything goes well, the file named `demoFile` will receive data: `{"temperature": 40, "humidity": 20}`.
+Inspect the rule running status, metrics, and logs in the console:
 
-```shell
-# mosquitto_pub -h broker.emqx.io -m '{"temperature": 40, "humidity" : 20}' -t devices/device_001/messages
-```
-
-**View more information of the rules**
-
-As shown in the figure below, there are three buttons in the options. Readers can click to try it out.
-
-- Rule running status
-- Restart rules
-- Delete rules
+- View rule status and throughput counters
+- Start, stop, or edit active rules
+- Export or delete rule configurations
 
 ![ruleOp](./resources/rule_op.png)
 
-## Extended reading
+## Further Reading
 
-- [How to display custom plugins in the installation list of the management console](plugins_in_manager.md): eKuiper provides a plugin extension mechanism, and users can implement custom plugins based on the extended interface. On the management console, users can install plugins directly through the interface. If readers have customized plugins and want to show them in the installation list of the management console, this article can give readers some reference.
-- If the readers want to develop their own plug-in, they can refer to [Plugin Development Tutorial](../../extension/native/develop/plugins_tutorial.md) for more information.
-- [EMQ edge-stack project](https://github.com/emqx/edge-stack): This project allows users to install and test EMQ edge series products more easily, realize industrial data analysis, edge data aggregation, and eKuiper-based edge data analysis and other one-stop edge solutions.
+- [Rule Processing Guide](../../guide/rules/overview.md)
+- [REST API Reference](../../api/restapi/overview.md)
+- [CLI Reference](../../api/cli/overview.md)

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress';
+import { withMermaid } from 'vitepress-plugin-mermaid';
 import directory from '../directory.json';
 
 interface DirectoryItem {
@@ -28,7 +29,8 @@ function transformSidebar(items: DirectoryItem[]): any[] {
   });
 }
 
-export default defineConfig({
+export default withMermaid(
+  defineConfig({
   title: 'rekuiper',
   description: 'Lightweight Stream Processing Engine in Rust',
   srcDir: './en_US',
@@ -53,4 +55,4 @@ export default defineConfig({
       copyright: 'Copyright © 2026 rekuiper contributors'
     }
   }
-});
+}));

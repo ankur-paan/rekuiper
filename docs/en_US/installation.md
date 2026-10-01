@@ -1,6 +1,6 @@
 # Installation & Deployment
 
-rekuiper is designed for seamless deployment across varied edge architectures—from single-board computers (Raspberry Pi, BeagleBone) to industrial PCs and cloud edge gateways.
+rekuiper deploys across edge architectures, from single-board computers (Raspberry Pi, BeagleBone) to industrial PCs and edge servers.
 
 ---
 

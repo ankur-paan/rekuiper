@@ -229,9 +229,12 @@ The prometheus port can be the same as the eKuiper REST API port. If so, both se
 
 ## Pluginhosts Configuration
 
-The URL where hosts all of pre-build [native plugins](../extension/native/overview.md). By default, it's at `packages.emqx.net`.
+> [!NOTE]
+> Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. Built-in connectors (including Kafka, SQL, Redis, and WebSocket) are compiled into the core engine. Custom functions and extensions run via WebAssembly (Wasm) or external service microservices.
 
-All plugins list as follows:
+In legacy eKuiper installations, `pluginHosts` specifies the repository URL hosting pre-built native plugins.
+
+Legacy plugin types include:
 
 | plugin types | pre-build plugins                                              |
 |--------------|----------------------------------------------------------------|

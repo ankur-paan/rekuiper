@@ -12,7 +12,6 @@ complex connection resources, including creation, reuse, automatic reconnection,
 eKuiper v2 introduced an internal connection pool component and adapted a series of connection types:
 
 - MQTT Connection
-- Neuron Connection
 - EdgeX Connection
 - SQL Connection
 - HTTP Connection (including REST sink, HTTP Pull source, and HTTP push source connections)
@@ -156,7 +155,7 @@ overrides), and compares it with the previously stored hash:
 
 Because of this content-hash mechanism, modifying `connection.yaml` (or changing an environment variable override such
 as `CONNECTION__MQTT__CLOUD__SERVER`) is required to trigger re-provisioning. Simply restarting the service without
-changing anything will not re-apply operations. Additionally, deletion must be explicitly declared — removing an entry
+changing anything will not re-apply operations. Additionally, deletion must be explicitly declared: removing an entry
 from the file does not implicitly delete the corresponding connection.
 
 ### Basic Configuration
@@ -165,10 +164,10 @@ from the file does not implicitly delete the corresponding connection.
 mqtt:
   localConnection:          # Connection ID
     server: tcp://127.0.0.1:1883
-    username: ekuiper
+    username: rekuiper
     password: password
   cloudConnection:
-    server: tcp://broker.emqx.io:1883
+    server: tcp://cloud.example.com:1883
     username: user1
     password: password
 ```

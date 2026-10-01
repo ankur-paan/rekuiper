@@ -13,32 +13,22 @@ Each source will support one or both modes. In the source page, a badge will sho
 
 ## Built-in Sources
 
-Users can directly use the built-in sources in the standard eKuiper instance. The list of built-in sources is as follows:
+The following sources are built directly into the rekuiper engine:
 
-- [MQTT source](./builtin/mqtt.md): read data from MQTT topics.
-- [Neuron source](./builtin/neuron.md): read data from the local neuron instance.
-- [EdgeX source](./builtin/edgex.md): read data from EdgeX foundry.
-- [HTTP pull source](./builtin/http_pull.md): source to pull data from HTTP servers.
-- [Http push source](./builtin/http_push.md): push data to eKuiper through http.
-- [Redis source](./builtin/redis.md): source to lookup from Redis as a lookup table.
-- [RedisSub source](./builtin/redisSub.md): subscribe data from Redis channels.
-- [File source](./builtin/file.md): source to read from file, usually used as tables.
-- [Memory source](./builtin/memory.md): source to read from eKuiper memory topic to form rule pipelines.
-- [Simulator source](./builtin/simulator.md): source to generate mock data for testing.
+- [MQTT source](./builtin/mqtt.md): subscribe to MQTT topics.
+- [HTTP pull source](./builtin/http_pull.md): periodically pull data from REST/HTTP endpoints.
+- [HTTP push source](./builtin/http_push.md): ingest data pushed to rekuiper via HTTP POST.
+- [WebSocket source](./builtin/websocket.md): ingest real-time events over WebSocket connections.
+- [Redis source](./builtin/redis.md): read from Redis keys or use Redis as a lookup table.
+- [RedisSub source](./builtin/redisSub.md): subscribe to messages from Redis channels.
+- [Kafka source](./plugin/kafka.md): consume stream records directly from Apache Kafka topics.
+- [SQL source](./plugin/sql.md): periodically query relational databases via SQL.
+- [File source](./builtin/file.md): read data from local files or directories.
+- [Memory source](./builtin/memory.md): read from internal in-memory topics for rule pipelining.
+- [Simulator source](./builtin/simulator.md): generate mock sensor telemetry for testing.
 
-## Predefined Source Plugins
-
-We have developed some official source plugins. These plugins can be found in eKuiper's source code and users need to build them manually. Please check each source about how to build and use.
-
-Additionally, these plugins have pre-built binaries for the mainstream CPU architecture such as AMD or ARM. The pre-built plugin is hosted in `https://packages.emqx.net/kuiper-plugins/$version/$os/sources/$type_$arch.zip`. For example, to get the ZMQ source for Debian amd64, install it from `https://packages.emqx.net/kuiper-plugins/1.4.4/debian/sources/zmq_amd64.zip`.
-
-The list of predefined source plugins:
-
-- [SQL source](./plugin/sql.md): a source to periodically fetch data from SQL DB.
-- [Video Source](./plugin/video.md): a source to query video streams.
-- [Random source](./plugin/random.md): a source to generate random data for testing.
-- [Zero MQ source](./plugin/zmq.md): read data from zero mq.
-- [Kafka source](./plugin/kafka.md): read data from Kafka.
+> [!NOTE]
+> Legacy eKuiper Go-based C-shared dynamic plugins (`.so`) are not supported in rekuiper. Connectors like Kafka, SQL, and WebSocket are compiled natively into the binary. For custom sources, use WebAssembly (Wasm) or an external HTTP service.
 
 ## Use of Sources
 

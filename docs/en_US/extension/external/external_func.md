@@ -36,10 +36,10 @@ Assuming we have a service named 'sample', we can define a service definition fi
 {
   "about": {
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "Author Name",
+      "email": "developer@example.org",
+      "company": "Example Corp",
+      "website": "https://example.org"
     },
     "helpUrl": {
       "en_US": "https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/plugins/functions/functions.md",
@@ -232,10 +232,10 @@ Let's assume we have a service named 'sample'.  We can define a service definiti
 {
   "about": {
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "Author Name",
+      "email": "developer@example.org",
+      "company": "Example Corp",
+      "website": "https://example.org"
     },
     "helpUrl": {
       "en_US": "https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/plugins/functions/functions.md",

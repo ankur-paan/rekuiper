@@ -140,24 +140,23 @@ bin/kuiper describe plugin wasm fibonacci
     select fib(num) from demo_fib
     ```
 
-2. Install EMQX to send data.
+2. Send test data to the stream:
+
+    Using the HTTP push endpoint:
 
     ```shell
-    docker pull emqx/emqx:v4.0.0
-    docker run -d --name emqx -p 1883:1883 -p 8081:8081 -p 8083:8083 -p 8883:8883 -p 8084:8084 -p 18083:18083 emqx/emqx:v4.0.0
+    curl -X POST http://localhost:9081/streams/demo_fib/data \
+      -H "Content-Type: application/json" \
+      -d '{"num": 25}'
     ```
 
-3. Send data by EMQX
+    Or using a standard MQTT publisher:
 
-Login to: http://127.0.0.1:18083/ with admin/public.
+    ```shell
+    mosquitto_pub -h 127.0.0.1 -t demo_fib -m '{"num": 25}'
+    ```
 
-Use TOOLS/Websocket  to send data:
-
-Topic    : `demo_fib`
-
-Messages : `{"num" : 25}`
-
-Once the message is sent successfully, the terminal receives the execution result.
+3. Once the message is received, the query calculates the Fibonacci value and outputs the result.
 
 ## Management
 

@@ -151,7 +151,7 @@ After setting up your streams, you can integrate them with eKuiper rules to proc
 
 ::: tip
 
-The File Source connector can operate as either a [stream source](../../streams/overview.md) or a [scan table](../../tables/scan.md) source. When configured as a stream source, you have the option to set the `interval` parameter, allowing for regular updates at specified intervals. While the file source is commonly utilized as a [table](../../../sqls/tables.md) — and it's the default configuration for the "create table" statement — this section will primarily demonstrate its integration as a table source.
+The File Source connector can operate as either a [stream source](../../streams/overview.md) or a [scan table](../../tables/scan.md) source. When configured as a stream source, you can set the `interval` parameter to check for updates at specified intervals. While the file source is commonly used as a [table](../../../sqls/tables.md) (the default for `CREATE TABLE`), this section demonstrates using it as a table source.
 
 :::
 

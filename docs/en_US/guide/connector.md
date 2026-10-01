@@ -20,7 +20,6 @@ This chapter details the configuration, usage, and best practices associated wit
 Below are the built-in source connectors provided by eKuiper:
 
 - [MQTT source](./sources/builtin/mqtt.md): A source to read data from MQTT topics.
-- [Neuron source](./sources/builtin/neuron.md): A source to read data from the local neuron instance.
 - [EdgeX source](./sources/builtin/edgex.md): A source to read data from EdgeX foundry.
 - [HTTP pull source](./sources/builtin/http_pull.md): A source to pull data from HTTP servers.
 - [HTTP push source](./sources/builtin/http_push.md): A source to push data to eKuiper through HTTP.
@@ -40,7 +39,7 @@ For scenarios where custom data sources or specific third-party integrations are
 
 ## Sink Connectors
 
-Sink connectors handle the task of dispatching the processed data from eKuiper to various external endpoints or sinks. These sinks can directly interface with platforms like MQTT, Neuron, and EdgeX, among others, while also offering cache mechanisms to handle network interruptions and ensure data consistency. Additionally, users have the flexibility to customize sink behaviors through dynamic properties and resource reuse, streamlining integration and improving scalability.
+Sink connectors handle the task of dispatching the processed data from eKuiper to various external endpoints or sinks. These sinks can directly interface with platforms like MQTT and EdgeX, among others, while also offering cache mechanisms to handle network interruptions and ensure data consistency. Additionally, users have the flexibility to customize sink behaviors through dynamic properties and resource reuse, streamlining integration and improving scalability.
 
 Similar to source connectors, sink connectors are also categorized into built-in and plugin-based types.
 
@@ -49,7 +48,6 @@ Similar to source connectors, sink connectors are also categorized into built-in
 Below are the built-in sink connectors provided by eKuiper:
 
 - [MQTT sink](./sinks/builtin/mqtt.md): A sink to external MQTT broker.
-- [Neuron sink](./sinks/builtin/neuron.md): A sink to the local neuron instance.
 - [EdgeX sink](./sinks/builtin/edgex.md): A sink to EdgeX Foundry. This sink only exists when enabling the edgex build tag.
 - [Rest sink](./sinks/builtin/rest.md): A sink to external HTTP server.
 - [Redis sink](./sinks/builtin/redis.md): A sink to Redis.

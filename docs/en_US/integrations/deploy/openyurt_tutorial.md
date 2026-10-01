@@ -211,7 +211,7 @@ revise the manager docker tag to the correct version that matches the eKuiper ve
 ...
 containers:
    - name: kmanager
-     image: emqx/ekuiper-manager:1.3.1
+     image: ankur-paan/ekuiper-manager:latest
 ...
 ```
 

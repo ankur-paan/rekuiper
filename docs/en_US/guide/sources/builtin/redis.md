@@ -67,7 +67,7 @@ For users who prefer a hands-on approach, the Command Line Interface (CLI) provi
 2. Use the `create` command to define a stream for the Redis source connector:
 
    ```bash
-   ./kuiper create stream neuron_stream ' WITH (DATASOURCE="0", FORMAT="json", TYPE="redis", KIND="lookup")'
+   ./kuiper create stream redis_stream ' WITH (DATASOURCE="0", FORMAT="json", TYPE="redis", KIND="lookup")'
    ```
 
 More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).

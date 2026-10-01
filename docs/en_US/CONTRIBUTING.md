@@ -195,8 +195,6 @@ basic:
   # Prometheus settings
   prometheus: false
   prometheusPort: 20499
-  # The URL where hosts all of pre-build plugins. By default it's at packages.emqx.net
-  pluginHosts: https://packages.emqx.net
   # Whether to ignore case in SQL processing. Note that, the name of customized function by plugins are case-sensitive.
   ignoreCase: true
 ```

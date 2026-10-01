@@ -1,63 +1,115 @@
-# eKuiper in IIoT (Industrial Internet of Things)
+# Industrial IoT (IIoT) Stream Processing
 
-In the new wave of global industrial transformation, intelligent manufacturing is facing huge development opportunities. Thanks to cloud computing, big data and artificial intelligence technologies, industrial transformation and upgrading have entered a new stage, and people gradually realize the great value brought by new business models driven by data. The combination and collision of data and algorithmic models provide powerful data support and new engine kinetic energy for the resolution of uncertainty, insight discovery and enterprise decision-making of complex systems.
+Industrial IoT environments require reliable, deterministic data processing close to the physical plant. In steel manufacturing, chemical plants, automated assembly lines, and energy grids, hundreds of sensors, PLCs, and SCADA controllers emit high-frequency telemetry.
 
-As a light-weight stream processing engine, eKuiper can be deployed on the edge side near the data source to do real-time analysis and smart decisions.
+rekuiper runs directly on industrial PCs, embedded gateways, and edge servers to filter noise, calculate windowed averages, detect anomalies, and trigger control signals with sub-millisecond latency.
 
-## Cloud Edge Collaborative Industrial Internet Solution
+---
 
-EMQ Cloud Edge Collaboration Industrial Internet Solution, through cloud-native technology and cloud edge collaboration architecture, realizes the connection, movement, processing, storage and analysis of massive industrial equipment data. The solution mainly includes the following software.
+## Edge Architecture for Industrial IoT
 
-| Software                         | Name                                                                        |
-|----------------------------------|-----------------------------------------------------------------------------|
-| Edge Data Collection Software    | [Neuron](https://neugates.io/) - Industrial Protocol Gateway Software       |
-| Edge MQTT Broker                 | [NanoMQ](https://nanomq.io/) - Ultra-lightweight Edge MQTT Messaging Server |
-| Edge Computing Software          | eKuiper - Lightweight IoT edge data streaming analytics engine              |
-| Edge Service Management Platform | EMQX Antares - Cloud Native Edge Service Management Platform                |
+In modern industrial architectures, rekuiper acts as the local real-time compute engine between factory-floor controllers and enterprise systems:
 
-![Cloud Edge Arch](./resources/cloud_edge_arch.png)
+```mermaid
+flowchart LR
+    subgraph Floor["1. Factory Floor"]
+        direction TB
+        F1["PLCs & CNCs\n(Modbus / OPC UA)"]
+        F2["Smart Meters & Sensors\n(MQTT / Serial)"]
+        F3["SCADA & MES\n(REST / Databases)"]
+    end
 
-Among these, eKuiper acts in the middle of edge and cloud. It can digest the data collected, processed and routing the result.
+    subgraph Edge["2. Edge Gateway (rekuiper)"]
+        direction TB
+        R1["Stream Ingestion\n(MQTT, HTTP, Kafka, Files)"]
+        R2["SQL Rules & Windows\n(10s tumbling, sliding, session)"]
+        R3["Edge AI Inference\n(Python & Wasm)"]
+        R1 --> R2 --> R3
+    end
 
-## Edge Computing Scenarios
+    subgraph Upstream["3. Control & Cloud"]
+        direction TB
+        U1["Local Actuators\n(Immediate Feedback)"]
+        U2["Plant Historian / InfluxDB\n(Aggregated Telemetry)"]
+        U3["Enterprise Cloud / Kafka\n(Analytics & Dashboards)"]
+    end
 
-By analyzing the collected data in real time, eKuiper can apply on common industrial scenarios such as energy consumption monitoring, predictive maintenance, and product quality traceability. Typical scenarios include:
+    Floor --> Edge
+    R3 --> Upstream
+```
 
-- Real-Time analysis of factory production data for efficient control of product quality
-- Device twin: Data clean, transformation and compression
-- Abnormal sensing, alarm and handling
-- Production process optimization augmented by AI
+---
 
-Let's take the last scenario as an example.
+## Key Industrial Capabilities
 
-### Production Process Optimization
+### 1. Deterministic Execution with Zero GC
+Edge gateways often run on constrained hardware (single-core ARM Cortex-A, 512 MB to 1 GB RAM). Traditional runtimes introduce garbage collection pauses that can drop packets or delay time-critical alerts. rekuiper provides zero GC pauses, deterministic execution, and a sub-5MB baseline memory footprint.
 
-Whether it is a process industry or a discrete industry, the optimization and stable control of production processes are the prerequisites for enterprises to reduce operating costs, improve production efficiency and build core competitiveness. In the context of intelligent transformation in the era of Industry 4.0, making full use of the value of massive data to achieve process optimization and on-site stability control is a proposition that enterprises continue to think about and explore, and it is also a common demand.
+### 2. Stream SQL for Local Windowing & Filtering
+Instead of streaming millions of raw sensor events to the cloud over costly cellular or WAN links, rekuiper computes rolling aggregates locally:
+- **Tumbling Windows**: Compute 10-second average temperatures, pressures, and vibration indexes per machine.
+- **Sliding Windows**: Detect moving spikes that exceed standard operating limits over 60 seconds.
+- **Session Windows**: Track operational states across batch processing runs.
 
-For example, in the steel industry, the heating furnace is important equipment in the steel rolling process. Through real-time collection of heating furnace data, combined with advanced control optimization algorithms, the furnace temperature can be guaranteed to be stable and the quality of billets can be improved on the basis of saving gas costs.
+### 3. Sub-Millisecond Anomaly Detection
+Detect equipment malfunctions instantly:
+- Bearing overheating and excessive motor vibration
+- Pressure loss in pneumatic valves
+- Voltage fluctuations in sub-distribution panels
 
-In the chemical industry, enterprises are mainly concerned about the change of raw material properties and production load adjustment. Currently, most of the testing methods are manual regular sampling and offline delivery, which are generally time-consuming and multi-step, making it difficult to achieve effective feedback and optimal control of production. Using real-time data modeling analysis, we can achieve accurate grasp of the reaction process, real-time intervention, and reduce the waste of raw materials caused by untimely intervention.
+When an anomaly triggers a SQL rule, rekuiper immediately publishes an alert to a local broker, activates a PLC digital output via a webhook, and logs the incident.
 
-In the smart factory scenario, through real-time data collection of machine data, combined with the MES system historical data analysis and verification, the machine parameter values can be revised and iterated in real time, which can ensure less manual intervention and more stable product quality in the production process of the machine.
+### 4. Edge AI & Machine Learning Inference
+rekuiper interfaces with Python and WebAssembly inference runtimes to evaluate machine learning models in real time:
+- Remaining useful life (RUL) estimation
+- Automated visual defect classification
+- Predictive maintenance scoring
 
-In the field of industrial energy saving and consumption reduction, through the collection of the whole process of energy data, combined with the kinetic energy equipment, production automation system and MES system, forming intelligent linkage between systems, based on the production plan, it can realize the fine prediction of energy demand and improve the level of energy consumption management of enterprises.
+---
 
-#### Integrate Data from Multiple Sources
+## Example: Temperature Spike Alarm
 
-eKuiper can provide flexible data interfacing capability for industrial sites, realize data pulling and integration of factory MES, ERP, database and various third-party applications, clean and process data through flow computing capability, and realize the interaction and collaboration between human-machine, material-law-loop in industrial sites with the ability of flow table combination. Neuron, an industrial protocol gateway software, integrates PLC, non-standard automation equipment, SCADA and various instruments in the factory for real-time data collection via edge message bus. At the same time, Neuron enables reverse control of plant equipment via MQTT and Restful API, and in combination with control optimization algorithms, enables low-latency data processing and analysis and production process optimization.
+The following SQL rule inspects continuous boiler temperature readings from an MQTT stream and triggers an immediate alert when temperature exceeds 85 degrees:
 
-Through Neuron+eKuiper's efficient collection of multi-dimensional data, real-time data from machines and equipment in the factory, business data related to production and operation, product design and process data, and data from various production management software in the factory can be aggregated and analyzed to achieve production process optimization, reduce production loss, and improve production output.
+```sql
+SELECT
+  deviceId,
+  temperature,
+  humidity
+FROM
+  telemetry_stream
+WHERE
+  temperature > 85.0
+```
 
-#### Edge-side AI Model Integration for Real-time Inference Decision
+The output action sends the structured alert payload to both a local alarm webhook and an upstream Kafka topic for compliance logging:
 
-eKuiper can make full use of multi-dimensional data from industrial sites, absorb and precipitate manual experience, combine industrial mechanics knowledge and data statistics methods, use machine learning and deep learning algorithms to establish optimization models of equipment production processes, optimize and control production processes, make equipment operation more reliable and stable, and improve enterprise economic efficiency.
+```json
+{
+  "id": "boiler_overheat_alarm",
+  "sql": "SELECT deviceId, temperature FROM telemetry_stream WHERE temperature > 85.0",
+  "actions": [
+    {
+      "rest": {
+        "url": "http://127.0.0.1:8080/api/v1/alarms",
+        "method": "POST",
+        "sendSingle": true
+      }
+    },
+    {
+      "mqtt": {
+        "server": "tcp://127.0.0.1:1883",
+        "topic": "factory/alarms/critical"
+      }
+    }
+  ]
+}
+```
 
-eKuiper supports calling Python scientific computing, machine learning and deep learning algorithm libraries and C/C++ algorithm models transferred from Matlab, and realizes real-time AI inference calculation at the edge by combining real-time data streams, and sends the inference results to the automation equipment side in real time through Neuron to realize real-time optimization and continuous optimization of the production process.
+---
 
-![AI inference](./resources/iiot_ai.png)
+## Benefits for Industrial Deployments
 
-## Summary
-
-The deep integration of new-generation information technology and manufacturing industry, through the comprehensive interconnection of people, machines and things, and the construction of a new industrial production, manufacturing and service system that fully connects the whole element, the whole industrial chain and the whole value chain are the core and key to support the fourth industrial revolution.
-
-EMQ Cloud Edge Collaborative Industrial Internet Solution, which connects artificial intelligence and cloud computing technology to traditional industrial production, helps enterprises realize the collaboration of data flow, production flow and control flow, improve production efficiency, reduce production costs, and help factories realize digitalization, real-time and intelligent transformation.
+- **Reduced WAN Bandwidth**: Downsample and aggregate high-frequency sensor streams before sending data upstream.
+- **Offline Autonomy**: Rules and alerts execute locally even if cloud connectivity is interrupted.
+- **Unified Stream SQL**: Manage filtering, joins, and windowing using standard SQL without writing custom firmware code.

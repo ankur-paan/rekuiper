@@ -1,8 +1,11 @@
 ## How to display custom plugins in the installation list of the management console
 
+> [!NOTE]
+> Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. Core connectors (Kafka, SQL, Redis, WebSocket) are compiled into the binary. Custom functions and extensions use WebAssembly (Wasm) or external service microservices. This guide describes the metadata schema used by the management console.
+
 ### Overview
 
-eKuiper provides a plugin extension mechanism, and users can implement custom plugins based on the extended interface. On the management console, users can install plugins directly through the interface. If readers have custom plugins and want to show them in the installation list of the management console, this article can give readers some reference.
+eKuiper and its management console provide a metadata mechanism for plugins. On the management console, users can inspect plugin metadata and interfaces.
 
 ### Plugin metadata
 

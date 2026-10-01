@@ -1,5 +1,8 @@
 # Run TensorFlow Lite model with eKuiper function plugin
 
+> [!NOTE]
+> Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. For edge ML model inference in rekuiper, use the [Python / External Function service](../ai/python_tensorflow_lite_tutorial.md) or WebAssembly functions. This article remains as reference documentation for legacy eKuiper installations.
+
 [LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is an edge lightweight IoT data analytics / streaming
 software which can be run at all kinds of resource constrained IoT devices.
 
@@ -66,13 +69,13 @@ To use the plugin, we need to build it in the environment where eKuiper will run
 
 ### Install by pre-built zip
 
-If using eKuiper docker images with tags like 1.1.1 or 1.1.1-slim which are based on debian, we can install the pre-built labelImage plugin. For example, to install the plugin for eKuiper 1.1.2 in docker image lfedge/ekuiper:1.1.2-slim, the pre-built zip file locates in *https://packages.emqx.net/kuiper-plugins/1.1.2/debian/functions/labelImage_amd64.zip*. Run the rest command as below to install.
+If using legacy eKuiper docker images, pre-built plugins were packaged as zip archives. For example, to install a function plugin from a zip URL, run the REST command as below:
 
 ```shell
 POST http://{{eKuiperHost:eKuiperRestPort}}/plugins/functions
 Content-Type: application/json
 
-{"name":"labelImage", "file": "https://packages.emqx.net/kuiper-plugins/1.1.2/debian/functions/labelImage_amd64.zip"}
+{"name":"labelImage", "file": "https://example.com/kuiper-plugins/1.1.2/debian/functions/labelImage_amd64.zip"}
 ```
 
 ### Manual build

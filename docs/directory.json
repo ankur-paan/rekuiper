@@ -199,10 +199,6 @@
                   "path": "guide/sources/builtin/mqtt"
                 },
                 {
-                  "title": "Neuron Source",
-                  "path": "guide/sources/builtin/neuron"
-                },
-                {
                   "title": "EdgeX Source",
                   "path": "guide/sources/builtin/edgex"
                 },
@@ -283,10 +279,6 @@
                 {
                   "title": "MQTT Sink",
                   "path": "guide/sinks/builtin/mqtt"
-                },
-                {
-                  "title": "Neuron Sink",
-                  "path": "guide/sinks/builtin/neuron"
                 },
                 {
                   "title": "EdgeX Sink",
@@ -419,10 +411,6 @@
               "path": "edgex/edgex_source_tutorial"
             }
           ]
-        },
-        {
-          "title": "Processing Data Collected by Neuron",
-          "path": "integrations/neuron/neuron_integration_tutorial"
         },
         {
           "title": "Analytic Engine for KubeEdge",
@@ -601,6 +589,10 @@
           "path": "api/cli/data"
         }
       ]
+    },
+    {
+      "title": "Model Context Protocol (MCP)",
+      "path": "mcp/overview"
     },
     {
       "title": "Extension Develop Guide",

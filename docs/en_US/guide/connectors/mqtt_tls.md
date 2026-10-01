@@ -5,7 +5,7 @@ rekuiper provides enterprise-grade TLS encryption and authentication for MQTT so
 ## Key Security Guarantees
 
 1. **Strict Verification by Default**: Hostname verification and certificate chain validation are enabled by default for all TLS connections.
-2. **Never Falls Back to Plaintext**: Secure URL schemes (`ssl://`, `tls://`, `tcps://`, `mqtts://`) strictly mandate TLS. If TLS negotiation fails or certificates are invalid, the connection fails immediately—rekuiper will **never** silently fall back to an unencrypted TCP connection.
+2. **Never Falls Back to Plaintext**: Secure URL schemes (`ssl://`, `tls://`, `tcps://`, `mqtts://`) strictly mandate TLS. If TLS negotiation fails or certificates are invalid, the connection fails immediately. rekuiper will **never** silently fall back to an unencrypted TCP connection.
 3. **No Secret Leaks**: Passwords, private keys, and raw certificates are masked (`******` and `<redacted>`) in log outputs and `Debug` formatting.
 4. **Standard PKI Support**: Supports both public trusted certificate authorities (using platform native root certificates and WebPKI roots) and private custom Certificate Authorities.
 5. **Mutual TLS (mTLS)**: Full support for client certificate and private key authentication (supporting SEC1, PKCS#1, and PKCS#8 PEM formats).
@@ -31,13 +31,13 @@ The following TLS settings are supported in `mqtt_source.yaml`, `mqtt.json` sink
 
 ## Working Configuration Examples
 
-### 1. Trusted Public Certificate Authorities (e.g. HiveMQ Cloud, EMQX Cloud)
+### 1. Trusted Public Certificate Authorities
 
 When connecting to brokers with certificates issued by publicly trusted CAs (Let's Encrypt, DigiCert, etc.), specify the secure URL scheme and credentials. No custom CA certificate is needed:
 
 ```json
 {
-  "server": "ssl://broker.emqx.io:8883",
+  "server": "ssl://mqtt.example.com:8883",
   "topic": "factory/sensors/telemetry",
   "qos": 1,
   "username": "sensor_agent",

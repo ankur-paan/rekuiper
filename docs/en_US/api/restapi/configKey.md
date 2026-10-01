@@ -21,7 +21,7 @@ GET http://localhost:9081/metadata/sources/yaml/{name}
 
 ### Parameter
 
- name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, neuron, memory, httppull, httppush, file, edgex,
+ name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
  Extended sources include random, sql, video, zmq and user-defined sources
 
 ### Example
@@ -65,7 +65,7 @@ DELETE http://localhost:9081/metadata/sources/{name}/confKeys/{confKey}
 
 ### Parameter
 
-1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, neuron, memory, httppull, httppush, file, edgex,
+1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
    Extended sources include random, sql, video, zmq and user-defined sources
 2. confKey: Config Key Name。Taking the above as an example, the Config Keys are amd_broker, default, demo_conf in sequence.
 
@@ -87,7 +87,7 @@ PUT http://localhost:9081/metadata/sources/{name}/confKeys/{confKey}
 
 ### Parameter
 
-1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, neuron, memory, httppull, httppush, file, edgex,
+1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
    Extended sources include random, sql, video, zmq and user-defined sources
 2. confKey: Config Key name to register
 

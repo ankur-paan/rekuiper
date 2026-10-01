@@ -228,7 +228,10 @@ POST http://{{host}}/plugins/functions/{plugin_name}/register
 
 ## Get the available plugins
 
-According to the configuration `pluginHosts` in file `etc/kuiper.yaml` ,  it returns the plugins list that can be installed at local run eKuiper instance. By default, it get the list from `https://packages.emqx.net` .
+> [!NOTE]
+> Native Go `.so` plugins are not supported in rekuiper. Built-in connectors are compiled into the binary, and custom logic is loaded via WebAssembly or external services. The endpoints below exist for legacy eKuiper compatibility.
+
+In legacy eKuiper, according to the configuration `pluginHosts` in `etc/kuiper.yaml`, this endpoint returns the list of pre-built plugins that can be installed.
 
 ```shell
 GET http://localhost:9081/plugins/sources/prebuild

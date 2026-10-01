@@ -71,7 +71,7 @@ operations.
    cd path_to_eKuiper_directory/bin
    ```
 
-2. Use the `create` command to define a stream for the Neuron source connector:
+2. Use the `create` command to define a stream for the Simulator source connector:
 
    ```bash
    ./kuiper create stream mock_stream ' WITH (TYPE="simulator")'

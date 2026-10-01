@@ -1,36 +1,25 @@
 # Sink Connectors
 
-In the eKuiper source code, there are built-in sinks and sinks in extension.
+In rekuiper, core sinks are compiled directly into the binary for maximum performance and zero external runtime dependencies.
 
 ## Built-in Sinks
 
-Users can directly use the built-in sinks in the standard eKuiper instance. The list of built-in sinks is as follows:
+The following sinks are built directly into the engine:
 
-- [MQTT sink](./builtin/mqtt.md): sink to external MQTT broker.
-- [Neuron sink](./builtin/neuron.md): sink to the local neuron instance.
-- [EdgeX sink](./builtin/edgex.md): sink to EdgeX Foundry. This sink only exists when enabling the edgex build tag.
-- [Rest sink](./builtin/rest.md): sink to external HTTP server.
-- [Redis sink](./builtin/redis.md): sink to Redis.
-- [RedisSub sink](./builtin/redisPub.md): sink to redis channel.
-- [File sink](./builtin/file.md): sink to a file.
-- [Memory sink](./builtin/memory.md): sink to eKuiper memory topic to form rule pipelines.
-- [Log sink](./builtin/log.md): sink to log, usually for debugging only.
-- [Nop sink](./builtin/nop.md): sink to nowhere. It is used for performance testing now.
+- [MQTT sink](./builtin/mqtt.md): publish messages to an external MQTT broker.
+- [Rest sink](./builtin/rest.md): send HTTP POST, PUT, or PATCH requests to webhooks and REST endpoints.
+- [Redis sink](./builtin/redis.md): write keys and stream entries to Redis.
+- [RedisSub sink](./builtin/redisPub.md): publish messages to Redis Pub/Sub channels.
+- [File sink](./builtin/file.md): write events to local files (JSON, CSV, line-delimited).
+- [Memory sink](./builtin/memory.md): forward data to in-memory topics to chain rules.
+- [Log sink](./builtin/log.md): write output to stdout and engine logs for debugging.
+- [Nop sink](./builtin/nop.md): discard output for benchmarking.
+- [Kafka sink](./plugin/kafka.md): publish stream records directly to Apache Kafka topics.
+- [SQL sink](./builtin/sql.md): insert or update records in relational databases via SQL.
+- [WebSocket sink](./builtin/websocket.md): stream events to WebSocket clients.
 
-## Predefined Sink Plugins
-
-We have developed some official sink plugins. These plugins can be found in eKuiper's source code and users need to build them manually. Please check each sink about how to build and use.
-
-Additionally, these plugins have pre-built binaries for the mainstream cpu architecture such as AMD or ARM. The pre-built plugin hosted in `https://packages.emqx.net/kuiper-plugins/$version/$os/sinks/$type_$arch.zip`. For example, to get tdengine sink for debian amd64, install it from `https://packages.emqx.net/kuiper-plugins/1.4.4/debian/sinks/tdengine_amd64.zip`.
-
-The list of predefined sink plugins:
-
-- [InfluxDB sink](./plugin/influx.md): sink to InfluxDB `v1.x`.
-- [InfluxDBV2 sink](./plugin/influx2.md): sink to InfluxDB `v2.x`.
-- [Image sink](./plugin/image.md): sink to an image file. Only used to handle binary results.
-- [Zero MQ sink](./plugin/zmq.md): sink to Zero MQ.
-- [Kafka sink](./plugin/kafka.md): sink to Kafka.
-- [IoTDB sink](./plugin/iotdb.md): sink to Apache IoTDB, supporting both tree and table models.
+> [!NOTE]
+> Legacy eKuiper Go-based C-shared dynamic plugins (`.so`) are not supported in rekuiper. High-demand connectors like Kafka and SQL are built into the core binary. For custom integrations, use WebAssembly (Wasm) or an external HTTP service.
 
 ## Updatable Sink
 
@@ -240,7 +229,7 @@ following content
 ```yaml
 test:
   qos: 1
-  server: "tcp://broker.emqx.io:1883"
+  server: "tcp://127.0.0.1:1883"
 ```
 
 When users need MQTT actions, in addition to the traditional configuration method, as shown below
@@ -248,7 +237,7 @@ When users need MQTT actions, in addition to the traditional configuration metho
 ```json
     {
       "mqtt": {
-        "server": "tcp://broker.emqx.io:1883",
+        "server": "tcp://127.0.0.1:1883",
         "topic": "devices/demo_001/messages/events/",
         "protocolVersion": "3.1.1",
         "qos": 1,

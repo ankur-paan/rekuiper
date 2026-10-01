@@ -7,7 +7,7 @@ eKuiper configuration is based on yaml file and allow to configure by updating t
 eKuiper configurations include
 
 1. `etc/kuiper.yaml`: global configuration file. Make change to it need to restart the eKuiper instance. Please refer to [basic configuration file](./global_configurations.md) for detail.
-2. `etc/sources/${source_name}.yaml`: the configuration file for each source to define the default properties (except MQTT source, whose configuration file is `etc/mqtt_source.yaml`). Please refer to the doc for each source for detail. For example, [MQTT source](../guide/sources/builtin/mqtt.md) and [Neuron source](../guide/sources/builtin/neuron.md) covers the configuration items.
+2. `etc/sources/${source_name}.yaml`: the configuration file for each source to define the default properties (except MQTT source, whose configuration file is `etc/mqtt_source.yaml`). Please refer to the doc for each source for detail, such as the [MQTT source](../guide/sources/builtin/mqtt.md).
 3. `etc/connections/connection.yaml`: shared connection configuration file.
 
 ## Configuration Methods

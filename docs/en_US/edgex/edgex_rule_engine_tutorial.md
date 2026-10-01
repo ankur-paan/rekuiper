@@ -178,7 +178,7 @@ Let's create a rule that send result data to an MQTT broker, for detailed inform
 
 So the below rule will get all of values from `event` topic. The sink result will
 
-- Published to topic `result` of public MQTT broker `broker.emqx.io`.
+- Published to topic `result` of local MQTT broker `127.0.0.1:1883`.
 - Print to log file.
 
 #### Option 1: Use Rest API
@@ -193,7 +193,7 @@ curl -X POST \
   "actions": [
     {
       "mqtt": {
-        "server": "tcp://broker.emqx.io:1883",
+        "server": "tcp://127.0.0.1:1883",
         "topic": "result",
         "clientId": "demo_001"
       }
@@ -215,7 +215,7 @@ You can create a rule file with any text editor, and copy following contents int
   "actions": [
     {
       "mqtt": {
-        "server": "tcp://broker.emqx.io:1883",
+        "server": "tcp://127.0.0.1:1883",
         "topic": "result",
         "clientId": "demo_001"
       }
@@ -248,7 +248,7 @@ to see detailed info of rule.
 time="2021-07-08 01:03:08" level=info msg="Serving kuiper (version - 1.2.1) on port 20498, and restful api on http://0.0.0.0:59720. \n" file="server/server.go:144"
 Serving kuiper (version - 1.2.1) on port 20498, and restful api on http://0.0.0.0:59720.
 time="2021-07-08 01:08:14" level=info msg="Successfully subscribed to edgex messagebus topic rules-events." file="extensions/edgex_source.go:111" rule=rule1
-time="2021-07-08 01:08:14" level=info msg="The connection to server tcp://broker.emqx.io:1883 was established successfully" file="sinks/mqtt_sink.go:182" rule=rule1
+time="2021-07-08 01:08:14" level=info msg="The connection to server tcp://127.0.0.1:1883 was established successfully" file="sinks/mqtt_sink.go:182" rule=rule1
 time="2021-07-08 01:08:20" level=info msg="sink result for rule rule1: [{\"Float32\":-2.4369560555943686e+38}]" file="sinks/log_sink.go:16" rule=rule1
 time="2021-07-08 01:08:20" level=info msg="sink result for rule rule1: [{\"Float64\":-1.488582e+308}]" file="sinks/log_sink.go:16" rule=rule1
 time="2021-07-08 01:08:20" level=info msg="sink result for rule rule1: [{\"Uint64\":9544048735510870974}]" file="sinks/log_sink.go:16" rule=rule1
@@ -260,10 +260,10 @@ time="2021-07-08 01:08:20" level=info msg="sink result for rule rule1: [{\"Uint3
 
 ### Monitor analysis result
 
-Since all of the analysis result are published to  `tcp://broker.emqx.io:1883`, so you can just use below `mosquitto_sub` command to monitor the result. You can also use other [MQTT client tools](https://www.emqx.io/blog/mqtt-client-tools).
+Since all analysis results are published to `tcp://127.0.0.1:1883`, you can use `mosquitto_sub` to monitor the result topic:
 
 ```shell
-$ mosquitto_sub -h broker.emqx.io -t result
+mosquitto_sub -h 127.0.0.1 -t result
 [{"Bool":false}]
 [{"Int64":228212448717749920}]
 [{"Int8":-70}]
