@@ -1,6 +1,6 @@
 # Determine the error type by error code
 
-In the result returned by eKuiper's REST API, if the internal processing of the REST request fails, an error code will be added to the returned error message.
+In the result returned by rekuiper's REST API, if the internal processing of the REST request fails, an error code will be added to the returned error message.
 
 ## Error code type
 

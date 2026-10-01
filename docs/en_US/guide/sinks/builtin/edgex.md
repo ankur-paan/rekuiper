@@ -2,9 +2,9 @@
 
 The action is used for publishing output message into EdgeX message bus.
 
-**Please notice that, if you're using the ZeorMQ message bus, the action will create a NEW EdgeX message bus (with the address where running eKuiper service), but not by leveraging the original message bus (normally it's the address & port exposed by application service).**
+**Please notice that, if you're using the ZeorMQ message bus, the action will create a NEW EdgeX message bus (with the address where running rekuiper service), but not by leveraging the original message bus (normally it's the address & port exposed by application service).**
 
-**Also, you need to expose the port number to host server before running the eKuiper server if you want to have the service available to other hosts.**
+**Also, you need to expose the port number to host server before running the rekuiper server if you want to have the service available to other hosts.**
 
 | Property name      | Optional | Description                                                                                                                                                                                                                                                                                |
 |--------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -18,9 +18,9 @@ The action is used for publishing output message into EdgeX message bus.
 | contentType        | true     | The content type of message to be published. If not specified, then use the default value `application/json`.                                                                                                                                                                              |
 | messageType        | true     | The EdgeX message model type. To publish the message as an event like EdgeX application service, use `event`. Otherwise, to publish the message as an event request like EdgeX device service or core data service, use `request`. If not specified, then use the default value `event`.   |
 | metadata           | true     | The property is a field name that allows user to specify a field name of SQL  select clause,  the field name should use `meta(*) AS xxx`  to select all of EdgeX metadata from message.                                                                                                    |
-| profileName        | true     | Allows user to specify the profile name in the event structure that are sent from eKuiper. The profileName in the meta take precedence if specified.                                                                                                                                       |
-| deviceName         | true     | Allows user to specify the device name in the event structure that are sent from eKuiper. The deviceName in the meta take precedence if specified.                                                                                                                                         |
-| sourceName         | true     | Allows user to specify the source name in the event structure that are sent from eKuiper. The sourceName in the meta take precedence if specified.                                                                                                                                         |
+| profileName        | true     | Allows user to specify the profile name in the event structure that are sent from rekuiper. The profileName in the meta take precedence if specified.                                                                                                                                       |
+| deviceName         | true     | Allows user to specify the device name in the event structure that are sent from rekuiper. The deviceName in the meta take precedence if specified.                                                                                                                                         |
+| sourceName         | true     | Allows user to specify the source name in the event structure that are sent from rekuiper. The sourceName in the meta take precedence if specified.                                                                                                                                         |
 | optional           | true     | If `mqtt` message bus type is specified, then some optional values can be specified. Please refer to below for supported optional supported configurations.                                                                                                                                |
 
 Below optional configurations are supported, please check MQTT specification for the detailed information.
@@ -227,11 +227,11 @@ In this case, the original metadata value (such as `id, profileName, deviceName,
 Please notice that,
 
 - The device name of `Event` structure is changed to `kuiper` and the profile name is changed to `kuiperProfile`.
-- All metadata for `Events and Readings` structure will be updated with new value. `Origin` field is updated to another value generated by eKuiper (here is `0``).
+- All metadata for `Events and Readings` structure will be updated with new value. `Origin` field is updated to another value generated by rekuiper (here is `0``).
 
 ### Publish result to a new EdgeX message bus keeping original metadata
 
-But for some scenarios, you may want to keep some of original metadata. Such as keep the device name as original value that published to eKuiper (`demo` in the sample), and also other metadata of readings arrays. In such case, eKuiper is acting as a filter - to filter NOT concerned messages, but still keep original data.
+But for some scenarios, you may want to keep some of original metadata. Such as keep the device name as original value that published to rekuiper (`demo` in the sample), and also other metadata of readings arrays. In such case, rekuiper is acting as a filter - to filter NOT concerned messages, but still keep original data.
 
 Below is an example,
 
@@ -286,7 +286,7 @@ Below is an example,
    Please notice that
    - The metadata of `Events` structure is still kept, such as `DeviceName` & `Origin`.
    - For the reading that can be found in original message, the metadata will be kept. Such as `humidity` metadata will be the `old values` received from EdgeX message bus.
-   - For the reading that can NOT be found in original message,  the metadata will not be set.  Such as metadata of `t1` in the sample will fill with default value that generated by eKuiper.
-   - If your SQL has aggregated function, then it does not make sense to keep these metadata, but eKuiper will still fill with metadata from a particular message in the time window. For example, with following SQL,
+   - For the reading that can NOT be found in original message,  the metadata will not be set.  Such as metadata of `t1` in the sample will fill with default value that generated by rekuiper.
+   - If your SQL has aggregated function, then it does not make sense to keep these metadata, but rekuiper will still fill with metadata from a particular message in the time window. For example, with following SQL,
    ```SELECT avg(temperature) AS temperature, meta(*) AS edgex_meta FROM ... GROUP BY TUMBLINGWINDOW(ss, 10)```.
    In this case, there are possibly several messages in the window, the metadata value for `temperature` will be filled with value from 1st message that received from bus.

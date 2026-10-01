@@ -9,7 +9,7 @@
 > 
 > Dynamic config keys registered here are immediately available for binding in stream `CONF_KEY` options under live telemetry flow.
 
-eKuiper REST api allows you to manage Config Keys, e.g. list, delete, register.
+rekuiper REST API allows you to manage Config Keys, e.g. list, delete, register.
 
 ## List all configKey
 

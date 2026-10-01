@@ -11,7 +11,7 @@
 > - `PUT /streams/{id}` (update a stream) - Verified (HTTP 200 OK)
 > - `DELETE /streams/{id}` (drop a stream) - Verified (HTTP 200 OK, HTTP 400 on subsequent query)
 
-The eKuiper REST api for streams allows you to manage the streams, such as create, describe, show and drop stream definitions.
+The rekuiper REST API for streams allows you to manage the streams, such as create, describe, show and drop stream definitions.
 
 ## create a stream
 

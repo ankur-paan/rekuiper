@@ -7,7 +7,7 @@ When user request the RESTful apis, put the `Token` in http request headers in t
 Authorization: XXXXXXXXXXXXXXX
 ```
 
-If the token is correct, eKuiper will respond the result; otherwise, it will return http `401`code.
+If the token is correct, rekuiper will respond the result; otherwise, it will return http `401`code.
 
 ### JWT Header
 

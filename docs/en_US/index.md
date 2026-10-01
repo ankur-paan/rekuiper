@@ -122,7 +122,7 @@ curl http://localhost:9081/rules/rule_temp_alert/status
 
 ## Documentation
 
-* [Architecture & Rust Design](./concepts/ekuiper.md)
+* [Architecture & Rust Design](./concepts/rekuiper.md)
 * [Getting Started Guide](./getting_started/getting_started.md)
 * [Installation & Deployment](./installation.md)
 * [SQL Reference & Functions](./sqls/overview.md)

@@ -39,6 +39,6 @@
 - [Multi-Column Functions](./multi_column_functions.md)
 - [Window Functions](./window_functions.md)
 
-eKuiper also provides a set of functions though shipped plugins. Users need to install the plugins before using them.
+rekuiper also provides a set of functions though shipped plugins. Users need to install the plugins before using them.
 
 - [Custom Functions](./custom_functions.md)

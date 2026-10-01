@@ -2,20 +2,20 @@
 
 Prometheus is an open source system monitoring and alerting toolkit hosted at CNCF, and has been adopted by many companies and organizations as a monitoring and alerting tool.
 
-eKuiper's rules are continuously running streaming task. Rules are used to process unbounded streams of data, and under normal circumstances, rules are started and run continuously, producing operational status data. Until the rule is stopped manually or after an unrecoverable error. eKuiper provides a status API to get the running metrics of the rules. At the same time, eKuiper integrates with Prometheus, making it easy to monitor various status metrics through the latter. This tutorial is intended for users who are already familiar with eKuiper and will introduce rule status metrics and how to monitor specific indicators via Prometheus.
+rekuiper's rules are continuously running streaming task. Rules are used to process unbounded streams of data, and under normal circumstances, rules are started and run continuously, producing operational status data. Until the rule is stopped manually or after an unrecoverable error. rekuiper provides a status API to get the running metrics of the rules. At the same time, eKuiper integrates with Prometheus, making it easy to monitor various status metrics through the latter. This tutorial is intended for users who are already familiar with rekuiper and will introduce rule status metrics and how to monitor specific indicators via Prometheus.
 
 ## Prometheus Metrics
 
 eKuiper exposes the following metrics to prometheus to reflect the current cluster status:
 
 ```text
-kuiper_rule_status: The status showed status of each rule in eKuiper. 1 represents running, 0 represents paused, and -1 represents abnormal exit.
-kuiper_rule_count: How many rules are running and how many rules are suspended in eKuiper.
+kuiper_rule_status: The status showed status of each rule in rekuiper. 1 represents running, 0 represents paused, and -1 represents abnormal exit.
+kuiper_rule_count: How many rules are running and how many rules are suspended in rekuiper.
 ```
 
 ## Rule Status Metrics
 
-Once a rule has been created and run successfully using eKuiper, the user can view the rule's operational status metrics via the CLI, REST API or the management console. For example, for an existing rule1, you can get the rule run metrics in JSON format via `curl -X GET "http://127.0.0.1:9081/rules/rule1/status"`.
+Once a rule has been created and run successfully using rekuiper, the user can view the rule's operational status metrics via the CLI, REST API or the management console. For example, for an existing rule1, you can get the rule run metrics in JSON format via `curl -X GET "http://127.0.0.1:9081/rules/rule1/status"`.
 
 ```json
 {
@@ -78,22 +78,22 @@ After version 2.0.0, we added connection-related metrics for source/sink.
 - connection_last_disconnected_message: The message of the last disconnection exception.
 - connection_last_try_time: The last reconnection attempt time.
 
-The numeric types of these metrics can all be monitored using Prometheus. In the next section we will describe how to configure the Prometheus service in eKuiper.
+The numeric types of these metrics can all be monitored using Prometheus. In the next section we will describe how to configure the Prometheus service in rekuiper.
 
 View CPU running metrics for a rule
 
 - kuiper_rule_cpu_ms: The CPU running indicator of the rule represents the CPU time used by the CPU in the past 30 seconds, in ms.
 
-## Configuring the Prometheus Service in eKuiper
+## Configuring the Prometheus Service in rekuiper
 
-The Prometheus service comes with eKuiper, but is disabled by default. You can turn on the service by modifying the configuration in `etc/kuiper.yaml`. Where `prometheus` is a boolean value, change it to `true` to turn on the service; `prometheusPort` configures the port of the service.
+The Prometheus service comes with rekuiper, but is disabled by default. You can turn on the service by modifying the configuration in `etc/kuiper.yaml`. Where `prometheus` is a boolean value, change it to `true` to turn on the service; `prometheusPort` configures the port of the service.
 
 ```yaml
   prometheus: true
   prometheusPort: 20499
 ```
 
-If you start eKuiper with Docker, you can also enable the service by configuring environment variables.
+If you start rekuiper with Docker, you can also enable the service by configuring environment variables.
 
 ```shell
 docker run -p 9081:9081 -d --name ekuiper MQTT_SOURCE__DEFAULT__SERVER="$MQTT_BROKER_ADDRESS" KUIPER__BASIC__PROMETHEUS=true lfedge/ekuiper :$tag
@@ -106,7 +106,7 @@ time="2022-08-22 17:16:50" level=info msg="Serving prometheus metrics on port ht
 Serving prometheus metrics on port http://localhost:20499/metrics
 ```
 
-Click on the address `http://localhost:20499/metrics` in the prompt to see the raw metrics information for eKuiper collected in Prometheus. Users can search the page for metrics like `kuiper_sink_records_in_total` after the eKuiper has rules running properly. Users can configure Prometheus to connect to eKuiper later for a richer presentation.
+Click on the address `http://localhost:20499/metrics` in the prompt to see the raw metrics information for rekuiper collected in Prometheus. Users can search the page for metrics like `kuiper_sink_records_in_total` after the rekuiper has rules running properly. Users can configure Prometheus to connect to rekuiper later for a richer presentation.
 
 ## Using Prometheus to monitor status
 
@@ -153,13 +153,13 @@ Click `Add Panel` to monitor more metrics in the same way.
 
 Grafana is a monitoring instrument system. It is a system monitoring tool open sourced by Grafana Labs. It can greatly help us simplify the complexity of monitoring. We only need to provide the data that needs to be monitored, and it can help generate various visual instruments. .
 
-eKuiper is predefined in the Grafana panel to help users more clearly and intuitively observe the current running status of eKuiper from Prometheus monitoring data. You can use the Grafama Dashboard Import function to copy the json content in the following link into grafana to obtain the panel.
+rekuiper is predefined in the Grafana panel to help users more clearly and intuitively observe the current running status of eKuiper from Prometheus monitoring data. You can use the Grafama Dashboard Import function to copy the json content in the following link into grafana to obtain the panel.
 
 ```shell
 https://github.com/lf-edge/ekuiper/blob/master/metrics/metrics.json
 ```
 
-Install eKuiper Dashboard
+Install rekuiper Dashboard
 
 Before introducing the eKuiper monitoring panel to grafana, you need to ensure that grafana has configured prometheus as a data source, and that prometheus has collected eKuiper monitoring data.
 
@@ -173,7 +173,7 @@ Set the Dashboard name and set the corresponding prometheus data source.
 
 ![Import Dashboard in grafana](./resources/import-2.png)
 
-After we introduce the panel, we can view the corresponding eKuiper instance and the metrics associated with the corresponding rules in the instance in the selection bar on the page.
+After we introduce the panel, we can view the corresponding rekuiper instance and the metrics associated with the corresponding rules in the instance in the selection bar on the page.
 
 ![Pick metrics in grafana](./resources/pick.png)
 
@@ -181,10 +181,10 @@ You can view the historical status of the rule through the following panel. 1 me
 
 ![rule status](./resources/ruleStatus.png)
 
-You can view how many running rules and paused rules there are inside eKuiper through the following panel. The metric is `kuiper_rule_count`.
+You can view how many running rules and paused rules there are inside rekuiper through the following panel. The metric is `kuiper_rule_count`.
 
 ![rule count](./resources/ruleCount.png)
 
 ## Summary
 
-This article introduced the rule metrics in eKuiper and how to use Prometheus to monitor these metrics. Users can further explore more advanced features of Prometheus based on this to improve eKuiper's operation and maintenance.
+This article introduced the rule metrics in rekuiper and how to use Prometheus to monitor these metrics. Users can further explore more advanced features of Prometheus based on this to improve rekuiper's operation and maintenance.

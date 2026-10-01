@@ -20,21 +20,21 @@ The action is used for publishing output message into websocket channel.
 
 Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
 
-## eKuiper as websocket client
+## rekuiper as websocket client
 
-When the websocket sink defines both addr and path, eKuiper will act as a websocket client to establish a websocket connection to the remote end and push messages through the connection.
+When the websocket sink defines both addr and path, rekuiper will act as a websocket client to establish a websocket connection to the remote end and push messages through the connection.
 
 You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
 
-## eKuiper as websocket server
+## rekuiper as websocket server
 
-When the websocket sink only defines path and addr is empty, eKuiper will serve as the websocket server and wait for the remote websocket connection to be established and push the message through the connection.
+When the websocket sink only defines path and addr is empty, rekuiper will serve as the websocket server and wait for the remote websocket connection to be established and push the message through the connection.
 
-When `checkConnection` is true, when creating a rule we need to ensure that the corresponding websocket enpoint has been established and the websocket connection has been established in order to successfully create the rule. We can [manage websocket endpoint](../../../api/restapi/connection.md#manage-websocket-connection) in eKuiper through REST API.
+When `checkConnection` is true, when creating a rule we need to ensure that the corresponding websocket enpoint has been established and the websocket connection has been established in order to successfully create the rule. We can [manage websocket endpoint](../../../api/restapi/connection.md#manage-websocket-connection) in rekuiper through REST API.
 
 ### Server Configuration
 
-To set up eKuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
+To set up rekuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
 
 ```yaml
 source:

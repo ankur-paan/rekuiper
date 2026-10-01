@@ -1,6 +1,6 @@
 # Rules
 
-eKuiper's stream processing capabilities are powered by its rules. Rules are the backbone of data flow, dictating how data is ingested, transformed, and then exported to external systems.
+rekuiper's stream processing capabilities are powered by its rules. Rules are the backbone of data flow, dictating how data is ingested, transformed, and then exported to external systems.
 
 A rule is a JSON-defined stream processing flow. It bridges the gap between data sources and processing logic before leading to actions that send the data to external systems.
 
@@ -25,14 +25,14 @@ A rule is a JSON-defined stream processing flow. It bridges the gap between data
 Key components of a rule:
 
 - **ID**: A unique identifier.
-- **SQL**: The processing logic, built on eKuiper's extended SQL syntax.
+- **SQL**: The processing logic, built on rekuiper's extended SQL syntax.
 - **Actions**: List of sink actions dictating where the processed data is sent.
 
 The table below is a detailed explanation of the row component:
 
 | Parameter name | Optional                         | Description                                                                                                                                               |
 |----------------|----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| id             | false                            | The id of the rule. The rule id must be unique in the same eKuiper instance.                                                                              |
+| id             | false                            | The id of the rule. The rule id must be unique in the same rekuiper instance.                                                                              |
 | name           | true                             | The display name or description of a rule                                                                                                                 |
 | sql            | required if graph is not defined | The sql query to run for the rule                                                                                                                         |
 | actions        | required if graph is not defined | An array of sink actions                                                                                                                                  |
@@ -49,7 +49,7 @@ A rule represents a stream processing flow from a data source that ingest data i
 There are two ways to define the flow aka. business logic of a rule. Either using SQL/actions combination or using the newly added graph API.
 
 1. **SQL Query Approach**: Using a combination of SQL and actions for a more declarative approach.
-2. **Graph API Approach**: Introduced in eKuiper 1.6.0, this method represents the rule as a Directed Acyclic Graph (DAG) in JSON, ideal for graphical user interfaces.
+2. **Graph API Approach**: Introduced in rekuiper 1.6.0, this method represents the rule as a Directed Acyclic Graph (DAG) in JSON, ideal for graphical user interfaces.
 
 ### SQL Query
 
@@ -57,7 +57,7 @@ By specifying the `sql` and `actions` property, we can define the business logic
 
 #### SQL
 
-The simplest rule SQL is like `SELECT * FROM demo`. It has ANSI SQL-like syntax and can leverage abundant operators and functions provided by eKuiper runtime. See [SQL](../../sqls/overview.md) for more information of eKuiper SQL.
+The simplest rule SQL is like `SELECT * FROM demo`. It has ANSI SQL-like syntax and can leverage abundant operators and functions provided by rekuiper runtime. See [SQL](../../sqls/overview.md) for more information of rekuiper SQL.
 
 Most of the SQL clauses define the logic except the `FROM` clause, which is responsible for specifying the stream. In this example, `demo` is the stream. It is possible to have multiple streams or streams/tables by using a join clause. As a streaming engine, there must be at least one stream in a rule.
 
@@ -72,11 +72,11 @@ Before using the SQL rule, the stream must be defined in prior. Please check [st
 
 The actions part defines the output action for a rule. Each rule can have multiple actions. An action is an instance of a sink connector. When define actions, the key is the sink connector type name, and the value is the properties.
 
-eKuiper has built in abundant sink connector type such as mqtt, rest and file. Users can also extend more sink type to be used in a rule action. Each sink type have its own property set. For more detail, please check [sink](../sinks/overview.md).
+rekuiper has built in abundant sink connector type such as mqtt, rest and file. Users can also extend more sink type to be used in a rule action. Each sink type have its own property set. For more detail, please check [sink](../sinks/overview.md).
 
 ### Graph rule
 
-Since eKuiper 1.6.0, eKuiper provides graph property in the rule model as an alternative way to create a rule. The property defines the DAG of a rule in JSON format. It is easy to map it directly to a graph in a GUI editor and suitable to serve as the backend of a drag and drop UI. An example of the graph rule definition is as below:
+Since eKuiper 1.6.0, rekuiper provides graph property in the rule model as an alternative way to create a rule. The property defines the DAG of a rule in JSON format. It is easy to map it directly to a graph in a GUI editor and suitable to serve as the backend of a drag and drop UI. An example of the graph rule definition is as below:
 
 ```json
 {
@@ -146,7 +146,7 @@ The `graph` property is a json structure with `nodes` to define the nodes presen
 
 ## Fine-Tuning
 
-eKuiper provides a slew of options to fine-tune rule behavior, including:
+rekuiper provides a slew of options to fine-tune rule behavior, including:
 
 - **Debugging and Logging**: Control log verbosity and direct logs to specific files.
 - **Event Time**: Choose between event time or processing time for timestamping.
@@ -196,9 +196,9 @@ The configuration items of `planOptimizeStrategy` are as follows:
 
 ## View Rule Status
 
-The rule startup process is asynchronous. When a user sends a start command, eKuiper performs necessary static checks
+The rule startup process is asynchronous. When a user sends a start command, rekuiper performs necessary static checks
 and then asynchronously executes the rule's startup operation. Therefore, the command response received by the user only
-indicates that eKuiper has accepted the startup request and set the rule's Expected Status to 'started'. This does not
+indicates that rekuiper has accepted the startup request and set the rule's Expected Status to 'started'. This does not
 mean the rule has begun running. Furthermore, a rule that is already running may stop due to runtime exceptions. We can
 get the running status of all rules and the detailed status of a single rule through the rest API.
 

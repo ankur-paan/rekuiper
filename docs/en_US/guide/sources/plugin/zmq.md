@@ -3,21 +3,21 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-The source will subscribe to a Zero Mq topic to import the messages into eKuiper
+The source will subscribe to a Zero Mq topic to import the messages into rekuiper
 
 ## Compile & deploy plugin
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sources/Zmq.so extensions/sources/zmq/zmq.go
-# cp plugins/sources/Zmq.so $eKuiper_install/plugins/sources
+# cp plugins/sources/Zmq.so $rekuiper_install/plugins/sources
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Configuration
 
-The configuration for this source is `$ekuiper/etc/sources/zmq.yaml`. The format is as below:
+The configuration for this source is `$rekuiper/etc/sources/zmq.yaml`. The format is as below:
 
 ```yaml
 #Global Zmq configurations

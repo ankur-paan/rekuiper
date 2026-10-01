@@ -5,12 +5,12 @@ Sink is used to save the picture to the specified folder.
 ## Compile and deploy the plugin
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sinks/Image.so extensions/sinks/image/image.go
-# cp plugins/sinks/Image.so $eKuiper_install/plugins/sinks
+# cp plugins/sinks/Image.so $rekuiper_install/plugins/sinks
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Attribute
 

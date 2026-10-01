@@ -1,4 +1,4 @@
-# Run TensorFlow Lite model with eKuiper external function
+# Run TensorFlow Lite model with rekuiper external function
 
 [LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is an edge lightweight IoT data analytics / streaming
 software which can be run at all kinds of resource constrained IoT devices.
@@ -22,7 +22,7 @@ Users also need have basic knowledge of Docker.
 
 ## Develop the external function
 
-In the example code, the gRPC Server provide ``label`` method, and users just need write an interface description file and register them into eKuiper. Then eKuiper can call the RPC method
+In the example code, the gRPC Server provide ``label`` method, and users just need write an interface description file and register them into rekuiper. Then rekuiper can call the RPC method
 just as built-in functions. The ``label`` method is powered by ``tflite_runtime`` image classification, for more detail, please check the `label.py` file in the example code.
 
 This is the proto file for the external functions plugins that provide services. The parameter of ``label`` method should be base64 encoded image.
@@ -84,7 +84,7 @@ You can get the example zip file in [example code](https://github.com/lf-edge/ek
 
 ### Register the external function
 
-put the sample.zip file in /tmp directory in the same machine with eKuiper and register by cli
+put the sample.zip file in /tmp directory in the same machine with rekuiper and register by cli
 
 ```shell
 # bin/kuiper create service sample '{"name": "sample","file": "file:///tmp/sample.zip"}'
@@ -96,7 +96,7 @@ Once the external function registered, we can use it in our rule. We will create
 
 ### Create the stream
 
-Define the stream by eKuiper Cli. We create a mqtt stream named demo, it subscribe to topic ``tfdemo``.
+Define the stream by rekuiper Cli. We create a mqtt stream named demo, it subscribe to topic ``tfdemo``.
 
 ```shell
 #/bin/kuiper create stream demo '() with (DATASOURCE="tfdemo")'
@@ -104,7 +104,7 @@ Define the stream by eKuiper Cli. We create a mqtt stream named demo, it subscri
 
 ### Create the rule
 
-Define the rule by eKuiper cli.  We will create a select query. We just read the base64 encoded images from demo stream and run the custom function ``label`` against it. The result will be the label of the image recognized by the AI.
+Define the rule by rekuiper cli.  We will create a select query. We just read the base64 encoded images from demo stream and run the custom function ``label`` against it. The result will be the label of the image recognized by the AI.
 
 ```shell
 #/bin/kuiper query

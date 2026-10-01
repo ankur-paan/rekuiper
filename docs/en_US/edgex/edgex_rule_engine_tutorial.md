@@ -2,15 +2,15 @@
 
 ## Overview
 
-In EdgeX Geneva, [LF Edge eKuiper - an SQL based rule engine](https://github.com/lf-edge/ekuiper) is integrated with EdgeX. Before diving into this tutorial, let's spend a little time on learning basic knowledge of eKuiper. eKuiper is an edge lightweight IoT data analytics / streaming software implemented by Golang, and it can be run at all kinds of resource constrained edge devices. eKuiper rules are based on `Source`, `SQL` and `Sink`.
+In EdgeX Geneva, [LF Edge eKuiper - an SQL based rule engine](https://github.com/lf-edge/ekuiper) is integrated with EdgeX. Before diving into this tutorial, let's spend a little time on learning basic knowledge of eKuiper. rekuiper is an edge lightweight IoT data analytics / streaming software implemented by Golang, and it can be run at all kinds of resource constrained edge devices. rekuiper rules are based on `Source`, `SQL` and `Sink`.
 
 - Source: The data source of streaming data, such as data from MQTT broker. In EdgeX scenario, the data source is EdgeX message bus, which could be ZeroMQ or MQTT broker.
-- SQL: SQL is where you specify the business logic of streaming data processing. eKuiper provides SQL-like statements to allow you to extract, filter & transform data.
+- SQL: SQL is where you specify the business logic of streaming data processing. rekuiper provides SQL-like statements to allow you to extract, filter & transform data.
 - Sink: Sink is used for sending analysis result to a specified target. For example, send analysis result to another MQTT broker, or an HTTP rest address.
 
 ![](../resources/arch.png)
 
-Following three steps are required for using eKuiper.
+Following three steps are required for using rekuiper.
 
 - Create a stream, where you specify the data source.
 - Write a rule.
@@ -18,15 +18,15 @@ Following three steps are required for using eKuiper.
   - Specify a sink target for saving analysis result
 - Deploy and run rule.
 
-The tutorial demonstrates how to use eKuiper to process the data from EdgeX message bus.
+The tutorial demonstrates how to use rekuiper to process the data from EdgeX message bus.
 
-## eKuiper EdgeX integration
+## rekuiper EdgeX integration
 
-EdgeX uses [message bus](https://github.com/edgexfoundry/go-mod-messaging) to exchange information between different micro services. It contains the abstract message bus interface and implementations for ZeroMQ & MQTT. The integration work for eKuiper & EdgeX includes following 3 parts.
+EdgeX uses [message bus](https://github.com/edgexfoundry/go-mod-messaging) to exchange information between different micro services. It contains the abstract message bus interface and implementations for ZeroMQ & MQTT. The integration work for rekuiper & EdgeX includes following 3 parts.
 
 - An EdgeX message bus source is extended to support consuming data from EdgeX message bus.
 
-- To analyze the data, eKuiper need to know data types that passed through it. Generally, user would be better to specify data schema for analysis data when a stream is created. Such as in below, a `demo` stream has a field named `temperature` field. It is very similar to create table schema in relational database system. After creating the stream definition, eKuiper can perform type checking during compilation or runtime, and invalid SQLs or data will be reported to user.
+- To analyze the data, eKuiper need to know data types that passed through it. Generally, user would be better to specify data schema for analysis data when a stream is created. Such as in below, a `demo` stream has a field named `temperature` field. It is very similar to create table schema in relational database system. After creating the stream definition, rekuiper can perform type checking during compilation or runtime, and invalid SQLs or data will be reported to user.
 
   ```shell
   CREATE STREAM demo (temperature bigint) WITH (FORMAT="JSON"...)
@@ -89,7 +89,7 @@ d4b236a7b561   redis:6.2.4-alpine                                              "
 
 #### Connection reuse
 
-When eKuiper gets data from messageBus and send back the processed result, user needs to specify the connection info separately when creating the source and sink.
+When rekuiper gets data from messageBus and send back the processed result, user needs to specify the connection info separately when creating the source and sink.
 
 - `mqtt` messageBus: this is especially useful when EdgeX use `secure` mode, in which case the client credentials will
   be injected into that share place automatically when services bootstrap.
@@ -106,11 +106,11 @@ In order to use this feature, users need do some modifications on the target `do
       CONNECTION__EDGEX__MQTTMSGBUS__TYPE: mqtt
   ```
 
-After these modifications and eKuiper starts up, please read [this](../guide/sinks/builtin/edgex.md#connection-reuse-publish-example) to learn how to refer to the connection info
+After these modifications and rekuiper starts up, please read [this](../guide/sinks/builtin/edgex.md#connection-reuse-publish-example) to learn how to refer to the connection info
 
 #### Run with native
 
-For performance reason, reader probably wants to run eKuiper with native approach. The default downloaded eKuiper
+For performance reason, reader probably wants to run rekuiper with native approach. The default downloaded eKuiper
 package **<u>does NOT have embedded support</u>**
 for `EdgeX`. If reader wants to support `EdgeX` in native packages, you can either make a native package by running
 command `make pkg_with_edgex`, or just copy the binary package from docker container.
@@ -138,9 +138,9 @@ curl -X POST \
 
 For other Rest APIs, please refer to [this doc](../api/restapi/overview.md).
 
-#### Option 2: Use eKuiper CLI
+#### Option 2: Use rekuiper CLI
 
-Run following command to enter the running eKuiper docker instance.
+Run following command to enter the running rekuiper docker instance.
 
 ```shell
 docker exec -it edgex-kuiper /bin/sh
@@ -205,7 +205,7 @@ curl -X POST \
 }'
 ```
 
-#### Option 2: Use eKuiper CLI
+#### Option 2: Use rekuiper CLI
 
 You can create a rule file with any text editor, and copy following contents into it. Let's say the file name is `rule.txt`.
 
@@ -227,7 +227,7 @@ You can create a rule file with any text editor, and copy following contents int
 }
 ```
 
-In the running eKuiper instance, and execute following command.
+In the running rekuiper instance, and execute following command.
 
 ```shell
 $ bin/kuiper create rule rule1 -f rule.txt
@@ -239,7 +239,7 @@ Rule rule1 was created successfully, please use 'cli getstatus rule rule1' comma
 ------
 
 If you want to send analysis result to another sink, please refer to [other sinks](../guide/sinks/overview.md)
-that supported in eKuiper.
+that supported in rekuiper.
 
 Now you can also take a look at the log file under `log/stream.log`, or through command `docker logs edgex-kuiper`
 to see detailed info of rule.
@@ -318,20 +318,20 @@ Connecting to 127.0.0.1:20498...
 
 ### Summary
 
-In this tutorial,  we introduce a very simple use of EdgeX eKuiper rule engine. If having any issues regarding to use of eKuiper rule engine, you can open issues in EdgeX or eKuiper Github respository.
+In this tutorial,  we introduce a very simple use of EdgeX rekuiper rule engine. If having any issues regarding to use of rekuiper rule engine, you can open issues in EdgeX or eKuiper Github respository.
 
 ### More Excecise
 
-Current rule does not filter any data that are sent to eKuiper, so how to filter data?  Please [drop rule](../api/cli/rules.md) and change the SQL in previous rule accordingly.  After update the rule file, and then deploy the rule again. Please monitor the `result` topic of MQTT broker, and please verify see if the rule works or not.
+Current rule does not filter any data that are sent to rekuiper, so how to filter data?  Please [drop rule](../api/cli/rules.md) and change the SQL in previous rule accordingly.  After update the rule file, and then deploy the rule again. Please monitor the `result` topic of MQTT broker, and please verify see if the rule works or not.
 
 #### Extended Reading
 
-- Starting from eKuiper 0.9.1 version, [a visualized web UI](../operation/manager-ui/overview.md) is released with a separated Docker image. You can manage the streams, rules and plugins through web page.
+- Starting from rekuiper 0.9.1 version, [a visualized web UI](../operation/manager-ui/overview.md) is released with a separated Docker image. You can manage the streams, rules and plugins through web page.
 - Read [EdgeX source](../guide/sources/builtin/edgex.md) for more detailed information of configurations and data type conversion.
 - [How to use meta function to extract additional data from EdgeX message bus?](edgex_meta.md) There are some other information are sent along with device service, such as event created time, event id etc. If you want to use such metadata information in your SQL statements, please refer to this doc.
-- [Use Golang template to customize analaysis result in eKuiper](../guide/sinks/data_template.md) Before the analysis result is sent to different sinks, the data template can be used to make more processing. You can refer to this doc for more scenarios of using data templates.
-- [EdgeX message bus sink doc](../guide/sinks/builtin/edgex.md). The document describes how to use EdgeX message bus sink. If you'd like to have your analysis result be consumed by other EdgeX services, you can send analysis data with EdgeX data format through this sink, and other EdgeX services can subscribe new message bus exposed by eKuiper sink.
-- [eKuiper plugin development tutorial](../extension/native/develop/plugins_tutorial.md): eKuiper plugin is based on the plugin mechanism of Golang, users can build loosely-coupled plugin applications,  dynamic loading and binding when it is running. You can refer to this article if you're interested in eKuiper plugin development.
+- [Use Golang template to customize analaysis result in rekuiper](../guide/sinks/data_template.md) Before the analysis result is sent to different sinks, the data template can be used to make more processing. You can refer to this doc for more scenarios of using data templates.
+- [EdgeX message bus sink doc](../guide/sinks/builtin/edgex.md). The document describes how to use EdgeX message bus sink. If you'd like to have your analysis result be consumed by other EdgeX services, you can send analysis data with EdgeX data format through this sink, and other EdgeX services can subscribe new message bus exposed by rekuiper sink.
+- [rekuiper plugin development tutorial](../extension/native/develop/plugins_tutorial.md): rekuiper plugin is based on the plugin mechanism of Golang, users can build loosely-coupled plugin applications,  dynamic loading and binding when it is running. You can refer to this article if you're interested in rekuiper plugin development.
 
  If you want to explore more features of eKuiper, please refer to below resources.
 

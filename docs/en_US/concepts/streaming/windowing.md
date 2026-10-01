@@ -2,7 +2,7 @@
 
 As streaming data is infinite, it is impossible to process it as a whole. Windowing provides a mechanism to split the unbounded data into a continuous series of bounded data to calculate.
 
-In eKuiper, the built-in windowing supports:
+In rekuiper, the built-in windowing supports:
 
 - Time window: window split by time
 - Count window: window split by element count

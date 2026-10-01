@@ -1,4 +1,4 @@
-eKuiper REST api allows you to manage external services, such as registering, deleting and listing services, listing external functions.
+rekuiper REST API allows you to manage external services, such as registering, deleting and listing services, listing external functions.
 
 ## Register external services
 
@@ -17,7 +17,7 @@ An example of a request for a file on an HTTP server:
 }
 ```
 
-An example of a request for a file on the eKuiper server:
+An example of a request for a file on the rekuiper server:
 
 ```json
 {
@@ -29,7 +29,7 @@ An example of a request for a file on the eKuiper server:
 ### parameter
 
 1. name: The unique name of the external service, which must be exactly the same as the json file of service definition in the zip file.
-2. file: URL of external service file. URL supports http, https and file modes. When using the file mode, the file must be on the machine where the eKuiper server is located. It must be a zip file, which contains the service description json file with the same name as the service and any other auxiliary files. The schema file must be in the schema folder.
+2. file: URL of external service file. URL supports http, https and file modes. When using the file mode, the file must be on the machine where the rekuiper server is located. It must be a zip file, which contains the service description json file with the same name as the service and any other auxiliary files. The schema file must be in the schema folder.
 
 ### Service file format
 

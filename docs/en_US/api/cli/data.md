@@ -1,6 +1,6 @@
 # Data Import/Export Management
 
-The eKuiper rule command line tools allows to import and export the Data.
+The rekuiper rule command line tools allows to import and export the Data.
 
 ## Data Format
 

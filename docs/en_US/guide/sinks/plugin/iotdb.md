@@ -4,7 +4,7 @@ The sink writes data into Apache IoTDB using the native Thrift RPC client. It su
 
 ## Compile the plugins
 
-In eKuiper source code root path, run the below command:
+In rekuiper source code root path, run the below command:
 
 ```shell
 go build -trimpath --buildmode=plugin -o plugins/sinks/Iotdb.so extensions/sinks/iotdb/*.go

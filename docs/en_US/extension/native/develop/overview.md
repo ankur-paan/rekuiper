@@ -45,7 +45,7 @@ implementation with a specific name. There are two types of exported symbol supp
     }
     ```
 
-2. Export an instance: eKuiper will use the instance as singleton for all plugin loads. So all rules will share the same
+2. Export an instance: rekuiper will use the instance as singleton for all plugin loads. So all rules will share the same
    instance. For such implementation, the developer will need to handle the shared states to avoid any potential
    multi-thread problems. This mode is recommended where there are no shared states and the performance is critical.
    Especially, a function extension is usually functional without internal state which is suitable for this mode.
@@ -93,12 +93,12 @@ return c, true
 ## Runtime dependencies
 
 Some plugins may need to access dependencies in the file system. Those files are put under
-<span v-pre>{{eKuiperPath}}/etc/{{pluginType}}/{{pluginName}}</span> directory. When packaging the plugin, put those
+<span v-pre>{{rekuiperPath}}/etc/{{pluginType}}/{{pluginName}}</span> directory. When packaging the plugin, put those
 files
 in [etc directory](../../../api/restapi/plugins.md#plugin-file-format). After installation, they will be moved to the
 recommended place.
 
-In the plugin source code, developers can access the dependencies of file system by getting the eKuiper root path from
+In the plugin source code, developers can access the dependencies of file system by getting the rekuiper root path from
 the context:
 
 ```go

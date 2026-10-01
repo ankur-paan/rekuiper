@@ -3,15 +3,15 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-The HTTP Pull source connector allows eKuiper to retrieve data from external HTTP servers, providing a flexible way to pull data on demand or based on a schedule. This section focuses on how to configure and use the HTTP Pull as a source connector.
+The HTTP Pull source connector allows rekuiper to retrieve data from external HTTP servers, providing a flexible way to pull data on demand or based on a schedule. This section focuses on how to configure and use the HTTP Pull as a source connector.
 
 The HTTP Pull source connector is designed to fetch data by making HTTP requests to external servers. It can be set to pull data based on a specified interval or triggered by certain conditions.
 
 ## Configurations
 
-The connector in eKuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring eKuiper connectors with the configuration file.
+The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
 
-eKuiper's default HTTP Pull source configuration resides at `$ekuiper/etc/sources/http_pull.yaml`. This configuration file provides a set of default settings, which you can override as needed.
+rekuiper's default HTTP Pull source configuration resides at `$rekuiper/etc/sources/http_pull.yaml`. This configuration file provides a set of default settings, which you can override as needed.
 
 See below for a demo configuration with the global configuration and a customized `application_conf` section.
 
@@ -223,7 +223,7 @@ For HTTP services that allow time-based filtering, `PullTime` and `LastPullTime`
 
 ## Custom Configurations
 
-For scenarios where you need to customize certain connection parameters, eKuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
+For scenarios where you need to customize certain connection parameters, rekuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
 
 Here's how to set up a custom configuration:
 
@@ -248,7 +248,7 @@ Parameters defined in a custom configuration will override the corresponding par
 
 ## Create a Stream Source
 
-Once the connector is defined, the next step is integrating it into eKuiper rules for data processing.
+Once the connector is defined, the next step is integrating it into rekuiper rules for data processing.
 
 ::: tip
 
@@ -260,7 +260,7 @@ You can define the HTTP Pull source as the data source either by REST API or CLI
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, making it suitable for those who aim to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, making it suitable for those who aim to automate tasks or integrate rekuiper operations into other systems.
 
 Example
 
@@ -272,12 +272,12 @@ For a comprehensive guide, refer to [Streams Management with REST API](../../../
 
 ### Use CLI
 
-If you favor a more hands-on approach, the Command Line Interface (CLI) offers direct access to eKuiper's functionalities.
+If you favor a more hands-on approach, the Command Line Interface (CLI) offers direct access to rekuiper's functionalities.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to create a rule, specifying the HTTP Pull connector as its source, for example:

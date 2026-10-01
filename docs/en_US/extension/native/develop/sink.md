@@ -3,7 +3,7 @@
 > [!NOTE]
 > Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
 
-Sink feed data from eKuiper into external systems. eKuiper has built-in sink support
+Sink feed data from rekuiper into external systems. rekuiper has built-in sink support
 for [MQTT broker](../../../guide/sinks/builtin/mqtt.md) and [log sink](../../../guide/sinks/builtin/log.md) etc. There
 are still needs to publish data to various external systems include messaging systems and database etc. Sink extension
 is presented to meet this requirement.
@@ -13,7 +13,7 @@ plugin code needs to be re-adapted.
 
 ## Developing
 
-To develop a sink for eKuiper is to
+To develop a sink for rekuiper is to
 implement [api.Sink](https://github.com/lf-edge/ekuiper/blob/master/contract/api/sink.go) interface and export it as a
 golang plugin.
 
@@ -52,7 +52,7 @@ All Sink must implement below general methods:
     ```
 
 3. Implement specific Collect method according to your sink type. This is the main task for a Sink. The function will be
-   invoked when eKuiper feed any data into the sink. As an infinite stream, this function will be invoked continuously.
+   invoked when rekuiper feed any data into the sink. As an infinite stream, this function will be invoked continuously.
    The task of this function is to publish data to the external system. The methods implemented by different types of
    Sinks vary slightly. For more details, please refer
    to [Sink Type Implementation](#various-sink-types-implementation).

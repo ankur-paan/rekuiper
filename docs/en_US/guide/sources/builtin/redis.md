@@ -2,7 +2,7 @@
 
 <span style="background:green;color:white;padding:1px;margin:2px">lookup table source</span>
 
-eKuiper provides built-in support for looking up data in Redis. The Redis Source Connector allows eKuiper to ingest data from a Redis instance, enabling real-time stream processing based on Redis data. With its in-memory data structure store capabilities, Redis is a vital tool in many application data architectures. Integrating it with eKuiper stream processing expands the realm of possibilities for real-time analytics and decision-making.
+rekuiper provides built-in support for looking up data in Redis. The Redis Source Connector allows eKuiper to ingest data from a Redis instance, enabling real-time stream processing based on Redis data. With its in-memory data structure store capabilities, Redis is a vital tool in many application data architectures. Integrating it with rekuiper stream processing expands the realm of possibilities for real-time analytics and decision-making.
 
 ::: tip
 
@@ -38,13 +38,13 @@ With this configuration, the table will refer to database 0 in the Redis instanc
 
 ## Create a Lookup Table Source
 
-To utilize the Redis Source Connector in eKuiper streams, define a stream specifying the Redis source, its configuration, and the data format.
+To utilize the Redis Source Connector in rekuiper streams, define a stream specifying the Redis source, its configuration, and the data format.
 
 You can define the Redis source as the data source either by REST API or CLI tool.
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for users looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for users looking to automate tasks or integrate rekuiper operations into other systems.
 
 Example:
 
@@ -56,12 +56,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to define a stream for the Redis source connector:

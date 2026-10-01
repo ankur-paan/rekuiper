@@ -1,10 +1,10 @@
 # Serialization
 
-The eKuiper uses a map based data structure internally during computation, so source/sink connections to external systems usually require codecs to convert the format. In source/sink, you can specify the codec scheme to be used by configuring the parameters `format` and `schemaId`.
+The rekuiper uses a map based data structure internally during computation, so source/sink connections to external systems usually require codecs to convert the format. In source/sink, you can specify the codec scheme to be used by configuring the parameters `format` and `schemaId`.
 
 ## Format
 
-There are two types of formats for codecs: schema and schema-less formats. The formats currently supported by eKuiper
+There are two types of formats for codecs: schema and schema-less formats. The formats currently supported by rekuiper
 are `json`, `binary`, `delimiter`, `protobuf` and `custom`. Among them, `protobuf` is the schema format.
 The schema format requires registering the schema first, and then setting the referenced schema along with the format.
 For example, when using mqtt sink, the format and schema can be configured as follows
@@ -54,7 +54,7 @@ When using `custom` format or `protobuf` format, the user can customize the code
     }
     ```
 
-3. Compile as a plugin so file. Usually, format extensions do not need to depend on the main eKuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to [deploy to the official docker](#build-format-plugin-with-docker), you can use the corresponding docker image for compilation.
+3. Compile as a plugin so file. Usually, format extensions do not need to depend on the main rekuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to [deploy to the official docker](#build-format-plugin-with-docker), you can use the corresponding docker image for compilation.
 
     ```shell
     go build -trimpath --buildmode=plugin -o data/test/myFormat.so internal/converter/custom/test/*.go
@@ -75,7 +75,7 @@ When using `custom` format or `protobuf` format, the user can customize the code
 
 5. Use custom format in source or sink with `format` and `schemaId` parameters.
 
-The complete custom format can be found in [myFormat.go](https://github.com/lf-edge/ekuiper/blob/master/internal/converter/custom/test/myformat.go). This file defines a simple custom format where the codec actually only calls JSON for serialization. It returns a data structure that can be used to infer the data structure of the eKuiper source.
+The complete custom format can be found in [myFormat.go](https://github.com/lf-edge/ekuiper/blob/master/internal/converter/custom/test/myformat.go). This file defines a simple custom format where the codec actually only calls JSON for serialization. It returns a data structure that can be used to infer the data structure of the rekuiper source.
 
 #### Build Format Plugin with Docker
 
@@ -115,7 +115,7 @@ Static parsing requires the development of a parsing plug-in, which proceeds as 
 
 2. Move the generated code helloworld.pb.go to the go language project and rename the package to main.
 3. Create the wrapper struct for each message type. Implement 3 methods `Encode`, `Decode`, `GetXXX`. The main purpose of encoding and decoding is to convert the struct and map types of messages. Note that to ensure performance, do not use reflection.
-4. Compile as a plugin so file. Usually, format extensions do not need to depend on the main eKuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to deploy to the official docker, you can use the corresponding docker image for compilation.
+4. Compile as a plugin so file. Usually, format extensions do not need to depend on the main rekuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to deploy to the official docker, you can use the corresponding docker image for compilation.
 
    ```shell
     go build -trimpath --buildmode=plugin -o data/test/helloworld.so internal/converter/protobuf/test/*.go
@@ -141,13 +141,13 @@ The complete static protobuf plugin can be found in [helloworld protobuf](https:
 
 ## Schema
 
-A schema is a set of metadata that defines the data structure. For example, the .proto file is used in the Protobuf format as the data format for schema definition transfers. Currently, eKuiper supports schema types protobuf and custom.
+A schema is a set of metadata that defines the data structure. For example, the .proto file is used in the Protobuf format as the data format for schema definition transfers. Currently, rekuiper supports schema types protobuf and custom.
 
 ### Schema Registry
 
 Schemas are stored as files. The user can register the schema through the configuration file or the API. The schema is stored in `data/schemas/${type}`. For example, a schema file in protobuf format should be placed in `data/schemas/protobuf`.
 
-When eKuiper starts, it will scan this configuration folder and automatically register the schemas inside. If you need to register or manage schemas on the fly, this can be done through the schema registry API, which acts on the file system.
+When rekuiper starts, it will scan this configuration folder and automatically register the schemas inside. If you need to register or manage schemas on the fly, this can be done through the schema registry API, which acts on the file system.
 
 ### Schema Registry API
 

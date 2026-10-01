@@ -68,7 +68,7 @@ You need to provide the address, username, and password of kuiper-manager when l
 
   ![login](./resources/login.png)
 
-### Create a eKuiper service
+### Create a rekuiper service
 
 When creating a eKuiper service, you need to fill in the "service type", "service name" and "endpoint URL".
 

@@ -75,7 +75,7 @@ process.
     }
     ```
 
-2. **Use in Data Source**: When configuring the MQTT source (`$ekuiper/etc/mqtt_source.yaml`), you can reference the
+2. **Use in Data Source**: When configuring the MQTT source (`$rekuiper/etc/mqtt_source.yaml`), you can reference the
    above connection configuration via `connectionSelector`, for example, both `demo_conf` and `demo2_conf` will
    reference the connection configuration of `mqttcon1`.
 

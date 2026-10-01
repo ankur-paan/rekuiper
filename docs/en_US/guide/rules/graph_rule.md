@@ -1,6 +1,6 @@
 # Graph Rule
 
-Originally, eKuiper leverage SQL to define the rule logic. Although it is handy for developers, it is still not easy to use for users with no development knowledge. During runtime, rules are a DAG of elements(source/operator/sink) even when defining by SQL. The graph can be easily mapping to a drag and drop UI to facilitate the users. Thus, an alternative `graph` property is provided in the rule API.
+Originally, rekuiper leveraged SQL to define the rule logic. Although it is handy for developers, it is still not easy to use for users with no development knowledge. During runtime, rules are a DAG of elements(source/operator/sink) even when defining by SQL. The graph can be easily mapping to a drag and drop UI to facilitate the users. Thus, an alternative `graph` property is provided in the rule API.
 
 The `graph` property is a JSON presentation of the DAG. It is consisted by `nodes` and `topo` which defines the nodes in the graph and their edges respectively. Below is a simplest rule defined by graph. It defines 3 nodes `demo`, `humidityFilter` and `mqttOut`. And the graph is linear as `demo` -> `humidityFilter` -> `mqttOut`. The rule will read from mqtt(`demo`), filter by humidity(`humidityFilter`) and sink to mqtt(`mqttOut`).
 

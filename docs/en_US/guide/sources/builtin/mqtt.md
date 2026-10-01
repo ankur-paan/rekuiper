@@ -3,15 +3,15 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-MQTT (Message Queuing Telemetry Transport) is a protocol optimized for low bandwidth scenarios. Using the MQTT source stream, eKuiper subscribes to messages from the MQTT broker and channels them into its processing pipeline. This integration allows for real-time data processing directly from specified MQTT topics.
+MQTT (Message Queuing Telemetry Transport) is a protocol optimized for low bandwidth scenarios. Using the MQTT source stream, rekuiper subscribes to messages from the MQTT broker and channels them into its processing pipeline. This integration allows for real-time data processing directly from specified MQTT topics.
 
- In eKuiper, the MQTT connector can function as both a source connector (ingesting data from MQTT brokers) and a [sink connector](../../sinks/builtin/mqtt.md) (publishing data to MQTT brokers). This section specifically focuses on its role as a source connector.
+ In rekuiper, the MQTT connector can function as both a source connector (ingesting data from MQTT brokers) and a [sink connector](../../sinks/builtin/mqtt.md) (publishing data to MQTT brokers). This section specifically focuses on its role as a source connector.
 
 ## Configurations
 
-The connector in eKuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring eKuiper connectors with the configuration file.
+The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
 
-eKuiper's default MQTT source configuration resides at `$ekuiper/etc/mqtt_source.yaml`. This configuration serves as a [base for all MQTT connections](#global-configuration). However, for specific use cases, you might need [custom configurations](#custom-configurations). eKuiper's [connector selector](../../connector.md#connection-selector) further enhances this by allowing connection reuse across configurations.
+rekuiper's default MQTT source configuration resides at `$rekuiper/etc/mqtt_source.yaml`. This configuration serves as a [base for all MQTT connections](#global-configuration). However, for specific use cases, you might need [custom configurations](#custom-configurations). rekuiper's [connector selector](../../connector.md#connection-selector) further enhances this by allowing connection reuse across configurations.
 
 See below for a demo configuration with the global configuration and a customized `demo_conf` section.
 
@@ -123,7 +123,7 @@ You can check the connectivity of the corresponding sink endpoint in advance thr
 
 ## Custom Configurations
 
-For scenarios where you need to customize certain connection parameters, eKuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
+For scenarios where you need to customize certain connection parameters, rekuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
 
 Here's how to set up a custom configuration:
 
@@ -148,7 +148,7 @@ Parameters defined in a custom configuration will override the corresponding par
 
 ## Create a Stream Source
 
-Having defined the connector, the next phase involves its integration with eKuiper rules by creating a stream.
+Having defined the connector, the next phase involves its integration with rekuiper rules by creating a stream.
 
 ::: tip
 
@@ -160,7 +160,7 @@ You can define the MQTT source as the data source either by REST API or CLI tool
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for those looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
 
 Example:
 
@@ -174,12 +174,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to create a rule, specifying the MQTT connector as its source, for example:
@@ -202,7 +202,7 @@ SELECT meta(properties) AS props FROM demo
 
 ## Migration Guide
 
-Starting from version 1.5.0, eKuiper has modified the MQTT source broker configuration, transitioning from `servers` to `server`. As a result, users can now specify only a single MQTT broker address, as opposed to an array of addresses.
+Starting from version 1.5.0, rekuiper has modified the MQTT source broker configuration, transitioning from `servers` to `server`. As a result, users can now specify only a single MQTT broker address, as opposed to an array of addresses.
 
 - If you've been using an MQTT broker as a stream source in earlier versions and plan to upgrade to 1.5.0 or subsequent releases, ensure that the `server` configuration in the `etc/mqtt_source.yaml` file is correctly set.
 - If you've been relying on environment variables to determine the MQTT source address, an adjustment is required. For instance, if your broker address is `tcp://127.0.0.1:1883`, then the environment variable should be changed from `MQTT_SOURCE__DEFAULT__SERVERS=[tcp://127.0.0.1:1883]` to `MQTT_SOURCE__DEFAULT__SERVER="tcp://127.0.0.1:1883"`

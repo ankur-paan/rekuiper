@@ -15,17 +15,17 @@ When using `sqlserver` as the target, you need to confirm that the `sqlserver` e
 ### Default build command
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
-# cp plugins/sinks/Sql.so $eKuiper_install/plugins/sinks
+# cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
 ```
 
 ### MySql build command
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -tags mysql -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
-# cp plugins/sinks/Sql.so $eKuiper_install/plugins/sinks
+# cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
 ```
 
 ## Properties

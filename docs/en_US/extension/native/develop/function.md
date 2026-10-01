@@ -3,7 +3,7 @@
 > [!NOTE]
 > Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
 
-In the eKuiper SQL syntax, [many built-in functions](../../../sqls/functions/overview.md) are provided to server for
+In the rekuiper SQL syntax, [many built-in functions](../../../sqls/functions/overview.md) are provided to server for
 various reusable business logic. However, the users still likely need various reusable business logic which is not
 covered by the built ins. The function extension is presented to customize the functions.
 
@@ -11,7 +11,7 @@ covered by the built ins. The function extension is presented to customize the f
 
 ### Develop a customized function
 
-To develop a function for eKuiper is to
+To develop a function for rekuiper is to
 implement [api.Function](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) interface and export it as a
 golang plugin.
 
@@ -77,11 +77,11 @@ go build -trimpath --buildmode=plugin -o plugins/functions/MyFunction.so extensi
 
 ### Register multiple functions
 
-eKuiper will load plugins in the plugin folders automatically. The autoload function plugin assumes there is a function
+rekuiper will load plugins in the plugin folders automatically. The autoload function plugin assumes there is a function
 named the same as the plugin name. If multiple functions are exported, users need to explicitly register them to make
 them available. There are two ways to register the functions.
 
-1. In development environment, we recommend to build plugin .so file directly into the plugin folder so that eKuiper can
+1. In development environment, we recommend to build plugin .so file directly into the plugin folder so that rekuiper can
    autoload it. Then call [CLI register functions command](../../../api/cli/plugins.md#register-functions)
    or [REST register functions API](../../../api/restapi/plugins.md#register-functions).
 2. In production environment, [package the plugin into zip file](plugins_tutorial.md#deployment), then

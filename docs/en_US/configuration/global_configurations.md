@@ -1,6 +1,6 @@
 # Basic configurations
 
-The configuration file for eKuiper is at `$kuiper/etc/kuiper.yaml`. The configuration file is yaml format.
+The configuration file for rekuiper is at `$kuiper/etc/kuiper.yaml`. The configuration file is yaml format.
 Application can be configured through environment variables. Environment variables are taking precedence over their counterparts
 in the yaml file. In order to use env variable for given config we must use formatting as follows:
 `KUIPER__` prefix + config path elements connected by `__`.
@@ -92,7 +92,7 @@ basic:
   maxAge: 72
 ```
 
-When debug is false, eKuiper's log level can be controlled through logLevel. When debug is true, eKuiper's log level will be fixed to debug.
+When debug is false, rekuiper's log level can be controlled through logLevel. When debug is true, rekuiper's log level will be fixed to debug.
 
 ## System log
 
@@ -199,7 +199,7 @@ The tls cert file path and key file path setting. If restTls is not set, the res
 
 ## authentication
 
-eKuiper will check the `Token` for rest api when `authentication` option is true. please check this file for [more info](../api/restapi/authentication.md).
+rekuiper will check the `Token` for rest api when `authentication` option is true. please check this file for [more info](../api/restapi/authentication.md).
 
 ```yaml
 basic:
@@ -215,7 +215,7 @@ basic:
 
 ## Prometheus Configuration
 
-eKuiper can export metrics to prometheus if `prometheus` option is true. The prometheus will be served with the port specified by `prometheusPort` option.
+rekuiper can export metrics to prometheus if `prometheus` option is true. The prometheus will be served with the port specified by `prometheusPort` option.
 
 ```yaml
 basic:
@@ -223,9 +223,9 @@ basic:
   prometheusPort: 20499
 ```
 
-For such a default configuration, eKuiper will export metrics and serve prometheus at `http://localhost:20499/metrics`.
+For such a default configuration, rekuiper will export metrics and serve prometheus at `http://localhost:20499/metrics`.
 
-The prometheus port can be the same as the eKuiper REST API port. If so, both service will be served on the same server.
+The prometheus port can be the same as the rekuiper REST API port. If so, both service will be served on the same server.
 
 ## Pluginhosts Configuration
 
@@ -369,9 +369,9 @@ ruleset. The ruleset will only be import on the first startup of eKuiper.
 
 ## Configure FoundationDB as storage
 
-eKuiper uses sqlite by default to store some meta-information. At the same time, eKuiper also supports using FoundationDB as meta-storage data. We can achieve this through the following steps:
+rekuiper uses sqlite by default to store some meta-information. At the same time, eKuiper also supports using FoundationDB as meta-storage data. We can achieve this through the following steps:
 
-* Confirm that the environment where eKuiper is located has installed and started FoundationDB, and confirm the storage path used by FoundationDB. Please refer to [Official Document](https://apple.github.io/foundationdb/administration.html#default-cluster-file)
+* Confirm that the environment where rekuiper is located has installed and started FoundationDB, and confirm the storage path used by FoundationDB. Please refer to [Official Document](https://apple.github.io/foundationdb/administration.html#default-cluster-file)
 * Confirm the APIVersion of the fdb c language library used by the eKuiper host, and replace the eKuiper dependent library with the corresponding version. Taking APIVersion 6.2.0 as an example, execute the following command in the eKuiper home directory:
 
 ```shell

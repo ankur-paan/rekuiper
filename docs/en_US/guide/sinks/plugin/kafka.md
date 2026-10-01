@@ -7,7 +7,7 @@ The sink will publish the result into a Kafka .
 ### build in shell
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sinks/kafka.so extensions/sinks/kafka/kafka.go
 # zip kafka.zip plugins/sinks/kafka.so
 # cp kafka.zip /root/tomcat_path/webapps/ROOT/
@@ -50,7 +50,7 @@ $(PLUGINS_CUSTOM):
   @$(CURDIR)/build-plugins.sh $(PLUGIN_TYPE) $(PLUGIN_NAME)
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Properties
 

@@ -1,4 +1,4 @@
-# eKuiper lexical elements
+# rekuiper lexical elements
 
 ## Comments
 
@@ -6,7 +6,7 @@ Comment serve as documentation. Comments begin with the character sequence `/*` 
 
 ## Tokens
 
-eKuiper SQL is built up from tokens. There are four classes of tokens:
+rekuiper SQL is built up from tokens. There are four classes of tokens:
 
 - *identifiers*
 - *keywords*
@@ -34,7 +34,7 @@ SELECT `a-b`, `hello world`, `中文Chinese` from demo
 SELECT, FROM, JOIN, LEFT, INNER, ON, WHERE, GROUP, ORDER, HAVING, BY, ASC, DESC, AND, OR, CASE, WHEN, UNTIL, THEN, ELSE, END, IN, NOT, BETWEEN, LIKE, OVER, PARTITION
 ```
 
-The following is an example for using a stream named `from`, which is a reserved keyword in eKuiper.
+The following is an example for using a stream named `from`, which is a reserved keyword in rekuiper.
 
 ```sql
 SELECT * FROM demo1 where `from`="device1"

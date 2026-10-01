@@ -1,6 +1,6 @@
 ## Use Open Telemetry Tracing to track data
 
-eKuiper's rule is a continuously running streaming computing task. Rules are used to process unbounded data flows. Under normal circumstances, rules will continue to run after they are started and continuously generate running status data. We can use open telemetry tracing to track the data changes of each piece of data in each operator.
+rekuiper's rule is a continuously running streaming computing task. Rules are used to process unbounded data flows. Under normal circumstances, rules will continue to run after they are started and continuously generate running status data. We can use open telemetry tracing to track the data changes of each piece of data in each operator.
 
 ## Open Telemetry Tracing configuration
 
@@ -32,7 +32,7 @@ If you configure an Open Telemetry Tracing collector, you can query the storage 
 
 ## Integrating Data Tracing with Open Telemetry Collector and Jaeger
 
-eKuiper supports exposing Trace data to the Open Telemetry Collector, which in turn supports exposing Tracing data to Jaeger for visualization. We demonstrate this through the following example:
+rekuiper supports exposing Trace data to the Open Telemetry Collector, which in turn supports exposing Tracing data to Jaeger for visualization. We demonstrate this through the following example:
 
 Launching Open Telemetry Collector and Jaeger Locally
 
@@ -96,7 +96,7 @@ networks:
     driver: bridge
 ```
 
-### Configure eKuiper to Send Trace Data to Collector
+### Configure rekuiper to Send Trace Data to Collector
 
 ```yaml
 openTelemetry:
@@ -106,7 +106,7 @@ openTelemetry:
   localTraceCapacity: 2048
 ```
 
-### Configuring eKuiper to Send Data Tracing to the Collector
+### Configuring rekuiper to Send Data Tracing to the Collector
 
 Via REST API [Create Rules](../../api/restapi/rules.md#create-a-rule)
 

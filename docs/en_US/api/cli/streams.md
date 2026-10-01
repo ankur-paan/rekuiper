@@ -1,6 +1,6 @@
 # Streams management
 
-The eKuiper stream command line tools allows you to manage the streams, such as create, describe, show and drop stream definitions.
+The rekuiper stream command line tools allows you to manage the streams, such as create, describe, show and drop stream definitions.
 
 ## create a stream
 
@@ -134,7 +134,7 @@ Sample:
 kuiper >
 ```
 
-After typing `query` sub-command, it prompts `kuiper >`, then type SQLs (see [eKuiper SQL reference](../../sqls/overview.md) for how to use eKuiper SQL) in the command prompt and press enter.
+After typing `query` sub-command, it prompts `kuiper >`, then type SQLs (see [rekuiper SQL reference](../../sqls/overview.md) for how to use rekuiper SQL) in the command prompt and press enter.
 
 The results will be print in the console.
 

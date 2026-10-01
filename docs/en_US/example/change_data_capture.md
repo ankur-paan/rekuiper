@@ -1,6 +1,6 @@
 # Notify when current changes
 
-In IoT scenarios, it is a very common scenario to trigger events when indicators change. This article will use current changes as an example to introduce eKuiper SQL rules.
+In IoT scenarios, it is a very common scenario to trigger events when indicators change. This article will use current changes as an example to introduce rekuiper SQL rules.
 
 ## Background
 
@@ -55,7 +55,7 @@ timestamp to which the data belongs. In this document, we will use the sample in
 In IoT applications, users often need to monitor whether sensor values exceed a certain threshold, thereby triggering
 alarms or other actions. Simply comparing the current value with the threshold may lead to continuous triggering of
 alarms. Therefore, what users might actually need is to trigger an alarm when the value changes from not exceeding the
-threshold to exceeding it, which implies a process of judging the change. Let's check how eKuiper can help to fulfill
+threshold to exceeding it, which implies a process of judging the change. Let's check how rekuiper can help to fulfill
 this requirement.
 
 #### 1. Changed current value exceeds 300

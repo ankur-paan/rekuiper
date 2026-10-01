@@ -1,12 +1,12 @@
 # Configuration
 
-eKuiper configuration is based on yaml file and allow to configure by updating the file, environment variable and REST API.
+rekuiper configuration is based on yaml file and allow to configure by updating the file, environment variable and REST API.
 
 ## Configuration Scope
 
-eKuiper configurations include
+rekuiper configurations include
 
-1. `etc/kuiper.yaml`: global configuration file. Make change to it need to restart the eKuiper instance. Please refer to [basic configuration file](./global_configurations.md) for detail.
+1. `etc/kuiper.yaml`: global configuration file. Make change to it need to restart the rekuiper instance. Please refer to [basic configuration file](./global_configurations.md) for detail.
 2. `etc/sources/${source_name}.yaml`: the configuration file for each source to define the default properties (except MQTT source, whose configuration file is `etc/mqtt_source.yaml`). Please refer to the doc for each source for detail, such as the [MQTT source](../guide/sources/builtin/mqtt.md).
 3. `etc/connections/connection.yaml`: shared connection configuration file.
 
@@ -37,7 +37,7 @@ The environment variables are separated by "__", the content of the first part a
 
 ### command line parameters
 
-eKuiper supports importing configuration from command line parameters, as follows:
+rekuiper supports importing configuration from command line parameters, as follows:
 
 | configuration name | type   | configuration role                                                                         |
 |--------------------|--------|--------------------------------------------------------------------------------------------|

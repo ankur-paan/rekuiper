@@ -1,10 +1,10 @@
 # How to Debug Rules
 
-eKuiper is a lightweight and high-performance SQL engine for edge computing. It allows you to write SQL-like rules to
+rekuiper is a lightweight and high-performance SQL engine for edge computing. It allows you to write SQL-like rules to
 process streaming data from various sources and send the results to different sinks. Sounds cool, right?
 
 But what if your rules don't work as expected? How do you find out what's wrong and fix it? Don't worry, I've got you
-covered. Here are some steps you can follow to debug eKuiper rules like a pro.
+covered. Here are some steps you can follow to debug rekuiper rules like a pro.
 
 ## Create the Rule
 
@@ -66,7 +66,7 @@ invalid SQL statement, you will get an error message like this:
 #### Check the logs
 
 The error message in the response body is usually enough to tell you what's wrong. But if you want to know more details
-about the error, you can check the logs of the eKuiper server.
+about the error, you can check the logs of the rekuiper server.
 
 The logs are located in the `logs` directory under the eKuiper installation directory. You can use the `tail` command to
 view the logs in real time.
@@ -78,7 +78,7 @@ Then you can use the `docker logs` command to view the logs and keep an eye on t
 
 ### Common Errors
 
-When submitting a rule, eKuiper will validate the rule and run it. You may encounter some errors. Here are some common
+When submitting a rule, rekuiper will validate the rule and run it. You may encounter some errors. Here are some common
 errors:
 
 #### Syntax error
@@ -114,7 +114,7 @@ a new stream if necessary.
 
 **3. Rule ID exists**
 
-Rule ID is unique in eKuiper. If you try to create a rule with an ID that already exists, you will get an error message
+Rule ID is unique in rekuiper. If you try to create a rule with an ID that already exists, you will get an error message
 like this:
 
 ```text

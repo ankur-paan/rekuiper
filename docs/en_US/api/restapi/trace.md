@@ -1,6 +1,6 @@
 # Data tracing management
 
-eKuiper supports viewing recent tracing data of rules through API.
+rekuiper supports viewing recent tracing data of rules through API.
 
 ## Start trace the data of specific rule
 

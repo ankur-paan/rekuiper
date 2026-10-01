@@ -1,6 +1,6 @@
 # SQL
 
-The SQL language support in eKuiper includes Data Definition Language (DDL), Data Manipulation Language (DML) and Query Language. The SQL support in eKuiper is a subset of ANSI SQL and has some customized extensions.
+The SQL language support in rekuiper includes Data Definition Language (DDL), Data Manipulation Language (DML) and Query Language. The SQL support in rekuiper is a subset of ANSI SQL and has some customized extensions.
 
 ## SQL in source definition
 

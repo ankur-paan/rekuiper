@@ -76,7 +76,7 @@ DELETE http://localhost:9081/connections/{id}
 
 ## Connectivity check
 
-Check eKuiper connection connectivity via API
+Check rekuiper connection connectivity via API
 
 ### sink connection check
 

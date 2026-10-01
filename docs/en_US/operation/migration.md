@@ -1,6 +1,6 @@
-# Migrating from eKuiper 1.x to 2.x
+# Migrating from rekuiper 1.x to 2.x
 
-This guide covers important breaking changes and migration steps when upgrading from eKuiper 1.x to 2.x.
+This guide covers important breaking changes and migration steps when upgrading from rekuiper 1.x to 2.x.
 
 ## Breaking Changes
 
@@ -26,13 +26,13 @@ eKuiper 2.x uses a different storage format for streams and tables in the SQLite
 Start fresh by removing the old database:
 
 ```bash
-# Stop eKuiper
+# Stop rekuiper
 docker stop ekuiper
 
 # Remove old database
 rm -rf /kuiper/data/sqliteKV.db
 
-# Start eKuiper 2.x (creates new database)
+# Start rekuiper 2.x (creates new database)
 docker start ekuiper
 
 # Re-create all streams and rules via REST API or CLI
@@ -77,7 +77,7 @@ sqlite3 /kuiper/data/sqliteKV.db "SELECT key FROM stream;"
 # Delete specific stream
 sqlite3 /kuiper/data/sqliteKV.db "DELETE FROM stream WHERE key = 'my_stream';"
 
-# Restart eKuiper
+# Restart rekuiper
 docker restart ekuiper
 ```
 

@@ -10,9 +10,9 @@ Do **not** open a public GitHub issue for a security vulnerability. Report it pr
 
 - If the bug is a **security vulnerability**, stop here and follow [SECURITY.md](../../SECURITY.md) instead of filing a public issue.
 - **Ensure the bug was not already reported** by searching on GitHub
-  under [Issues](https://github.com/lf-edge/ekuiper/issues).
+  under [Issues](https://github.com/ankur-paan/rekuiper/issues).
 - If you're unable to find an open issue addressing the
-  problem, [open a new one](https://github.com/lf-edge/ekuiper/issues/new). Be sure to include a **title and clear
+  problem, [open a new one](https://github.com/ankur-paan/rekuiper/issues/new). Be sure to include a **title and clear
   description**, as much relevant information as possible, and a **code sample** or an **executable test case**
   demonstrating the expected behavior that is not occurring.
 
@@ -25,12 +25,12 @@ Welcome to contribute code to provide features or fix bugs.
 We use GitHub pull request to review proposed code changes. So you'll need to obtain a GitHub account before making code
 contribution.
 
-1. **Fork** eKuiper to your private repository. Click the `Fork` button in the top right corner of eKuiper repository.
+1. **Fork** rekuiper to your private repository. Click the `Fork` button in the top right corner of eKuiper repository.
 2. **Clone** the repository locally from your personal fork. `git clone https://github.com/<Github_user>/ekuiper.git`.
-3. Add eKuiper repo as additional Git remote so that you can sync between local repo and eKuiper.
+3. Add rekuiper repo as additional Git remote so that you can sync between local repo and eKuiper.
 
   ```shell
-  git remote add upstream https://github.com/lf-edge/ekuiper.git
+  git remote add upstream https://github.com/ankur-paan/rekuiper.git
   ```
 
 You can use your favorite IDE or editor to develop. You can find information in editor support for Go tools
@@ -72,7 +72,7 @@ Alternatively, if you use GoLand, you can check `Group` and `Group stdlib import
 
 ### Code conventions
 
-- Use `go fmt` to format your code before commit code change. eKuiper Github Action CI pipeline reports error if it's
+- Use `go fmt` to format your code before commit code change. rekuiper GitHub Actions CI pipeline reports error if it's
   not format by `go fmt`.
 - Run static code analysis with `make lint` to make sure there are no stylistic errors and common programming issues.
   - If you encounter lint errors related to `gofumpt`, run `gofumpt -w .` in the project root directory to solve it.
@@ -85,7 +85,7 @@ Take GoLand as an example, developers can debug the code:
 
 1. Debug the whole program. Make sure all directories mentioned
    in [Makefile](https://github.com/lf-edge/ekuiper/blob/master/Makefile) build_prepare sections are created in your
-   eKuiper root path. Add your breakpoints. Open `cmd/kuiperd/main.go`. In the main function, you'll find a green
+   rekuiper root path. Add your breakpoints. Open `cmd/kuiperd/main.go`. In the main function, you'll find a green
    triangle in the ruler, click it and select debug. Then create your stream/rule that would run through your
    breakpoint, the debugger will pause there.
 2. To debug a small portion of code, we recommend writing a unit test and debug it. You can go to any test file and find
@@ -95,12 +95,12 @@ Take GoLand as an example, developers can debug the code:
 #### Debug edgex code
 
 Users can modify edgex source/sink code to meet their requirement. In this case, the best practice is letting the other
-services running in docker mode but eKuiper run locally.
+services running in docker mode but rekuiper running locally.
 Users can follow these steps to set up the environment.
 
 #### expose message bus
 
-eKuiper subscribe messages by topic and by default edgex is using redis as message bus. This guide will use redis as
+rekuiper subscribes to messages by topic and by default edgex is using redis as message bus. This guide will use redis as
 example to show how to expose message bus.
 In the docker-compose file, find the redis service and in ports part change 127.0.0.1:6379
 to 0.0.0.0:6379, then restart all the services.
@@ -144,7 +144,7 @@ the file locates in `etc/sources/edgex.yaml`.
 | mqtt  broker  | mqtt  | tcp      | 10.65.38.224 | 1883 |
 | zemo mq       | zero  | tcp      | 10.65.38.224 | 5566 |
 
-Take the redis as example, the following config will let eKuiper connect to 10.65.38.224's 6379 port.
+Take the redis as example, the following config will let eKuiper connect to the broker's 6379 port.
 
 ```yaml
 default:
@@ -163,9 +163,9 @@ After changing this, redis will listen on the host 6379 port, developers can con
 remotely by the server address.
 For example, the host ip address is 10.65.38.224 , users can connect to this machine by the ip address.
 
-#### enable eKuiper console log and set rest api port
+#### enable rekuiper console log and set rest api port
 
-Change the config file in `etc/kuiper.yaml`, set the console log true and set eKuiper rest api port to 59720
+Change the config file in `etc/kuiper.yaml`, set the console log true and set rekuiper REST API port to 59720
 
 ```yaml
 basic:
@@ -201,11 +201,11 @@ basic:
 
 #### run locally
 
-Use the [former method](./CONTRIBUTING.md#debug-your-code) to run the eKuiper
+Use the [former method](./CONTRIBUTING.md#debug-your-code) to run rekuiper
 
 ### Testing
 
-The eKuiper project leverages Github actions to run unit test & FVT (functional verification test), so please take a
+The rekuiper project leverages Github actions to run unit test & FVT (functional verification test), so please take a
 look at the PR status result, and make sure that all of testcases run successfully.
 
 - Write Golang unit testcases to test your code if necessary.
@@ -215,7 +215,7 @@ look at the PR status result, and make sure that all of testcases run successful
 
 ### Licensing
 
-All code contributed to eKuiper will be licensed under Apache License V2. You need to ensure every new files you are
+All code contributed to rekuiper will be licensed under Apache License V2. You need to ensure every new files you are
 adding have the right license header.
 
 ### Sign-off commit
@@ -257,7 +257,7 @@ git rebase -i upstream/master
 
 Make sure all your commits comply to the [commit message guidelines](#commit-message-guidelines).
 
-You'll then push to your branch on your forked repo and then navigate to eKuiper repo to create a pull request. Our
+You'll then push to your branch on your forked repo and then navigate to rekuiper repo to create a pull request. Our
 GitHub repo provides automatic testing with GitHub action. Please make sure those tests pass. We will review the code
 after all tests passed.
 
@@ -351,7 +351,7 @@ promoting it to the open source community and the world.
 
 The promotion contributions include but not limit to:
 
-- Integrate of eKuiper to your open source project
+- Integrate rekuiper to your open source project
 - Organize workshops or meetups about the project
 - Answer questions about the project on issues, slack or maillist
 - Write tutorials for how a project can be used
@@ -377,7 +377,7 @@ it is recommended to start by going through [code and doc contribution](#code-an
 and joining our community Slack channel.
 
 As one continues to contribute to the project and engage with the community,
-he/she may at some point become eligible for an eKuiper committer.
+he/she may at some point become eligible for an rekuiper committer.
 
 ### Committer
 
@@ -389,7 +389,7 @@ access to the project’s resources.
 Typically, a potential committer needs to show that they have a sufficient understanding of the project, its objectives,
 and its strategy. To become a committer, you are expected to:
 
-- Be a eKuiper contributor.
+- Be a rekuiper contributor.
 - Express interest to the existing maintainers that you are interested in becoming a committer.
 - Have contributed 6 or more substantial PRs.
 - Have an above-average understanding of the project codebase, its goals, and directions.
@@ -408,7 +408,7 @@ direction and long-term health, may be nominated to become a maintainer. This ro
 ### Maintainer
 
 Maintainers are first and foremost committers that have shown they are committed to the long term success of a project.
-They are the planners and designers of the eKuiper project.
+They are the planners and designers of the rekuiper project.
 Maintainership is about building trust with the current maintainers of the project and being a person that they can
 depend on to make decisions in the best interest of the project in a consistent manner.
 
@@ -416,8 +416,8 @@ Committers want to become maintainers are expected to:
 
 - Enable adoptions or ecosystems.
 - Collaborate well. Participate in community meetings and events.
-- Demonstrate a deep and comprehensive understanding of eKuiper's architecture, technical goals, and directions.
-- Actively engage with major eKuiper feature proposals and implementations.
+- Demonstrate a deep and comprehensive understanding of rekuiper's architecture, technical goals, and directions.
+- Actively engage with major rekuiper feature proposals and implementations.
 
 A new maintainer must be nominated by an existing maintainer. The nominating maintainer will create a PR to update
 the [Maintainer List](https://github.com/lf-edge/ekuiper/blob/master/MAINTAINERS.md). It is recommended to describe the

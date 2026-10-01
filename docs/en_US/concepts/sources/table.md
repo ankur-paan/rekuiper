@@ -9,7 +9,7 @@ A table is a snapshot of the source data. We support two kinds of table: scan ta
 
 The source for table can be either bounded or unbounded. For bounded source table, the content of the table is static. For unbounded table, the content of the table is dynamic. The content of the table are stored in memory.
 
-Currently, the scan table update in eKuiper is append-only. Users can specify the properties to limit the table size to avoid too much memory consumption.
+Currently, the scan table update in rekuiper is append-only. Users can specify the properties to limit the table size to avoid too much memory consumption.
 
 Scan table cannot be used standalone in a rule. It is usually used to join with streams. It can be used to enrich stream data or as a switch for calculation.
 

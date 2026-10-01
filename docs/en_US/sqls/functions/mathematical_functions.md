@@ -278,10 +278,10 @@ from base from_base to base to_base. Returns NULL if any argument is NULL. The a
 but may be specified as an integer or a string. The minimum base is 2 and the maximum base is 36.
 
 ```sql
-ekuiper> select conv('a',16,2);
+rekuiper> select conv('a',16,2);
         -> '1010'
-ekuiper> select conv('6E',18,8);
+rekuiper> select conv('6E',18,8);
         -> '172'
-ekuiper> select conv(-17,10,-18);
+rekuiper> select conv(-17,10,-18);
         -> '-H'
 ```

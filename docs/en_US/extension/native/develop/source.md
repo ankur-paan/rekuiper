@@ -3,7 +3,7 @@
 > [!NOTE]
 > Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
 
-Sources feed data into eKuiper from other systems. eKuiper has built-in source support for [MQTT broker](../../../guide/sources/builtin/mqtt.md). There are still needs to consume data from various external systems include messaging systems and data pipelines etc. Source extension is presented to meet this requirement.
+Sources feed data into rekuiper from other systems. rekuiper has built-in source support for [MQTT broker](../../../guide/sources/builtin/mqtt.md). There are still needs to consume data from various external systems include messaging systems and data pipelines etc. Source extension is presented to meet this requirement.
 
 ***Note***: v2.0.0 has modified the source extension API, which is not fully compatible with the v1.x plugin API.
 Existing plugin code needs to be re-adapted.
@@ -12,7 +12,7 @@ There are two kinds of sources. One is the normal source also named scan source,
 
 ## Develop a scan source
 
-To develop a source for eKuiper is to
+To develop a source for rekuiper is to
 implement [api.Source](https://github.com/lf-edge/ekuiper/blob/master/contract/api/source.go) interface and export it as
 a golang plugin.
 
@@ -58,7 +58,7 @@ corresponding type of methods.
     ```
 
 3. Implement the subscription or pull method for the source type. This is the main execution logic of the source, used
-   to fetch data from the external system and send it to the eKuiper system for consumption by downstream operators. The
+   to fetch data from the external system and send it to the rekuiper system for consumption by downstream operators. The
    methods implemented by different types of sources vary slightly. For more details, please refer
    to [Source Type Implementation](#various-source-type-implementation).
 
@@ -121,7 +121,7 @@ The main task of a source is to continuously receive data from an external syste
 
 ### Develop a lookup source
 
-To develop a lookup source for eKuiper is to implement [api.LookupSource](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) interface and export it.
+To develop a lookup source for rekuiper is to implement [api.LookupSource](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) interface and export it.
 
 Based on whether the data from the data source is binary, sources can be categorized into two types of interfaces:
 
@@ -162,12 +162,12 @@ feature interfaces to support various source features.
 
 If the [rule checkpoint](../../../guide/rules/state_and_fault_tolerance.md#source-consideration) is enabled, the source requires to be rewindable. That means the source need to implement both `api.Source` and `api.Rewindable` interface.
 
-A typical implementation is to save an `offset` as a field of the source. And update the offset value when reading in new value. Notice that, when implementing GetOffset() will be called by eKuiper system which means the offset value can be accessed by multiple go routines. So a lock is required when read or write the offset.
+A typical implementation is to save an `offset` as a field of the source. And update the offset value when reading in new value. Notice that, when implementing GetOffset() will be called by rekuiper system which means the offset value can be accessed by multiple go routines. So a lock is required when read or write the offset.
 
 ### Bounded Source
 
 Some data sources are bounded, such as files; some data sources are inherently unbounded, but in some scenarios, users
-may want to stop reading after a certain amount of data. eKuiper supports data sources to define their own read-end
+may want to stop reading after a certain amount of data. rekuiper supports data sources to define their own read-end
 signals. When the framework receives the data end signal, the corresponding rule will stop on its own.
 
 Data sources can implement the `api.Bounded` interface to obtain the `EOFIngest` method. After the data reading is
@@ -180,7 +180,7 @@ eKuiper configurations are formatted as yaml and it provides a centralize locati
 configurations. Inside it, a subfolder **sources** is provided for the source configurations including the extended
 sources.
 
-A configuration system is supported for eKuiper extension which will automatically read the configuration in yaml file
+A configuration system is supported for rekuiper extension which will automatically read the configuration in yaml file
 and feed into the **Provision** method of the source. If
 the [CONF_KEY](../../../guide/streams/overview.md#stream-properties) property is specified in the stream, the
 configuration of that key will be fed. Otherwise, the default configuration is used.

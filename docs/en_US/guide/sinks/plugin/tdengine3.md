@@ -2,7 +2,7 @@
 
 ## Compile the plugins
 
-In eKuiper source code root path, run the below command：
+In rekuiper source code root path, run the below command：
 
 ```shell
 go build -trimpath --buildmode=plugin -o plugins/sinks/Tdengine3.so extensions/sinks/tdengine3/*.go

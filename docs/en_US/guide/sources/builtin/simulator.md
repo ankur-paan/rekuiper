@@ -8,11 +8,11 @@ data from a device or sensor. User can define the mock data content and the send
 
 ## Configurations
 
-The connector in eKuiper can be configured
+The connector in rekuiper can be configured
 with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md),
 or configuration file. This section focuses on the configuration file approach.
 
-The default simulator source configuration can be found at `$ekuiper/etc/sources/simulator.yaml`. It defines the mock
+The default simulator source configuration can be found at `$rekuiper/etc/sources/simulator.yaml`. It defines the mock
 data and the interval to generate the data.
 
 ```yaml
@@ -34,7 +34,7 @@ Users can specify the following properties:
 
 ## Create a Stream Source
 
-Having defined the connector, the next phase involves its integration with eKuiper rules.
+Having defined the connector, the next phase involves its integration with rekuiper rules.
 
 ::: tip
 
@@ -48,8 +48,8 @@ You can define the Simulator source as the data source either by REST API or CLI
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for users looking to automate tasks or
-integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for users looking to automate tasks or
+integrate rekuiper operations into other systems.
 
 Example:
 
@@ -62,13 +62,13 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's
+For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's
 operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to define a stream for the Simulator source connector:

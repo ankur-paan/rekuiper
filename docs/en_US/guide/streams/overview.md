@@ -1,10 +1,10 @@
 # Stream
 
-A stream is the runtime form of a source connector in eKuiper. It must specify a source type to define how to connect to the external resource.
+A stream is the runtime form of a source connector in rekuiper. It must specify a source type to define how to connect to the external resource.
 
 When using as a stream, the source must be unbounded. The stream acts like a trigger for the rule. Each event will trigger a calculation in the rule.
 
-Unlike relational database, eKuiper do not need a pre-built schema. This makes it adaptable to schemaless data which is common in the IoT and edge scenarios. When working with fixed type stream, the user can also define schema like in database to get more validation and SQL optimization in compile time. In most case, schemaless mode skip the data validation during data loading which may gain better performance.
+Unlike relational databases, rekuiper does not need a pre-built schema. This makes it adaptable to schemaless data which is common in the IoT and edge scenarios. When working with fixed type stream, the user can also define schema like in database to get more validation and SQL optimization in compile time. In most case, schemaless mode skip the data validation during data loading which may gain better performance.
 
 ## Stream Definition
 
@@ -26,7 +26,7 @@ Schema definition is optional. It is only needed when the ingested data is fixed
 
 When the format of the data source is json, defining the schema information of the stream will help only the data in the schema definition be parsed when parsing json data. When the structure of the data from the source is relatively complex or large and the information required in the schema definition is clear and simple, parsing only the json data required will greatly reduce the processing time during paring, thereby improving performance.
 
-In eKuiper, each column or an expression has a related data type. A data type describes (and constrains) the set of values that a column of that type can hold or an expression of that type can produce.
+In rekuiper, each column or an expression has a related data type. A data type describes (and constrains) the set of values that a column of that type can hold or an expression of that type can produce.
 
 Below is the list of data types supported.
 
@@ -41,7 +41,7 @@ Below is the list of data types supported.
 | 7   | array     | The array type, can be any simple types or array and type.                                                                |
 | 8   | struct    | The complex type.                                 |
 
-eKuiper allows inserting a default clause next to a type definition. The DEFAULT clause allows the engine to insert a default value in absence of the field. This check is done only if strict validation is activated. The DEFAULT clause supports only the following types: STRING, BOOLEAN, FLOAT and BIGINT.
+rekuiper allows inserting a default clause next to a type definition. The DEFAULT clause allows the engine to insert a default value in absence of the field. This check is done only if strict validation is activated. The DEFAULT clause supports only the following types: STRING, BOOLEAN, FLOAT and BIGINT.
 
 ### Stream Properties
 
@@ -60,7 +60,7 @@ eKuiper allows inserting a default clause next to a type definition. The DEFAULT
 | TIMESTAMP        | true     | The field to represent the event's timestamp. If specified, the rule will run with event time. Otherwise, it will run with processing time. Please refer to [timestamp management](../../sqls/windows.md#timestamp-management) for details. |
 | TIMESTAMP_FORMAT | true     | The default format to be used when converting string to or from datetime type.                                                                                                                                                              |
 | VERSION          | true     | Version of the stream, check [versioning](#versioning)。                                                                                                                                                                                     |
-| TEMP             | true     | Whether the stream is temporary. Temporary streams are stored in memory only and will be lost when eKuiper restarts. Default is false. Check [Temporary Streams](#temporary-streams) for more details.                                      |
+| TEMP             | true     | Whether the stream is temporary. Temporary streams are stored in memory only and will be lost when rekuiper restarts. Default is false. Check [Temporary Streams](#temporary-streams) for more details.                                      |
 
 **Example 1,**
 
@@ -70,7 +70,7 @@ my_stream
 WITH ( datasource = "topic/temperature", FORMAT = "json", KEY = "id");
 ```
 
-The stream will subscribe to MQTT topic ``topic/temperature``, the server connection uses ``server`` key of ``default`` section in configuration file ``$ekuiper/etc/mqtt_source.yaml``.
+The stream will subscribe to MQTT topic ``topic/temperature``, the server connection uses ``server`` key of ``default`` section in configuration file ``$rekuiper/etc/mqtt_source.yaml``.
 
 - See [MQTT source](../sources/builtin/mqtt.md) for more info.
 
@@ -87,7 +87,7 @@ demo (
     ) WITH (DATASOURCE="test/", FORMAT="JSON", KEY="USERID", CONF_KEY="demo");
 ```
 
-The stream will subscribe to MQTT topic `test/`, the server connection uses settings of `demo` section in configuration file `$ekuiper/etc/mqtt_source.yaml`.
+The stream will subscribe to MQTT topic `test/`, the server connection uses settings of `demo` section in configuration file `$rekuiper/etc/mqtt_source.yaml`.
 
 **Example 3**
 
@@ -95,7 +95,7 @@ The stream will subscribe to MQTT topic `test/`, the server connection uses sett
 demo () WITH (DATASOURCE="test/", FORMAT="protobuf", SCHEMAID="proto1.Book");
 ```
 
-The stream will subscribe to MQTT topic `test/` and using PROTOBUF format to decode the data. The decode schema is defined by `BOOK` message type in `$ekuiper/data/schemas/protobuf/schema1.proto` file. Regardng the management of schema, please refer to [schema registry](../serialization/serialization.md#schema).
+The stream will subscribe to MQTT topic `test/` and using PROTOBUF format to decode the data. The decode schema is defined by `BOOK` message type in `$rekuiper/data/schemas/protobuf/schema1.proto` file. Regardng the management of schema, please refer to [schema registry](../serialization/serialization.md#schema).
 
 - See [MQTT source](../sources/builtin/mqtt.md) for more info.
 
@@ -110,7 +110,7 @@ Stream properties can be configured in two ways:
 
 ### CONF_KEY Configuration
 
-The source configuration files are located at: `\$ekuiper/etc/sources/{\$source_type}.yaml`. The YAML file contains
+The source configuration files are located at: `\$rekuiper/etc/sources/{\$source_type}.yaml`. The YAML file contains
 multiple configurations. The example file below includes three sets of configurations: `default`, `myconf`, and
 `myconf2`. The CONF_KEY points to one of these keys.
 
@@ -210,7 +210,7 @@ If "BINARY" format stream is defined as schemaless, a default field named `self`
 Temporary streams are in-memory streams that are not persisted to disk. They are useful for intermediate data processing
 or testing scenarios where persistence is not required. Temporary streams have the following characteristics:
 
-- **In-memory storage**: Stream definitions are stored in memory only and will be lost when eKuiper restarts.
+- **In-memory storage**: Stream definitions are stored in memory only and will be lost when rekuiper restarts.
 - **Cannot be replaced**: Once created, temporary streams cannot be replaced using `REPLACE STREAM` statement.
 - **Usage restriction**: Temporary streams can only be used by temporary rules. Non-temporary rules cannot reference
   temporary streams.

@@ -12,7 +12,7 @@
 > - `DELETE /tables/{id}` (drop table) - Verified (HTTP 200 OK, HTTP 400 on subsequent query)
 > - `GET /rules/{rule}/scantables` (query scan table) - Verified (HTTP 200 OK)
 
-The eKuiper REST api for tables allows you to manage the tables, such as create, describe, show and drop table definitions.
+The rekuiper REST API for tables allows you to manage the tables, such as create, describe, show and drop table definitions.
 
 ## create a table
 

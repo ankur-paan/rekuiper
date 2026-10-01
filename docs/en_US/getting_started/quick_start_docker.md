@@ -129,7 +129,7 @@ docker logs rekuiper | grep "LOG SINK"
 
 ---
 
-## 6. Optional: Visual Management with eKuiper Manager
+## 6. Optional: Visual Management with rekuiper Manager
 
 If you prefer a web-based dashboard for building rules and visual topologies:
 
@@ -147,7 +147,7 @@ Open `http://localhost:9082` in your browser to inspect streams, edit rules visu
 
 ## Next Steps
 
-- Explore [Core Architecture & Design](../concepts/ekuiper.md)
+- Explore [Core Architecture & Design](../concepts/rekuiper.md)
 - Learn about [Windowing Functions](../sqls/windows.md) (Tumbling, Hopping, Sliding, Session)
 - Configure [Production Deployments](../installation.md)
 - Connect external [MQTT Brokers](../guide/sources/builtin/mqtt.md)

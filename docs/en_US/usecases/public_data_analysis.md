@@ -1,4 +1,4 @@
-# eKuiper in Public Data Analysis
+# rekuiper in Public Data Analysis
 
 In the era of big data, there are many publicly available data sharing
 platforms where valuable information can be extracted through various
@@ -9,20 +9,20 @@ public data using basic SQL statements.
 
 ## Scenario Introduction
 
-This tutorial demonstrates how to use eKuiper to process the daily order table data of
+This tutorial demonstrates how to use rekuiper to process the daily order table data of
 a bike-sharing company from the Shenzhen Open Data Platform. The operating steps are:
 
 - Subscribing to the API of the open data platform using the [HTTP Pull Source](../guide/sources/builtin/http_pull.md)
-- Creating streams and rules using eKuiper's REST API interface
+- Creating streams and rules using rekuiper's REST API interface
 - Processing data using built-in SQL functions and rule pipelines
 - Visualizing the processed data by storing it and using an external API
 
 ## Data Acquisition
 
-eKuiper supports real-time data processing with millisecond-level of precision.
+rekuiper supports real-time data processing with millisecond-level of precision.
 In this tutorial, we will use the data from [the daily order table of the Shenzhen Open Data Platform's
 bike-sharing company](https://opendata.sz.gov.cn/data/api/toApiDetails/29200_00403627) as an example to demonstrate how to fetch the corresponding API
-data using eKuiper for further processing.
+data using rekuiper for further processing.
 
 > If you want to analyze real-time updating APIs, you can reduce the interval of the HTTP Pull Source.
 
@@ -154,7 +154,7 @@ Content-Type: application/json
 
 ### Calculate Travel Distance with SQL
 
-eKuiper provides a rich set of built-in SQL functions that can meet most calculation
+rekuiper provides a rich set of built-in SQL functions that can meet most calculation
 requirements in various scenarios, even without using extended plugins.
 
 Since we already have the starting and ending coordinates of the bikes in our data,

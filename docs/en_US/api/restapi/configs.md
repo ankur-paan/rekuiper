@@ -1,7 +1,7 @@
 # Dynamic Reload Configs
 
 By dynamically reloading [configuration](../../configuration/global_configurations.md), parameters such as debug and timezone
-can be updated for running eKuiper without restarting the application.
+can be updated for running rekuiper without restarting the application.
 
 ## Reload Basic Configs
 
@@ -27,10 +27,10 @@ Current supported dynamic reloadable parameters:
 - `fileLog`
 - `timezone`
 
-## Shutdown eKuiper
+## Shutdown rekuiper
 
 ```shell
 POST http://localhost:9081/stop
 ```
 
-Shut down eKuiper through rest api.
+Shut down rekuiper through REST API.

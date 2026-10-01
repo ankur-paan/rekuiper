@@ -5,15 +5,15 @@
 
 ## Overview
 
-eKuiper plugin is based on the plugin mechanism of Golang, users can build loosely-coupled plugin applications,  dynamic loading and binding when it is running. However, because the limitation of the Golang plugin system, the compilation and usage of the eKuiper plugin also have corresponding limitations:
+rekuiper plugin is based on the plugin mechanism of Golang, users can build loosely-coupled plugin applications,  dynamic loading and binding when it is running. However, because the limitation of the Golang plugin system, the compilation and usage of the rekuiper plugin also have corresponding limitations:
 
 - The plugin does not support Windows system
-- The compilation environment of the plugin is required to be as consistent as possible with eKuiper. Including but not limited to:
+- The compilation environment of the plugin is required to be as consistent as possible with rekuiper. Including but not limited to:
   - The same Go version
   - The version of the same libraries plugin and eKuiper depend on must be completely the same
   - The plugin needs to be completely consistent with GOPATH of the eKuiper compilation environment
 
-These limitations are relatively strict, and they almost require compiling and running the plugin and eKuiper on the same machine. It often results in the plugin which complied by the development environment can not be used in producing eKuiper. This article gives a detailed introduction to one reliable and available plugin development environment setting and process, which is recommended to the eKuiper plugin developer to use. Generally, the process for development and usage of the plugin is as follows:
+These limitations are relatively strict, and they almost require compiling and running the plugin and eKuiper on the same machine. It often results in the plugin which complied by the development environment can not be used in producing eKuiper. This article gives a detailed introduction to one reliable and available plugin development environment setting and process, which is recommended to the rekuiper plugin developer to use. Generally, the process for development and usage of the plugin is as follows:
 
 - Development
   - Create and develop the plugin project
@@ -24,8 +24,8 @@ These limitations are relatively strict, and they almost require compiling and r
 
 ## Plugin development
 
-Developing plugin is generally carried out in the development environment. eKuiper plugins will be deployed to the
-production environment after passing debugging and running the development environment. The eKuiper plugin has three
+Developing plugin is generally carried out in the development environment. rekuiper plugins will be deployed to the
+production environment after passing debugging and running the development environment. The rekuiper plugin has three
 types: **sources**,**functions** and **sinks**, for the detailed method of plugin
 development: [LF Edge eKuiper extension](../../overview.md). This article will take the Sink plugin as an example to
 introduce the process of plugin development and deployment. We will develop a basic MySql sink, for write stream output
@@ -42,7 +42,7 @@ data to the MySql database. The workflow list as followings:
 
 ### Compose the Plugin
 
-Users usually need to create a new project outside of the eKuiper project to develop customized plugins, to manage code
+Users usually need to create a new project outside of the rekuiper project to develop customized plugins, to manage code
 more conveniently. It's recommended to use Go module to develop plugin projects, the code structure of project is listed
 as following.
 
@@ -167,8 +167,8 @@ func Mysql() api.Sink {
 
 ```
 
-Plugin development requires extending interfaces within eKuiper, so it must depend on the eKuiper contract project (a
-sub-project of the eKuiper project). The simplest `go.mod` should also include a dependency on the contract. A
+Plugin development requires extending interfaces within rekuiper, so it must depend on the eKuiper contract project (a
+sub-project of the rekuiper project). The simplest `go.mod` should also include a dependency on the contract. A
 typical `go.mod` is as follows:
 
 ```go
@@ -216,7 +216,7 @@ In the plugin project, the compilation will produce `Mysql@v1.0.0.so` for the ne
 
 #### Docker compile
 
-eKuiper provides different docker images for different purpose. The development docker image should be used for
+rekuiper provides different docker images for different purpose. The development docker image should be used for
 compiling plugins. Since 1.7.1, the development docker image tag format is `x.x.x-dev`(From 0.4.0 to 1.7.0, the tag
 format is x.x.x) . Compared with the running version, the development version provides the development environment of
 Go, which lets users compile the plugin that can be completely compatible with the officially published version of
@@ -246,13 +246,13 @@ eKuiper.
 eKuiper offers an Alpine version of its image, but it does not come with the Go environment pre-installed. To compile
 plugins using the Alpine image, users will need to install the necessary dependencies themselves. Alternatively, users
 can opt to use the Golang image as their base environment, which includes the Go environment and simplifies the plugin
-compilation process(If you are using the golang 1.25 version image and want to compile eKuiper plugins, you can use the
+compilation process(If you are using the golang 1.25 version image and want to compile rekuiper plugins, you can use the
 provided base image (https://github.com/lf-edge/ekuiper/pkgs/container/ekuiper%2Fbase) as the base environment. Plugins
 compiled using this base image will not encounter the "Error loading shared library libresolve.so.2" when deployed to
 the alpine version of eKuiper). Here are the specific steps to follow when using the Golang image as the base
 environment:
 
-1. To use the Golang image as the base environment, you'll need to make sure that you have the correct version of the Golang image installed. Additionally, you'll need to mount the local plugin directory and eKuiper source code into a directory within Docker, so that you can access and compile the plugin project within the Docker environment.
+1. To use the Golang image as the base environment, you'll need to make sure that you have the correct version of the Golang image installed. Additionally, you'll need to mount the local plugin directory and rekuiper source code into a directory within Docker, so that you can access and compile the plugin project within the Docker environment.
 Assuming that your plugin project is located in the local directory `/var/git`, you can map this directory to the `/go/plugins` directory within Docker using the following command:
 
     ```shell
@@ -268,7 +268,7 @@ Assuming that your plugin project is located in the local directory `/var/git`, 
 
 #### Debug and run the plugin
 
-Run eKuiper in the local or **Develop** Docker, create streams and rules, set action of the rule to mysql, then users can test the customized mysql sink plugin. Please refer [eKuiper documentation](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/getting_started/getting_started.md) for the steps of creating streams and rules. The following provides a rule using the mysql plugin for reference.
+Run rekuiper in the local or **Develop** Docker, create streams and rules, set action of the rule to mysql, then users can test the customized mysql sink plugin. Please refer [eKuiper documentation](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/getting_started/getting_started.md) for the steps of creating streams and rules. The following provides a rule using the mysql plugin for reference.
 
 ```json
 {
@@ -286,7 +286,7 @@ Run eKuiper in the local or **Develop** Docker, create streams and rules, set ac
 }
 ```
 
-**note**: The interface implemented in mysql.go inserts data into a table only with column name. During development testing, it is also fine to manually copy the compiled .so file and the .yaml file(if any) to the corresponding folders and then restart eKuiper. In development docker image, the default eKuiper location is `/usr/local/kuiper`. It should be noted that `loading the new version after compiling the plugin again needs to restart eKuiper`.
+**note**: The interface implemented in mysql.go inserts data into a table only with column name. During development testing, it is also fine to manually copy the compiled .so file and the .yaml file(if any) to the corresponding folders and then restart rekuiper. In development docker image, the default eKuiper location is `/usr/local/kuiper`. It should be noted that `loading the new version after compiling the plugin again needs to restart rekuiper`.
 
 ## Plugin deployment
 
@@ -303,11 +303,11 @@ Please refer [Docker compile](#Docker-compile) for the compilation process. The 
 Users can use [REST API](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/restapi/plugins.md) or [CLI](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/cli/plugins.md) to manage plugins. The following takes the REST API as an example to deploy the plugin compiled in the previous step to the production environment.
 
 1. Package the plugin and put it into the http server. Package the file `.so` of the plugin compiled in the previous step and the default configuration file (only required for source) `.yaml` into a `.zip` file (assuming that the file is `mysqlSink.zip`). Put this file into the http server that the production environment can also access.
-    - Some plugin may depend on libs that are not installed on eKuiper environment. The user can either install them manually in the eKuiper server or put the install script and dependencies in the plugin zip and let the plugin management system do the installation. Please refer to [Plugin File Format](../../../api/restapi/plugins.md#plugin-file-format) for detail.
+    - Some plugin may depend on libs that are not installed on rekuiper environment. The user can either install them manually in the rekuiper server or put the install script and dependencies in the plugin zip and let the plugin management system do the installation. Please refer to [Plugin File Format](../../../api/restapi/plugins.md#plugin-file-format) for detail.
 2. Use REST API to create plugins:
 
    ```shell
-   POST http://{$production_eKuiper_ip}:9081/plugins/sinks
+   POST http://{$production_rekuiper_ip}:9081/plugins/sinks
    Content-Type: application/json
  
    {"name":"mysql","file":"http://{$http_server_ip}/plugins/sinks/mysqlSink.zip"}
@@ -316,7 +316,7 @@ Users can use [REST API](https://github.com/lf-edge/ekuiper/blob/master/docs/en_
 3. Verify whether the plugin was created successfully or not
 
     ```shell
-    GET http://{$production_eKuiper_ip}:9081/plugins/sinks/mysql
+    GET http://{$production_rekuiper_ip}:9081/plugins/sinks/mysql
     ```
 
     Return

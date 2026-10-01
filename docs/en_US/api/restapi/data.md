@@ -1,6 +1,6 @@
 # Data Import/Export Management
 
-eKuiper REST api allows to import or export data.
+rekuiper REST API allows to import or export data.
 
 ## Data Format
 
@@ -71,7 +71,7 @@ Content-Type: application/json
 }
 ```
 
-Example 3: Import data via file URI and exit (for plug-ins and static schema updates, users need to ensure that eKuiper can be restarted after exiting)
+Example 3: Import data via file URI and exit (for plug-ins and static schema updates, users need to ensure that rekuiper can be restarted after exiting)
 
 ```shell
 POST http://{{host}}/data/import?stop=1
@@ -190,7 +190,7 @@ POST -d '["rule1","rule2"]' http://{{host}}/data/export
 
 ## Import and export data through yaml format
 
-For eKuiper configuration, the yaml format is more readable. eKuiper also supports importing and exporting configurations through yaml format, including stream `stream`, table `table`, rule `rule`, plug-in `plugin`, and source configuration etc. Each type stores a name and a key-value pair of the creation statement. In the following example file, we define flows, rules, tables, plug-ins, source configurations, and target action configurations.
+For rekuiper configuration, the yaml format is more readable. eKuiper also supports importing and exporting configurations through yaml format, including stream `stream`, table `table`, rule `rule`, plug-in `plugin`, and source configuration etc. Each type stores a name and a key-value pair of the creation statement. In the following example file, we define flows, rules, tables, plug-ins, source configurations, and target action configurations.
 
 GET /v2/data/export
 

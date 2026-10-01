@@ -2,7 +2,7 @@
 
 ## Background
 
-In some scenarios, we hope that eKuiper can create some internal SQL functions through hot reload, and map it as an external service, so that it can directly call the external service. Currently, eKuiper provides the configuration method to map an existing external service to an SQL function of eKuiper. When running a rule that uses an external function, the data input and output can be converted and the corresponding external service can be called.
+In some scenarios, we hope that rekuiper can create some internal SQL functions through hot reload, and map it as an external service, so that it can directly call the external service. Currently, rekuiper provides the configuration method to map an existing external service to an SQL function of eKuiper. When running a rule that uses an external function, the data input and output can be converted and the corresponding external service can be called.
 
 External functions can be categorized into two types: schema-based and schemaless. The difference between these two types lies in the way they are configured. Schema-based external functions require a schema file to describe the API interface of the service, while schemaless external functions are suitable for simpler scenarios that use the REST protocol and have less complex message.
 
@@ -12,7 +12,7 @@ External functions can be categorized into two types: schema-based and schemales
 
 The configuration file of the external function is in json format, which usually consists of two parts:
 
-- JSON file, used to describes the information of the service. The file will be saved as the name of the service in eKuiper.
+- JSON file, used to describes the information of the service. The file will be saved as the name of the service in rekuiper.
 - Schema file, used to  describes the service API interface, including the name of the API included in the service,, input and output parameter type. Currently only [protobuf type](https://developers.google.com/protocol-buffers) is supported.
 
 The json configuration file includes the following two parts:
@@ -176,7 +176,7 @@ message MessageRequest {
 }
 ```
 
-In this example, there is no *body* specified thus all parameter fields are mapped to the query parameter. When calling `SearchMessage({"author":"Author","title":"Message1"})` in eKuiper SQL, it will be mapped to `GET /v1/messages?author=Author&title=Message1`.
+In this example, there is no *body* specified thus all parameter fields are mapped to the query parameter. When calling `SearchMessage({"author":"Author","title":"Message1"})` in rekuiper SQL, it will be mapped to `GET /v1/messages?author=Author&title=Message1`.
 
 For more detail about the mapping syntax for protobuf, please check [adding transcoding mapping](https://cloud.google.com/endpoints/docs/grpc/transcoding#adding_transcoding_mappings) and [httprule](https://cloud.google.com/endpoints/docs/grpc-service-config/reference/rpc/google.api#httprule).
 
@@ -202,7 +202,7 @@ In the external service configuration, there are 1 json file and at least 1 sche
 2. Interface layer: it is defined in the `interfaces` section of the json file. This is a virtual layer to group functions with the same schemas so that the shared properties such as address, schema file can be specified only once.
 3. eKuiper function layer: it is defined in the proto file as `rpc`. Notice that, the proto rpcs must be defined under a service section in protobuf. There is no restriction for the name of proto service. The function name is the same as the rpc name in the proto by default. But the user can override the mapping name in the json files's interfaces -> functions section.
 
-In this sample, if a user call `objectDetection` function in eKuiper SQL, the mapping steps are:
+In this sample, if a user call `objectDetection` function in rekuiper SQL, the mapping steps are:
 
 1. Found a function mapping in json file, interfaces *tsrest* functions section: `{"name": "objectDetect","serviceName": "object_detection"}`. This maps SQL function `objectDetect` to rpc named `object_detection`.
 2. In the schema file `tsrest.proto`, rpc `object_detection` is defined and the parameter and return type will be parsed. The `tsrest` interface properties such as address, protocol will be used to issue the request in runtime.
@@ -275,7 +275,7 @@ Unlike schema-based external services, schemaless external services only require
 
 #### Notification
 
-In this example, if a user calls this schemaless external service in eKuiper SQL:
+In this example, if a user calls this schemaless external service in rekuiper SQL:
 
 1. The name of the external function, external service, and interface are the same. Since the tsschemaless interface is defined in the json file, you would call the tsschemaless function here.
 2. Currently, schemaless external functions only support the REST protocol.
@@ -287,7 +287,7 @@ External functions need to be registered before being used. There are two ways t
 - Placed in the configuration folder
 - Dynamic registration via REST API.
 
-When eKuiper is started, it will read and register the external service configuration file in the configuration folder *etc/services*. Before starting, users can put the configuration file into the configuration folder according to the following rules:
+When rekuiper is started, it will read and register the external service configuration file in the configuration folder *etc/services*. Before starting, users can put the configuration file into the configuration folder according to the following rules:
 
 1. The file name must be *$service name$.json*. For example, *sample.json* will be registered as a sample service.
 
@@ -305,7 +305,7 @@ When eKuiper is started, it will read and register the external service configur
        ...
    ```
 
-   Note: After eKuiper is started, it **cannot** automatically load the system by modifying the configuration file. If you need to update dynamically, please use the REST service.
+   Note: After rekuiper is started, it **cannot** automatically load the system by modifying the configuration file. If you need to update dynamically, please use the REST service.
 
 For dynamic registration and management of services, please refer to [External Service Management API](../../api/restapi/services.md).
 
@@ -323,7 +323,7 @@ Before calling the function, you need to make sure that the REST service is runn
 
 #### Parameter Expansion
 
-In the ptoto file, the general parameters are in message type. When being mapped to eKuiper, its parameters can be received in two situations:
+In the ptoto file, the general parameters are in message type. When being mapped to rekuiper, its parameters can be received in two situations:
 
 1. If the parameters are not expanded, they must be in struct type when being passed in.
 2. If the parameters are expanded, multiple parameters can be passed in according to the order defined in the message.

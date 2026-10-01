@@ -1,4 +1,4 @@
-The eKuiper REST api for schemas allows you to manage schemas, such as create, show, drop and describe schemas.
+The rekuiper REST API for schemas allows you to manage schemas, such as create, show, drop and describe schemas.
 
 ## Create a schema
 
@@ -41,7 +41,7 @@ Schema with static plugin：
 1. name：the unique name of the schema.
 2. schema content, use `file` or `content` parameter to specify. After schema created, the schema content will be written into file `data/schemas/$shcema_type/$schema_name`.
    - file: the url of the schema file. The url can be `http` or `https` scheme or `file` scheme to refer to a local file
-   path of the eKuiper server. The referenced file can be either a single schema file or a zip archive.
+   path of the rekuiper server. The referenced file can be either a single schema file or a zip archive.
      - Single schema file: The file extension must match the corresponding schema type. For example: .proto for protobuf schema.
      - Zip archive: The zip file must contain a single primary schema file at its root. Optionally, the zip file can also contain a folder with the same name as the schema (without the extension) to hold supporting files. Any other files or folders within the zip archive will be ignored. Example: For a schema named test, the test.zip file should have the following structure:
 

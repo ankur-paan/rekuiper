@@ -8,16 +8,16 @@ The source will generate random inputs with a specified pattern.
 ## Compile & deploy plugin
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sources/Random.so extensions/sources/random/random.go
-# cp plugins/sources/Random.so $eKuiper_install/plugins/sources
+# cp plugins/sources/Random.so $rekuiper_install/plugins/sources
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Configuration
 
-The configuration for this source is `$ekuiper/etc/sources/random.yaml`. The format is as below:
+The configuration for this source is `$rekuiper/etc/sources/random.yaml`. The format is as below:
 
 ```yaml
 default:

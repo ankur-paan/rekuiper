@@ -7,16 +7,16 @@ The source will query the Kafka periodically to get data stream.
 ## Default build command
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sources/kafka.so extensions/sources/kafka/kafka.go
-# cp plugins/sources/kafka.so $eKuiper_install/plugins/sources
+# cp plugins/sources/kafka.so $rekuiper_install/plugins/sources
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Configuration
 
-The configuration for this source is `$ekuiper/etc/sources/kafka.yaml`. The format is as below:
+The configuration for this source is `$rekuiper/etc/sources/kafka.yaml`. The format is as below:
 
 ```yaml
 default:
@@ -44,5 +44,5 @@ You can check the connectivity of the corresponding sink endpoint in advance thr
 | privateKeyRaw      | true     | Kafka client ssl verified Key base64 encoded original text, use `privateKeyPath` first if both defined    |
 | rootCARaw          | true     | Kafka client ssl verified CA base64 encoded original text, use `rootCaPath` first if both defined         |
 | maxBytes           | true     | The maximum number of bytes that a single Kafka message batch can carry, the default is 1MB               |
-| groupID            | true     | The group ID used by eKuiper when consuming kafka messages. |
-| partition | true     | The partition specified when eKuiper consumes kafka messages |
+| groupID            | true     | The group ID used by rekuiper when consuming kafka messages. |
+| partition | true     | The partition specified when rekuiper consumes kafka messages |

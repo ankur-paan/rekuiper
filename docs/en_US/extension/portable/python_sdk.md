@@ -17,7 +17,7 @@ Source interface:
 
 ```python
   class Source(object):
-    """abstract class for eKuiper source plugin"""
+    """abstract class for rekuiper source plugin"""
 
     @abstractmethod
     def configure(self, datasource: str, conf: dict):
@@ -39,7 +39,7 @@ Sink interface:
 
 ```python
 class Sink(object):
-    """abstract class for eKuiper sink plugin"""
+    """abstract class for rekuiper sink plugin"""
 
     @abstractmethod
     def configure(self, conf: dict):
@@ -104,7 +104,7 @@ Function interface:
 
 ```python
 class Function(object):
-    """abstract class for eKuiper function plugin"""
+    """abstract class for rekuiper function plugin"""
 
     @abstractmethod
     def validate(self, args: List[Any]):
@@ -150,7 +150,7 @@ environment.
 Virtual environments are a common and effective technique used in Python development which is useful for python
 dependency management. Anaconda or Miniconda are one of the most popular environment manager for Python.
 The [conda](https://conda.io/projects/conda/en/latest/index.html) package and environment manager is included in all
-versions of Anaconda®, Miniconda, and Anaconda Repository. eKuiper supports to run the Python plugin with conda
+versions of Anaconda®, Miniconda, and Anaconda Repository. rekuiper supports to run the Python plugin with conda
 environment.
 
 To use conda environment, the common steps are:

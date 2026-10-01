@@ -3,15 +3,15 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-In IoT ecosystems, devices often need to transmit data to processing platforms. The HTTP Push connector in eKuiper allows devices to send their data directly to eKuiper for real-time processing. With eKuiper acting as an endpoint, devices can send data using standard HTTP methods, making integration seamless and straightforward.
+In IoT ecosystems, devices often need to transmit data to processing platforms. The HTTP Push connector in rekuiper allows devices to send their data directly to rekuiper for real-time processing. With eKuiper acting as an endpoint, devices can send data using standard HTTP methods, making integration seamless and straightforward.
 
-When configured as an HTTP Push source, eKuiper exposes an HTTP endpoint so devices can push their data. Once the data is received, eKuiper processes it according to the defined rules and streams.
+When configured as an HTTP Push source, rekuiper exposes an HTTP endpoint so devices can push their data. Once the data is received, eKuiper processes it according to the defined rules and streams.
 
-The connector in eKuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring eKuiper connectors with the configuration file.
+The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
 
 ## Server Configuration
 
-To set up eKuiper as an HTTP endpoint, configure the server settings in `etc/sources/httppush.yaml`.
+To set up rekuiper as an HTTP endpoint, configure the server settings in `etc/sources/httppush.yaml`.
 
 ```yaml
 source:
@@ -60,7 +60,7 @@ Note: Currently, only the `method` property is available for configuring the HTT
 
 ## Create a Stream Source
 
-Once you've set up your streams with their respective configurations, you can integrate them with eKuiper rules to process and act on the incoming data.
+Once you've set up your streams with their respective configurations, you can integrate them with rekuiper rules to process and act on the incoming data.
 
 ::: tip
 
@@ -72,7 +72,7 @@ You can define the HTTP Push source as the data source either by REST API or CLI
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for those looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
 
 Example:
 
@@ -96,12 +96,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to create a rule, specifying the HTTP Push connector as its source, for example:

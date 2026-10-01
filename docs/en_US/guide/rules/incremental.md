@@ -8,7 +8,7 @@ In the current ekuiper, when performing aggregate calculations on data, we often
 select avg(a) from stream group by tumblingWindow(ss,10),b;
 ```
 
-In ekuiper's operator model, aggregate calculations are split into three operators:
+In rekuiper's operator model, aggregate calculations are split into three operators:
 
 ```txt
 Window Operator -> Group By Operator -> Proj (Calculation) Operator

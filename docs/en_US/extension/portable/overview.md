@@ -40,7 +40,7 @@ The steps to create plugin is similar to the native plugin.
    1. Develop each plugin symbol(source, sink and function) by implementing corresponding interfaces
    2. Develop the main program to serve all the symbols as one plugin
 2. Build or package the plugin depending on the programing language.
-3. Register the plugin by eKuiper file/REST/CLI.
+3. Register the plugin by rekuiper file/REST/CLI.
 
 We aim to provide SDK for all mainstream language. Currently, [go SDK](go_sdk.md) and [python SDK](python_sdk.md) are
 supported.

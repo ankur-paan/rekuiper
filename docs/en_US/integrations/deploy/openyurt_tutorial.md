@@ -1,8 +1,8 @@
-# Deploy and Manage eKuiper with OpenYurt
+# Deploy and Manage rekuiper with OpenYurt
 
-LF Edge eKuiper is lightweight IoT data analytics and streaming software which is usually running in the edge side.
+LF Edge rekuiper is lightweight IoT data analytics and streaming software which is usually running in the edge side.
 A [manager dashboard](../../operation/manager-ui/overview.md) is provided to manage one or multiple eKuiper instances. Typically, the
-dashboard is deployed in a cloud node to manage eKuiper instances across many edge nodes.
+dashboard is deployed in a cloud node to manage rekuiper instances across many edge nodes.
 
 In most circumstances, the edge node is physically un-accessible from the cloud node due to security or other
 considerations. This makes deployment hard and cloud to edge management
@@ -10,9 +10,9 @@ impossible. [OpenYurt](https://github.com/openyurtio/openyurt) sheds light on th
 native Kubernetes and targets to extend it to support edge computing seamlessly. In a nutshell, OpenYurt enables users
 to manage applications that run in the edge infrastructure as if they were running in the cloud infrastructure.
 
-In this tutorial, we will show how to deploy eKuiper and its dashboard in the OpenYurt cluster and leverage the yurt
+In this tutorial, we will show how to deploy rekuiper and its dashboard in the OpenYurt cluster and leverage the yurt
 tunnel to enable the management from cloud to the edge. To mimic the real scenario where the cloud node and edge nodes
-may locate in separate network regions, we use a two-nodes kubernetes cluster. The eKuiper instance will be deployed to
+may locate in separate network regions, we use a two-nodes kubernetes cluster. The rekuiper instance will be deployed to
 the edge node, and the dashboard will be deployed to the cloud node.
 
 <img src="./ekuiper_openyurt.png" alt="arch" width="80%"/>
@@ -39,7 +39,7 @@ sudo apt-get install -y kubelet=1.20.8-00 kubeadm=1.20.8-00 kubectl=1.20.8-00
 Next, [install Golang](https://golang.org/doc/install) and
 then [build OpenYurt](https://github.com/openyurtio/openyurt#getting-started).
 
-Finally, [install helm](https://helm.sh/docs/intro/install/) as we will deploy eKuiper by helm chart.
+Finally, [install helm](https://helm.sh/docs/intro/install/) as we will deploy rekuiper by helm chart.
 
 Across this tutorial, the host name of the cloud node is `cloud-node`. You can modify your host name to match this, or
 you will have to update all occurrence of `cloud-node` in this tutorial to your cloud node host name.
@@ -146,9 +146,9 @@ $ sudo iptables -t nat -A OUTPUT -d 172.31.0.236 -j DNAT --to-destination 34.209
 
 Make sure in the edge node, `172.31.0.236` is accessible by `ping 172.31.0.236`.
 
-## Deploy eKuiper instance to edge
+## Deploy rekuiper instance to edge
 
-As an edge streaming software, eKuiper usually deploys in the edge side. We will use eKuiper helm chart to accelerate
+As an edge streaming software, eKuiper usually deploys in the edge side. We will use rekuiper helm chart to accelerate
 the deployment.
 
 ```shell
@@ -170,7 +170,7 @@ spec:
 ...
 ```
 
-Save the change and deploy eKuiper by helm command:
+Save the change and deploy rekuiper by helm command:
 
 ```shell
 $ helm install ekuiper .
@@ -201,10 +201,10 @@ $ curl http://192.168.2.143:9081
 {"version":"1.2.0","os":"linux","upTimeSeconds":81317}
 ```
 
-## Deploy the eKuiper dashboard to cloud
+## Deploy the web dashboard to cloud
 
 We will deploy ekuiper dashboard in the cloud node by kubectl tool with [kmanager.yaml](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/tutorials/deploy/kmanager.yaml). In the
-configuration file, we define a deployment and a service for eKuiper manager which is a web based UI. First, we need to
+configuration file, we define a deployment and a service for rekuiper manager which is a web based UI. First, we need to
 revise the manager docker tag to the correct version that matches the eKuiper version in line 21:
 
 ```yaml
@@ -235,7 +235,7 @@ kubernetes         ClusterIP   10.96.0.1       <none>        443/TCP            
 The dashboard is run in the cloud node with port `32555`. So open the dashboard with url http://34.209.219.149:32555 in
 your browser. Login with default username and password: admin/public.
 
-Our goal is to manage eKuiper instance in the edge node. So we will add a the eKuiper service in the edge node which is
+Our goal is to manage rekuiper instance in the edge node. So we will add a the eKuiper service in the edge node which is
 set up in the last section as a service in the dashboard.
 
 1. Create `Add Service` and fill in the form as below.
@@ -246,7 +246,7 @@ set up in the last section as a service in the dashboard.
    so that we will get errors about connection. That is because `http://192.168.2.143:9081/` is the intranet address of
    eKuiper service in the edge side. It is not accessible from the cloud side directly.
 
-In next section, we will setup the yurt tunnel to let the dashboard manage the eKuiper instance in the edge side.
+In next section, we will setup the yurt tunnel to let the dashboard manage the rekuiper instance in the edge side.
 
 ## Setup the yurt-tunnel
 

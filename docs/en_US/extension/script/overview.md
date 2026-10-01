@@ -15,7 +15,7 @@ The software has a built-in JavaScript interpreter [goja](https://github.com/dop
 
 The general steps for users to write script functions in JavaScript are as follows:
 1. Write and debug JavaScript functions
-2. Register the script function in eKuiper
+2. Register the script function in rekuiper
 3. Use the script function in SQL
 4. Input the data stream and check the running result
 
@@ -43,7 +43,7 @@ function count_by_js(msgs) {
 
 ### Management of JavaScript Functions
 
-After the function is written and debugged, the user needs to register the function in eKuiper. There are two ways to register:
+After the function is written and debugged, the user needs to register the function in rekuiper. There are two ways to register:
 1. Register using [REST API](../../api/restapi/udf.md)
 2. Register using [CLI](../../api/cli/scripts.md)
 

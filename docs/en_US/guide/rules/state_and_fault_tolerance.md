@@ -1,6 +1,6 @@
 ## State
 
-eKuiper supports stateful rule stream. There are two kinds of states in eKuiper:
+rekuiper supports stateful rule stream. There are two kinds of states in rekuiper:
 
 1. Internal state for window operation and rewindable source
 2. User state exposed to extensions with stream context, check [state storage](../../extension/native/overview.md#state-storage).
@@ -21,7 +21,7 @@ When things go wrong in a stream processing application, it is possible to have 
 2. At-least-once(1): Nothing is lost, but you may experience duplicated results
 3. Exactly-once(2): Nothing is lost or duplicated
 
-Given that eKuiper recovers from faults by rewinding and replaying the source data streams, when the ideal situation is described as exactly once does not mean that every event will be processed exactly once. Instead, it means that every event will affect the state being managed by eKuiper exactly once.
+Given that eKuiper recovers from faults by rewinding and replaying the source data streams, when the ideal situation is described as exactly once does not mean that every event will be processed exactly once. Instead, it means that every event will affect the state being managed by rekuiper exactly once.
 
 If you don’t need "exactly once", you can gain some performance by configuring eKuiper to use AT_LEAST_ONCE.
 
@@ -31,7 +31,7 @@ If you don’t need "exactly once", you can gain some performance by configuring
 
 To have an end to end qos of the stream, the source must be rewindable. That means after recovery, the source can be reverted to the checkpointed offset and resend data from that so that the whole stream can be replayed from the last failure.
 
-For extended source, the user must implement the api.Rewindable interface as well as the default api.Source interface. eKuiper will handle the rewind internally.
+For extended source, the user must implement the api.Rewindable interface as well as the default api.Source interface. rekuiper will handle the rewind internally.
 
 ```go
 type Rewindable interface {

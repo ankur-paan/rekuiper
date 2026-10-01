@@ -12,12 +12,12 @@ source down sampling is suitable for scenarios with higher performance requireme
 
 Data streams can be categorized into PullSource and PushSource based on the method of data acquisition. PullSource is a
 data stream that samples data periodically, and down sampling can be achieved by setting the sampling rate. The data
-inflow frequency of PushSource is determined by the push speed of the data source. In eKuiper, common configurations
+inflow frequency of PushSource is determined by the push speed of the data source. In rekuiper, common configurations
 such as sampling frequency are provided, and various strategies for down sampling can also be implemented.
 
 ## Configuration
 
-eKuiper data sources provide the following common properties for configuring down sampling characteristics.
+rekuiper data sources provide the following common properties for configuring down sampling characteristics.
 
 ### interval
 

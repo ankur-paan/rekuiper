@@ -1,8 +1,8 @@
 
-The eKuiper REST api for plugins allows you to manage plugins, such as create, drop and list plugins. Notice that, drop a plugin will need to restart eKuiper to take effect. To update a plugin, do the following:
+The rekuiper REST API for plugins allows you to manage plugins, such as create, drop and list plugins. Notice that, drop a plugin will need to restart rekuiper to take effect. To update a plugin, do the following:
 
 1. Drop the plugin.
-2. Restart eKuiper.
+2. Restart rekuiper.
 3. Create the plugin with the new configuration.
 
 ## create a plugin
@@ -25,7 +25,7 @@ Request Sample when the file locates in a http server
 }
 ```
 
-Request Sample for files locates in the same machine of the eKuiper server.
+Request Sample for files locates in the same machine of the rekuiper server.
 
 ```json
 {
@@ -37,7 +37,7 @@ Request Sample for files locates in the same machine of the eKuiper server.
 ### Parameters
 
 1. name: a unique name of the plugin. The name must be the same as the camel case version of the plugin with lowercase first letter. For example, if the exported plugin name is `Random`, then the name of this plugin is `random`.
-2. file: the url of the plugin files. The url can be `http` or `https` scheme or `file` scheme to refer to a local file path of the eKuiper server. It must be a zip file with: a compiled so file and the yaml file(only required for sources). If the plugin depends on some external dependencies, a bash script named install.sh can be provided to do the dependency installation. The name of the files must match the name of the plugin. Please check [Extension](../../extension/overview.md) for the naming rule.
+2. file: the url of the plugin files. The url can be `http` or `https` scheme or `file` scheme to refer to a local file path of the rekuiper server. It must be a zip file with: a compiled so file and the yaml file(only required for sources). If the plugin depends on some external dependencies, a bash script named install.sh can be provided to do the dependency installation. The name of the files must match the name of the plugin. Please check [Extension](../../extension/overview.md) for the naming rule.
 
 ### Plugin File Format
 
@@ -52,7 +52,7 @@ A sample zip file for a source named random.zip
    - mysdk.zip
    - myconfig.conf
 5. etc directory: the runtime configuration files or dependency files. After installation, this directory will be
-   renamed to the plugin name under <span v-pre>{{eKuiperPath}}/etc/{{pluginType}}</span> directory.
+   renamed to the plugin name under <span v-pre>{{rekuiperPath}}/etc/{{pluginType}}</span> directory.
 
 Notice that, the install.sh will be run that the system may already had the lib or package. Make sure to check the path before. Below is an example install.sh to install a sample sdk lib.
 
@@ -130,7 +130,7 @@ Response Sample:
 
 ## drop a plugin
 
-The API is used for drop the plugin. Notice that, for native plugins, the eKuiper server needs to be restarted to take effect. The current rules will continue to run with the deleted native plugins successfully. For portable plugin, the deletion will take effect immediately. The current rules which are using that plugin may encounter errors but won't stop and can continue running if an updated plugin with the same name is created later. If this is not expected, manually stop or delete those rules before deleting a plugin.
+The API is used for drop the plugin. Notice that, for native plugins, the rekuiper server needs to be restarted to take effect. The current rules will continue to run with the deleted native plugins successfully. For portable plugin, the deletion will take effect immediately. The current rules which are using that plugin may encounter errors but won't stop and can continue running if an updated plugin with the same name is created later. If this is not expected, manually stop or delete those rules before deleting a plugin.
 
 ```shell
 DELETE http://localhost:9081/plugins/sources/{name}
@@ -139,7 +139,7 @@ DELETE http://localhost:9081/plugins/functions/{name}
 DELETE http://localhost:9081/plugins/portables/{name}
 ```
 
-The user can pass a query parameter to decide if eKuiper should be stopped after a delete in order to make the deletion take effect. The parameter is `stop` and only when the value is `1` will the eKuiper be stopped. The user has to manually restart it.
+The user can pass a query parameter to decide if rekuiper should be stopped after a delete in order to make the deletion take effect. The parameter is `stop` and only when the value is `1` will the eKuiper be stopped. The user has to manually restart it.
 
 ```shell
 DELETE http://localhost:9081/plugins/sources/{name}?stop=1
@@ -147,7 +147,7 @@ DELETE http://localhost:9081/plugins/sources/{name}?stop=1
 
 ## update a plugin
 
-Notice that, native plugins can be updated, but the new version will not take effect until the eKuiper server is
+Notice that, native plugins can be updated, but the new version will not take effect until the rekuiper server is
 restarted.
 Portable plugins can be updated, and the new version will take effect immediately even for the running rules.
 The request body is the same as the create plugin request.

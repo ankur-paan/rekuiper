@@ -2,15 +2,15 @@
 
 <span style="background:green;color:white;">stream source</span>
 
-eKuiper has built-in support for Websocket data sources. Through the Websocket data source connector, eKuiper can obtain data through websocket connection.
+rekuiper has built-in support for Websocket data sources. Through the Websocket data source connector, rekuiper can obtain data through websocket connection.
 
-When eKuiper uses the websocket data source, eKuiper will get the data from the websocket TextMessage and parse it in the form of json object data.
+When rekuiper uses the websocket data source, rekuiper will get the data from the websocket TextMessage and parse it in the form of json object data.
 
-## eKuiper serve as websocket client
+## rekuiper as websocket client
 
-eKuiper can serve as a websocket client, initiate a websocket connection to the remote websocket server, and receive data on the websocket connection as a message source.
+rekuiper can serve as a websocket client, initiate a websocket connection to the remote websocket server, and receive data on the websocket connection as a message source.
 
-When you need eKuiper as a websocket client, you need to specify the server address of the websocket connection in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
+When you need rekuiper as a websocket client, you need to specify the server address of the websocket connection in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
 
 ```yaml
 default:
@@ -22,15 +22,15 @@ default:
 CREATE STREAM demo'() with(CONF_KEY="default", datasource="/api/data", type="websocket")'
 ```
 
-At this time, eKuiper will act as a websocket client, establish a websocket connection to 127.0.0.1:8080/api/data, and use this connection to receive data as the message source.
+At this time, rekuiper will act as a websocket client, establish a websocket connection to 127.0.0.1:8080/api/data, and use this connection to receive data as the message source.
 
 You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
 
-## eKuiper serve as websocker server
+## rekuiper as websocket server
 
-eKuiper can serve as a websocket server. At this time, the remote websocket client can actively initiate a websocket connection to eKuiper, and eKuiper will receive messages on the websocket connection as the message source.
+rekuiper can serve as a websocket server. At this time, the remote websocket client can actively initiate a websocket connection to rekuiper, and rekuiper will receive messages on the websocket connection as the message source.
 
-When you need eKuiper as a websocket server, you need to specify that the websocket server address is empty in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
+When you need rekuiper as a websocket server, you need to specify that the websocket server address is empty in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
 
 ```yaml
 default:
@@ -41,11 +41,11 @@ default:
 CREATE STREAM demo'() with(CONF_KEY="default", datasource="/api/data", type="websocket")'
 ```
 
-At this time, eKuiper will serve as the websocket server, use itself as the host, wait for the websocket connection to be established at the URL of /api/data, and use this connection to receive data as the message source.
+At this time, rekuiper will serve as the websocket server, use itself as the host, wait for the websocket connection to be established at the URL of /api/data, and use this connection to receive data as the message source.
 
 ### Server Configuration
 
-To set up eKuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
+To set up rekuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
 
 ```yaml
 source:
@@ -69,7 +69,7 @@ The global server initializes when any rule requiring an Websocket source is act
 
 ## Create a Stream Source
 
-Once you've set up your streams with their respective configurations, you can integrate them with eKuiper rules to process and act on the incoming data.
+Once you've set up your streams with their respective configurations, you can integrate them with rekuiper rules to process and act on the incoming data.
 
 ::: tip
 
@@ -81,7 +81,7 @@ You can define the Websocket source as the data source either by REST API or CLI
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for those looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
 
 Example:
 
@@ -105,12 +105,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to create a rule, specifying the Websocket connector as its source, for example:

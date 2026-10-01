@@ -4,9 +4,9 @@
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">lookup table source</span>
 
-The Memory source connector enables eKuiper to retrieve data from in-memory sources, primarily the [memory sink](../../sinks/builtin/memory.md). This connector plays an essential role in scenarios that require swift data retrieval without the overhead of disk or external service reads.
+The Memory source connector enables rekuiper to retrieve data from in-memory sources, primarily the [memory sink](../../sinks/builtin/memory.md). This connector plays an essential role in scenarios that require swift data retrieval without the overhead of disk or external service reads.
 
-There's no need for additional configurations when integrating the Memory Source Connector with an eKuiper rule. Moreover, this connector is versatile, performing roles like a stream source, scan table source, or lookup table source.
+There's no need for additional configurations when integrating the Memory Source Connector with an rekuiper rule. Moreover, this connector is versatile, performing roles like a stream source, scan table source, or lookup table source.
 
 ## Create a Stream Source
 

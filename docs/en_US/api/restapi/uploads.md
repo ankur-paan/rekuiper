@@ -1,4 +1,4 @@
-The eKuiper REST api for configuration file uploads allows you to upload configuration files and list all uploaded files.
+The rekuiper REST API for configuration file uploads allows you to upload configuration files and list all uploaded files.
 
 ## Upload a configuration file
 

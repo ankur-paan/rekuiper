@@ -3,15 +3,15 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-eKuiper's EdgeX connector seamlessly integrates with EdgeX instances, allowing for efficient data ingestion and output. While it can function both as a source and a [sink connector](../../sinks/builtin/edgex.md), this section focuses on its role as a source connector.
+rekuiper's EdgeX connector seamlessly integrates with EdgeX instances, allowing for efficient data ingestion and output. While it can function both as a source and a [sink connector](../../sinks/builtin/edgex.md), this section focuses on its role as a source connector.
 
-eKuiper's EdgeX source connector can subscribe to the message from [EdgeX message bus](https://github.com/edgexfoundry/go-mod-messaging) and feed into the eKuiper streaming process pipeline. eKuiper's EdgeX source connector is tailored to consume events directly from EdgeX, ensuring effective stream processing without any manual schema definitions, thanks to EdgeX's predefined data types in its reading objects.
+rekuiper's EdgeX source connector can subscribe to the message from [EdgeX message bus](https://github.com/edgexfoundry/go-mod-messaging) and feed into the eKuiper streaming process pipeline. rekuiper's EdgeX source connector is tailored to consume events directly from EdgeX, ensuring effective stream processing without any manual schema definitions, thanks to EdgeX's predefined data types in its reading objects.
 
 ## Configurations
 
-The connector in eKuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring eKuiper connectors with the configuration file.
+The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
 
-eKuiper's default EdgeX source configuration resides at `$ekuiper/etc/sources/edgex.yaml`. This configuration serves as a base for all EdgeX connections. However, for specific use cases, you might need [custom configurations](#custom-configurations). eKuiper's [connector selector](../../connector.md#connection-selector) further enhances this by allowing connection reuse across configurations.
+rekuiper's default EdgeX source configuration resides at `$rekuiper/etc/sources/edgex.yaml`. This configuration serves as a base for all EdgeX connections. However, for specific use cases, you might need [custom configurations](#custom-configurations). rekuiper's [connector selector](../../connector.md#connection-selector) further enhances this by allowing connection reuse across configurations.
 
 See below for a demo configuration with the global configuration and a customized `demo1` section.
 
@@ -81,7 +81,7 @@ Users can specify the global EdgeX configurations here. The configuration items 
   - `mqtt`: Use the MQTT broker as EdgeX message bus. See [Optional Configuration (Specifically for MQTT)](#optional-configuration-specifically-for-mqtt) for more MQTT-related configurations.
   - `redis`: Use Redis as the EdgeX message bus. Redis is the default message bus when using EdgeX docker compose.
 
-  EdgeX Levski introduces two types of information message bus, eKuiper supports these two new types from 1.7.1, respectively:
+  EdgeX Levski introduces two types of information message bus, rekuiper supports these two new types from 1.7.1, respectively:
 
   - `nats-jetstream`
   - `nats-core`
@@ -111,7 +111,7 @@ If the MQTT message bus is used, additional optional configurations can be speci
 
 ## Custom Configurations
 
-For scenarios where you need to consume messages from multiple topics or customize certain connection parameters, eKuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
+For scenarios where you need to consume messages from multiple topics or customize certain connection parameters, rekuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
 
 Here's how to set up a custom configuration:
 
@@ -136,7 +136,7 @@ Parameters defined in a custom configuration will override the corresponding par
 
 ## Create a Stream Source
 
-Having set up the EdgeX source connector, the subsequent step involves its integration into eKuiper rules. This integration facilitates the processing of streamed data from EdgeX.
+Having set up the EdgeX source connector, the subsequent step involves its integration into rekuiper rules. This integration facilitates the processing of streamed data from EdgeX.
 
 ::: tip
 
@@ -148,7 +148,7 @@ You can define the edgeX source as the data source either by REST API or CLI too
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for those looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
 
 Example:
 
@@ -160,12 +160,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to create a rule, specifying the EdgeX connector as its source, for example:
@@ -180,20 +180,20 @@ More details can be found at [Streams Management with CLI](../../../api/cli/stre
 
 When integrating eKuiper with EdgeX, it's recommended to use [schema-less stream](../../streams/overview.md#schema) definitions, as EdgeX has predefined data structures in its [reading objects](https://docs.edgexfoundry.org/2.0/microservices/core/data/Ch-CoreData/#events-and-readings).
 
-For example, to define a stream in eKuiper that consumes events from EdgeX:
+For example, to define a stream in rekuiper that consumes events from EdgeX:
 
 ```shell
-# cd $eKuiper_base
+# cd $rekuiper_base
 # bin/kuiper CREATE STREAM demo'() with(format="json", datasource="demo" type="edgex")'
 ```
 
 ### Automatic Data Type Conversion
 
-When eKuiper processes events from EdgeX, it automatically manages data type conversions based on EdgeX's `ValueType` field.
+When rekuiper processes events from EdgeX, it automatically manages data type conversions based on EdgeX's `ValueType` field.
 
 **Data Conversion:**
 
-- If eKuiper identifies a matching type in EdgeX's readings, it converts the data.
+- If rekuiper identifies a matching type in EdgeX's readings, it converts the data.
 - If no match is found, the original value remains unchanged.
 - If a conversion fails, the value is dropped, and a warning logs in the system.
 

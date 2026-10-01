@@ -19,24 +19,24 @@ When using `sqlserver` as the target, you need to confirm that the `sqlserver` e
 ### Default build command
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sources/Sql.so extensions/sources/sql/*.go
-# cp plugins/sources/Sql.so $eKuiper_install/plugins/sources
+# cp plugins/sources/Sql.so $rekuiper_install/plugins/sources
 ```
 
 ### Sqlserver build command
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -tags sqlserver -o plugins/sources/Sql.so extensions/sources/sql/*.go
-# cp plugins/sources/Sql.so $eKuiper_install/plugins/sources
+# cp plugins/sources/Sql.so $rekuiper_install/plugins/sources
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Configuration
 
-The configuration for this source is `$ekuiper/etc/sources/sql.yaml`. The format is as below:
+The configuration for this source is `$rekuiper/etc/sources/sql.yaml`. The format is as below:
 
 ```yaml
 default:
@@ -121,7 +121,7 @@ internalSqlQueryCfg:
       indexValue: 1
 ```
 
-For indexFields, eKuiper will generate corresponding query statements for all index columns. It is worth noting that for query statements with multiple index columns, the declaration order of indexFields will determine the priority of index column sorting. For the above example, it will generate The following SQL:
+For indexFields, rekuiper will generate corresponding query statements for all index columns. It is worth noting that for query statements with multiple index columns, the declaration order of indexFields will determine the priority of index column sorting. For the above example, it will generate The following SQL:
 
 ```sql
 select * from t where a > '2022-04-21 10:23:55' and b > 1 order by a asc, b asc limit 1
@@ -228,4 +228,4 @@ sqlite3_lookup:
     templateSql: select aid from t limit where b2 + 1 = {{.bid}};
 ```
 
-Through the above operation, we have pushed down the equivalence calculation where demo.b equals sqllookup.b2 + 1 to the database level during the SQL lookup query. For some equivalence calculation operations not supported by eKuiper, we can achieve them in this way.
+Through the above operation, we have pushed down the equivalence calculation where demo.b equals sqllookup.b2 + 1 to the database level during the SQL lookup query. For some equivalence calculation operations not supported by rekuiper, we can achieve them in this way.

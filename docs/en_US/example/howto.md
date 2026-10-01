@@ -1,8 +1,8 @@
-# Step-by-Step Guide: Navigating eKuiper with the Management Console UI
+# Step-by-Step Guide: Navigating rekuiper with the Management Console UI
 
-This page explains how to use eKuiper to run the examples in this document. Before running the examples, you need to [install eKuiper](../installation.md).
+This page explains how to use rekuiper to run the examples in this document. Before running the examples, you need to [install rekuiper](../installation.md).
 
-You can use SQL to define rules in the example documents. You can run rules using eKuiper manager management console UI or eKuiper’s REST API or command-line tool.
+You can use SQL to define rules in the example documents. You can run rules using rekuiper manager management console UI or eKuiper’s REST API or command-line tool.
 
 ## Data Preparation
 
@@ -10,7 +10,7 @@ In each example, we provide an input sample data to help users quickly understan
 
 ### Record Data
 
-eKuiper provides many kinds of data source access methods and the File sink output methods. Therefore, you can save the data of an existing data source as a file through a rule and then use the file as input for the example. For example, you can use MQTT data source and eKuiper manager UI to record data. Before using it, please [install and configure eKuiper manager](../installation.md#running-ekuiper-with-management-console).
+rekuiper provides many kinds of data source access methods and the File sink output methods. Therefore, you can save the data of an existing data source as a file through a rule and then use the file as input for the example. For example, you can use MQTT data source and eKuiper manager UI to record data. Before using it, please [install and configure rekuiper manager](../installation.md#running-ekuiper-with-management-console).
 
 1. Create Data Source: In the eKuiper manager UI, click **Source** in the top navigation bar to enter the stream management page. Click **Create Stream**, in the pop-up dialog box, fill in the stream name `mqttDemoStream`, select the stream type as `mqtt`, fill in the data source (MQTT topic) as `demo/#`. If you need to change the default MQTT connection configuration, click **Add configuration key** to configure it. Click **OK** to create the stream. By now, we have created a stream named `mqttDemoStream` that subscribe to the MQTT topic wildcard `demo/#`. ![record_stream.png](./resources/record_stream.png)
 
@@ -48,4 +48,4 @@ Next, we will introduce how to use the eKuiper manager UI to run an example. Whe
 
 ## Summary
 
-This document introduces how to use eKuiper manager to run the examples in this document. In actual use, users can use eKuiper’s REST API or eKuiper CLI to process data according to their needs. After the case runs successfully, users can also modify the SQL statements in the case to play around and achieve their own needs.
+This document introduces how to use rekuiper manager to run the examples in this document. In actual use, users can use rekuiper’s REST API or rekuiper CLI to process data according to their needs. After the case runs successfully, users can also modify the SQL statements in the case to play around and achieve their own needs.

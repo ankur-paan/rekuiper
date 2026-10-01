@@ -3,7 +3,7 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-eKuiper provides built-in support for reading file content into the eKuiper processing pipeline. This is useful in scenarios where data is batch-processed or when files need real-time processing by eKuiper. **Note**: The file source supports monitoring either files or directories. If the monitored location is a directory, all files within that directory must be of the same type. When monitoring a directory, it will read files in alphabetical order by the file names.
+rekuiper provides built-in support for reading file content into the eKuiper processing pipeline. This is useful in scenarios where data is batch-processed or when files need real-time processing by rekuiper. **Note**: The file source supports monitoring either files or directories. If the monitored location is a directory, all files within that directory must be of the same type. When monitoring a directory, it will read files in alphabetical order by the file names.
 
 The File Source Connector allows eKuiper to read data from local files, supporting multiple formats such as JSON, CSV, and line-separated values:
 
@@ -77,7 +77,7 @@ When dealing with files that have metadata or non-standard content at the beginn
 
 ## Configurations
 
-The connector in eKuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring eKuiper connectors with the configuration file.
+The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
 
 The configure file for the file source is located at  `/etc/sources/file.yaml`.
 
@@ -147,7 +147,7 @@ default:
 
 ## Create a Table Source
 
-After setting up your streams, you can integrate them with eKuiper rules to process the data.
+After setting up your streams, you can integrate them with rekuiper rules to process the data.
 
 ::: tip
 
@@ -165,7 +165,7 @@ create table table1 (
 ) WITH (DATASOURCE="lookup.json", FORMAT="json", TYPE="file");
 ```
 
-After setting up your streams, you can integrate them with eKuiper rules to process the data.
+After setting up your streams, you can integrate them with rekuiper rules to process the data.
 
 ```sql
 CREATE RULE rule1 AS SELECT * FROM fileDemo WHERE temperature > 50 INTO mySink;
@@ -177,7 +177,7 @@ You can define the file source as the data source either by [REST API](../../../
 
 ## Tutorial: Parsing File Sources
 
-File sources in eKuiper require parsing of content, which often intersects with format-related stream definitions. To illustrate how eKuiper parses different file formats, let's walk through a couple of examples.
+File sources in rekuiper require parsing of content, which often intersects with format-related stream definitions. To illustrate how eKuiper parses different file formats, let's walk through a couple of examples.
 
 ### Read a CSV File with a Custom Separator
 
@@ -189,7 +189,7 @@ id name age
 2 Jane 34
 ```
 
-Before eKuiper can read the file, you need to specify its type and inform the system about the header. Modify the configuration file (`/etc/sources/file.yaml`) with the following content:
+Before rekuiper can read the file, you need to specify its type and inform the system about the header. Modify the configuration file (`/etc/sources/file.yaml`) with the following content:
 
 ```yaml
 csv:
@@ -238,7 +238,7 @@ This command configures a stream named `linesFileDemo` to process line-separated
 In many IoT and data processing scenarios, we need to monitor file changes in a specific folder in real time, such as
 the creation of new files or modification of existing files. For example, monitoring screenshot files from a camera and
 synchronizing them to the cloud. With eKuiper, we can easily monitor file changes in a folder and process and analyze
-these changes in real time. This tutorial will guide you on how to configure eKuiper to monitor a folder and create
+these changes in real time. This tutorial will guide you on how to configure rekuiper to monitor a folder and create
 corresponding streams and rules to handle file change events. We will monitor the `data/watch` folder and upload newly
 created image files to the cloud via MQTT.
 

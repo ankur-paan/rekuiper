@@ -1,6 +1,6 @@
 # Rules management
 
-The eKuiper rule command line tools allows you to manage rules, such as create, show, drop, describe, start, stop and restart rules.
+The rekuiper rule command line tools allows you to manage rules, such as create, show, drop, describe, start, stop and restart rules.
 
 ## create a rule
 

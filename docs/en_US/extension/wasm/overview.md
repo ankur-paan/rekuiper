@@ -110,9 +110,9 @@ fibonacci.json
 }
 ```
 
-## Build eKuiper
+## Build rekuiper
 
-The official released eKuiper do not have wasm support, users need build eKuiper by himself
+The official released eKuiper do not have wasm support, users need build rekuiper by himself
 
 ```shell
 make build_with_wasm

@@ -59,7 +59,7 @@ Depending on the requirements of different scenarios, we can flexibly write rule
 
 ## Solution
 
-In practice, users often have different merging algorithms. This article will list several common merge algorithms and how to use eKuiper SQL to implement them.
+In practice, users often have different merging algorithms. This article will list several common merge algorithms and how to use rekuiper SQL to implement them.
 
 ### 1. Output as One Stream by Rule Pipeline
 

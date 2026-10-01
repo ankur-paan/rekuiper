@@ -1,25 +1,25 @@
-# Configure the data flow from EdgeX to eKuiper
+# Configure the data flow from EdgeX to rekuiper
 
-Sources feed data into eKuiper from other systems such as EdgeX foundry which are defined as streams. [EdgeX source](../guide/sources/builtin/edgex.md) defines the properties to configure how the data feed into eKuiper from EdgeX. In this tutorial, we will demonstrate the various data flow from EdgeX to eKuiper and how to configure the source to adopt any kind of data flow.
+Sources feed data into rekuiper from other systems such as EdgeX foundry which are defined as streams. [EdgeX source](../guide/sources/builtin/edgex.md) defines the properties to configure how the data feed into rekuiper from EdgeX. In this tutorial, we will demonstrate the various data flow from EdgeX to rekuiper and how to configure the source to adopt any kind of data flow.
 
 ## Typical Data Flow Model
 
-Typically, there are two kinds of data flow from EdgeX to eKuiper:
+Typically, there are two kinds of data flow from EdgeX to rekuiper:
 
-- From EdgeX app service to eKuiper
-- From EdgeX message bus directly to eKuiper
+- From EdgeX app service to rekuiper
+- From EdgeX message bus directly to rekuiper
 
 ![data flow](./flow.png)
 
-Notice that, the EdgeX message bus receives messages from various service such as device service and core data. Even for the first kind of data flow, the app service result is also  publish to the message bus and then consumed by eKuiper. The differences between the two kinds is whether app service processed the message before consuming by eKuiper.
+Notice that, the EdgeX message bus receives messages from various service such as device service and core data. Even for the first kind of data flow, the app service result is also  publish to the message bus and then consumed by rekuiper. The differences between the two kinds is whether app service processed the message before consuming by rekuiper.
 
-By default, the first kind of data flow is used which allow users to prepare (transformed, enriched, filtered, etc.) and groom (formatted, compressed, encrypted, etc.) before sending to the eKuiper rule engine. If users don't need to transform the data and would like to process the raw data in eKuiper to reduce the overhead, they can connect to the message bus directly.
+By default, the first kind of data flow is used which allow users to prepare (transformed, enriched, filtered, etc.) and groom (formatted, compressed, encrypted, etc.) before sending to the rekuiper rule engine. If users don't need to transform the data and would like to process the raw data in rekuiper to reduce the overhead, they can connect to the message bus directly.
 
 The full properties list of EdgeX source can be found [here](../guide/sources/builtin/edgex.md#global-configurations). There are two critical properties that define the connection model: `topic` and `messageType`. Let's explore how to configure them to adopt the connection models.
 
 ## Connect to the App Service
 
-In the default EdgeX [docker compose file](https://github.com/edgexfoundry/edgex-compose/blob/main/docker-compose.yml), a default app service `app-service-rules` is defined as the upstream of eKuiper. The default publish topic is `rules-events` which is defined in the [default configuration](https://github.com/edgexfoundry/app-service-configurable/blob/main/res/rules-engine/configuration.toml). In the same docker compose file `rulesengine` section, there is an environment variable definition `EDGEX__DEFAULT__TOPIC: rules-events`. This means eKuiper edgeX source default topic is "rules-events" which just matches the publish topic of `app-service-rules`. Thus, when create an edgex type stream with default configuration, the data will flow from `app-service-rules` to eKuiper automatically.
+In the default EdgeX [docker compose file](https://github.com/edgexfoundry/edgex-compose/blob/main/docker-compose.yml), a default app service `app-service-rules` is defined as the upstream of eKuiper. The default publish topic is `rules-events` which is defined in the [default configuration](https://github.com/edgexfoundry/app-service-configurable/blob/main/res/rules-engine/configuration.toml). In the same docker compose file `rulesengine` section, there is an environment variable definition `EDGEX__DEFAULT__TOPIC: rules-events`. This means eKuiper edgeX source default topic is "rules-events" which just matches the publish topic of `app-service-rules`. Thus, when create an edgex type stream with default configuration, the data will flow from `app-service-rules` to rekuiper automatically.
 
 ### Modify the connected app service
 

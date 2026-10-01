@@ -5,7 +5,7 @@
 > **Scorecard**: **Plugin-Dependent Extensions**:  
 > Custom functions (`echo`, `countPlusOne`, `accumulateWordCount`, image, geohash, and tensorflow plugins) require compiling and registering external plugin dynamic libraries (`/plugins/functions`) or JavaScript UDF functions (`/udf/javascript`). Without the plugin loaded, the engine validates functions strictly and returns `function not found`.
 
-eKuiper can customize functions.
+rekuiper can customize functions.
 For the development, compilation and use of functions, please [see here](../../extension/native/develop/function.md).
 
 ## echo plugin

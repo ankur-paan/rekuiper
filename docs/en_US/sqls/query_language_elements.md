@@ -1,11 +1,11 @@
 
 # Query language elements
 
-eKuiper provides a variety of elements for building queries. They are summarized below.
+rekuiper provides a variety of elements for building queries. They are summarized below.
 
 | Element               | Summary                                                                                                                                                                                                                                       |
 |-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [SELECT](#select)     | SELECT is used to retrieve rows from input streams and enables the selection of one or many columns from one or many input streams in eKuiper.                                                                                                |
+| [SELECT](#select)     | SELECT is used to retrieve rows from input streams and enables the selection of one or many columns from one or many input streams in rekuiper.                                                                                                |
 | [FROM](#from)         | FROM specifies the input stream. The FROM clause is always required for any SELECT statement.                                                                                                                                                 |
 | [JOIN](#join)         | JOIN is used to combine records from two or more input streams. JOIN includes LEFT, RIGHT, FULL & CROSS. Join can apply to multiple streams join or stream/table join. To join multiple streams, it must run within a [window](./windows.md). |
 | [WHERE](#where)       | WHERE specifies the search condition for the rows returned by the query.                                                                                                                                                                      |
@@ -16,7 +16,7 @@ eKuiper provides a variety of elements for building queries. They are summarized
 
 ## SELECT
 
-Retrieves rows from input streams and enables the selection of one or many columns from one or many input streams in eKuiper.
+Retrieves rows from input streams and enables the selection of one or many columns from one or many input streams in rekuiper.
 
 ### Syntax
 
@@ -398,7 +398,7 @@ GROUP BY <group by spec>
 
 **<window_type>**
 
-Specifies any eKuiper supported Windowing, see [windows](windows.md) for more info.
+Specifies any rekuiper supported Windowing, see [windows](windows.md) for more info.
 
 **< column_expression >**
 

@@ -1,16 +1,16 @@
-# Command device with EdgeX eKuiper rules engine
+# Command device with EdgeX rekuiper rules engine
 
 ## Overview
 
-This document describes how to actuate a device with rules trigger by the eKuiper rules engine. To make the example
+This document describes how to actuate a device with rules trigger by the rekuiper rules engine. To make the example
 simple, the virtual device [device-virtual](https://github.com/edgexfoundry/device-virtual-go) is used as the actuated
-device. The eKuiper rules engine analyzes the data sent from device-virtual services, and then sends a command to
-virtual device based a rule firing in eKuiper based on that analysis. It should be noted that an application service is
+device. The rekuiper rules engine analyzes the data sent from device-virtual services, and then sends a command to
+virtual device based a rule firing in rekuiper based on that analysis. It should be noted that an application service is
 used to route core data through the rules engine.
 
 ### Use Case Scenarios
 
-Rules will be created in eKuiper to watch for two circumstances:
+Rules will be created in rekuiper to watch for two circumstances:
 
 1. monitor for events coming from the `Random-UnsignedInteger-Device` device (one of the default virtual device managed
    devices), and if a `uint8` reading value is found larger than `20` in the event, then send a command
@@ -22,7 +22,7 @@ Rules will be created in eKuiper to watch for two circumstances:
    false).
 
 These use case scenarios do not have any real business meaning, but easily demonstrate the features of EdgeX automatic
-actuation accomplished via the eKuiper rule engine.
+actuation accomplished via the rekuiper rule engine.
 
 ### Prerequisite Knowledge
 
@@ -34,11 +34,11 @@ This document will not cover basic operations of EdgeX or LF Edge eKuiper. Reade
   to [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/edgex/edgex_rule_engine_tutorial.md)
   to understand the basics of eKuiper and EdgeX.
 
-## Start eKuiper and Create an EdgeX Stream
+## Start rekuiper and Create an EdgeX Stream
 
 Make sure you read
 the [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/edgex/edgex_rule_engine_tutorial.md)
-and successfully run eKuiper with EdgeX.
+and successfully run rekuiper with EdgeX.
 
 First create a stream that can consume streaming data from the EdgeX application service (rules engine profile). This
 step is not required if you already finished
@@ -47,7 +47,7 @@ the [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob
 
 ``` bash
 curl -X POST \
-  http://$ekuiper_docker:59720/streams \
+  http://$rekuiper_docker:59720/streams \
   -H 'Content-Type: application/json' \
   -d '{"sql": "create stream demo() WITH (FORMAT=\"JSON\", TYPE=\"edgex\")"}'
 ```
@@ -154,7 +154,7 @@ curl -X PUT \
 ## Create rules
 
 Now that you have EdgeX and eKuiper running, the EdgeX stream defined, and you know the command to
-actuate `Random-Boolean-Device`, it is time to build the eKuiper rules.
+actuate `Random-Boolean-Device`, it is time to build the rekuiper rules.
 
 ### The first rule
 
@@ -165,11 +165,11 @@ to true).
 
 #### Option 1: Use Rest API
 
-Given the URL and parameters to the command, below is the curl command to declare the first rule in eKuiper.
+Given the URL and parameters to the command, below is the curl command to declare the first rule in rekuiper.
 
 ``` bash
 curl -X POST \
-  http://$ekuiper_server:59720/rules \
+  http://$rekuiper_server:59720/rules \
   -H 'Content-Type: application/json' \
   -d '{
   "id": "rule1",
@@ -246,12 +246,12 @@ to false).
 
 #### Option 1: Use Rest API
 
-Here is the curl request to setup the second rule in eKuiper. The same command URL is used as the same device
+Here is the curl request to setup the second rule in rekuiper. The same command URL is used as the same device
 action (`Random-Boolean-Device's PUT bool command`) is being actuated, but with different parameters.
 
 ``` bash
 curl -X POST \
-  http://$ekuiper_server:59720/rules \
+  http://$rekuiper_server:59720/rules \
   -H 'Content-Type: application/json' \
   -d '{
   "id": "rule2",
@@ -294,9 +294,9 @@ The procedure is the same as the previous step. Use the following configuration 
 }
 ```
 
-## Watch the eKuiper Logs
+## Watch the rekuiper Logs
 
-Both rules are now created in eKuiper. eKuiper is busy analyzing the event data coming for the virtual devices looking
+Both rules are now created in rekuiper. rekuiper is busy analyzing the event data coming for the virtual devices looking
 for readings that match the rules you created. You can watch the edgex-kuiper container logs for the rule triggering and
 command execution.
 
@@ -328,7 +328,7 @@ curl -X PUT \
   -d '{"value":-75, "EnableRandomization_Bool": "true"}'
 ```
 
-eKuiper uses [Go template](https://golang.org/pkg/text/template/) to extract data from analysis result, and the `dataTemplate` should be similar as following.
+rekuiper uses [Go template](https://golang.org/pkg/text/template/) to extract data from analysis result, and the `dataTemplate` should be similar as following.
 
 ```text
 "dataTemplate": "{\"value\": {{.int8}}, \"EnableRandomization_Bool\": \"{{.randomization}}\"}"

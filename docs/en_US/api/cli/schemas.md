@@ -1,6 +1,6 @@
 # Schema Registry
 
-The eKuiper command line tools allows you to manage schemas, such as create, show, drop, describe schemas.
+The rekuiper command line tools allows you to manage schemas, such as create, show, drop, describe schemas.
 
 ## Register schema
 

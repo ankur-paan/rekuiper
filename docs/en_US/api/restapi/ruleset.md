@@ -1,6 +1,6 @@
 # Ruleset Management
 
-eKuiper REST api allows to import or export the stream and rule configurations.
+rekuiper REST API allows to import or export the stream and rule configurations.
 
 ## Ruleset Format
 

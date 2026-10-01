@@ -3,7 +3,7 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-eKuiper has built-in support for Redis data sources, allowing data querying and channel subscription within Redis.Please note that the RedisSub source can be used as both a streaming and scanning table data source,while the [Redis source](./redis.md) can be used as a [lookup table](../../tables/lookup.md).
+rekuiper has built-in support for Redis data sources, allowing data querying and channel subscription within Redis.Please note that the RedisSub source can be used as both a streaming and scanning table data source,while the [Redis source](./redis.md) can be used as a [lookup table](../../tables/lookup.md).
 
 ## Configurations
 
@@ -29,13 +29,13 @@ default:
 
 ## Create a Stream Source
 
-To utilize the RedisSub source Connector in eKuiper streams, define a stream specifying the RedisSub source, its configuration, and the data format.
+To utilize the RedisSub source Connector in rekuiper streams, define a stream specifying the RedisSub source, its configuration, and the data format.
 
 You can define the RedisSub source as the data source either by REST API or CLI tool.
 
 ### Use REST API
 
-The REST API offers a programmatic way to interact with eKuiper, perfect for users looking to automate tasks or integrate eKuiper operations into other systems.
+The REST API offers a programmatic way to interact with rekuiper, perfect for users looking to automate tasks or integrate rekuiper operations into other systems.
 
 **Example**
 
@@ -47,12 +47,12 @@ More details can be found at [Streams Management with REST API](../../../api/res
 
 ### Use CLI
 
-For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to eKuiper's operations.
+For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
 
-1. Navigate to the eKuiper binary directory:
+1. Navigate to the rekuiper binary directory:
 
    ```bash
-   cd path_to_eKuiper_directory/bin
+   cd path_to_rekuiper_directory/bin
    ```
 
 2. Use the `create` command to define a stream for the RedisSub source connector:

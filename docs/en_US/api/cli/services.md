@@ -1,6 +1,6 @@
 # Services management
 
-The eKuiper command line tools allows you to manage services, such as create, show, drop, describe services.
+The rekuiper command line tools allows you to manage services, such as create, show, drop, describe services.
 
 ## Register service
 
@@ -10,7 +10,7 @@ The command is used for creating a service. The service's definition is specifie
 create service $service_name $service_json
 ```
 
-Service package file should be prepared at first and put at a place that eKuiper can access.
+Service package file should be prepared at first and put at a place that rekuiper can access.
 
 Example：
 

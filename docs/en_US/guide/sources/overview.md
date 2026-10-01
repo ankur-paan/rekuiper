@@ -1,6 +1,6 @@
 # Source Connectors
 
-In the eKuiper source code, there are built-in sources and sources in extension.
+In the rekuiper source code, there are built-in sources and sources in extension.
 
 ## Ingestion Mode
 

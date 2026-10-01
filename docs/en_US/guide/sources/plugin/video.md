@@ -8,18 +8,18 @@ The source will query video streams such as RTSP encoded stream by `ffmpeg` comm
 ## Compile & deploy plugin
 
 ```shell
-# cd $eKuiper_src
+# cd $rekuiper_src
 # go build -trimpath --buildmode=plugin -o plugins/sources/Video.so extensions/sources/video/video.go
-# cp plugins/sources/Video.so $eKuiper_install/plugins/sources
-# cp plugins/sources/video.json $eKuiper_install/etc/sources
-# cp plugins/sources/video.yaml $eKuiper_install/etc/sources
+# cp plugins/sources/Video.so $rekuiper_install/plugins/sources
+# cp plugins/sources/video.json $rekuiper_install/etc/sources
+# cp plugins/sources/video.yaml $rekuiper_install/etc/sources
 ```
 
-Restart the eKuiper server to activate the plugin.
+Restart the rekuiper server to activate the plugin.
 
 ## Configuration
 
-The configuration for this source is `$ekuiper/etc/sources/video.yaml`. The format is as below:
+The configuration for this source is `$rekuiper/etc/sources/video.yaml`. The format is as below:
 
 ```yaml
 default:

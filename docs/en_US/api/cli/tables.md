@@ -1,6 +1,6 @@
 # Tables management
 
-The eKuiper table command line tools allows you to manage the tables, such as create, describe, show and drop table definitions.
+The rekuiper table command line tools allow you to manage the tables, such as create, describe, show and drop table definitions.
 
 ## create a table
 
@@ -75,7 +75,7 @@ KEY: id
 DATASOURCE: lookup.json
 ```
 
- *Note*: eKuiper do not support query table data by cli. Users need join the table with a stream and check the result
+ *Note*: rekuiper does not support querying table data by CLI. Users need join the table with a stream and check the result
 
 ## drop a table
 

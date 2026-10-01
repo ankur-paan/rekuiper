@@ -1,6 +1,6 @@
 # Ruleset Management
 
-The eKuiper rule command line tools allows to import and export all the stream and rule configurations.
+The rekuiper rule command line tools allows to import and export all the stream and rule configurations.
 
 ## Ruleset Format
 

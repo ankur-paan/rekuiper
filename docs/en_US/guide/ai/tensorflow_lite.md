@@ -1,4 +1,4 @@
-# Run TensorFlow Lite model with eKuiper function plugin
+# Run TensorFlow Lite model with rekuiper function plugin
 
 [LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is an edge lightweight IoT data analytics / streaming
 software which can be run at all kinds of resource constrained IoT devices.
@@ -16,7 +16,7 @@ By integrating eKuiper and TensorFlow Lite, users only need to upload a pre-buil
 To run the TensorFlow Lite interpreter, we need a trained model. In this tutorial, we will not describe how to train and cover this model, you can see how to do it by looking at [tflite converter](https://www.tensorflow.org/lite/convert). We can either train a new model or select a trained model online.
 In this tutorial we will use the [sin](https://github.com/mattn/go-tflite/tree/master/_example/sin) model and [mobilenet_v1_1.0_224](https://tfhub.dev/tensorflow/lite-model/mobilenet_v1_1.0_224/1/default/1) demo.
 
-### eKuiper Start up
+### rekuiper Start up
 
 This tutorial uses the eKuiper Docker image `lfedge/ekuiper:1.8.0-slim` and the eKuiper manager Docker image `emqx/ekuiper-manager:1.8.0` released by the team to demonstrate. Please refer to [here](https://hub.docker.com/r/emqx/ekuiper-manager) on how to use them.
 
@@ -30,7 +30,7 @@ TensorFlow Lite is provided as a precompiled plug-in, and users need to download
 ## Sin Mode Set up
 
 Please download the [sin model](https://github.com/mattn/go-tflite/blob/master/_example/sin/sin_model.tflite), which returns inference results based on input values. For example, if the user enters π/2, let us take 1.57, the calculation result of sin 1.57 is about 1.
-Users need to prepare MQTT Broker and create an MQTT source to send data to be processed to eKuiper rule and send inference results back to MQTT Broker.
+Users need to prepare MQTT Broker and create an MQTT source to send data to be processed to rekuiper rule and send inference results back to MQTT Broker.
 
 ### MQTT Source
 
@@ -39,7 +39,7 @@ Note that the model input data format must be a byte array, and json does not su
 
 ### Model Upload
 
-Users can upload model files to eKuiper through eKuiper manager. As shown below.
+Users can upload model files to rekuiper through rekuiper manager. As shown below.
 ![model upload](../../resources/sin_upload.png)
 
 ### Call Model in TensorFlow Lite
@@ -75,7 +75,7 @@ Since the precompiled model requires 224 * 224 pixel image data, another precomp
 
 ### Model Upload
 
-Users can upload model files to eKuiper through eKuiper manager. As shown below.
+Users can upload model files to rekuiper through rekuiper manager. As shown below.
 ![model upload](../../resources/mobilenet_upload.png)
 
 ### Call Model in TensorFlow Lite

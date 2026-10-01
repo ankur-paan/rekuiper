@@ -1,12 +1,12 @@
-# Use eKuiper to process Protocol Buffers data
+# Use rekuiper to process Protocol Buffers data
 
-LF Edge eKuiper connects external systems with various communication protocols such as MQTT, HTTP, etc. via source and sink. eKuiper supports codecs for configuring source/sink transport data, currently supporting JSON, ProtoBuf and Binary formats. Protocol Buffers (Protobuf) is a language-neutral, platform-neutral and extensible mechanism for serializing structured data in a binary transfer format. Protobuf is widely used because it is more efficient and faster than conventional data transfer formats such as JSON or XML, and saves transfer bandwidth.
+LF Edge eKuiper connects external systems with various communication protocols such as MQTT, HTTP, etc. via source and sink. rekuiper supports codecs for configuring source/sink transport data, currently supporting JSON, ProtoBuf and Binary formats. Protocol Buffers (Protobuf) is a language-neutral, platform-neutral and extensible mechanism for serializing structured data in a binary transfer format. Protobuf is widely used because it is more efficient and faster than conventional data transfer formats such as JSON or XML, and saves transfer bandwidth.
 
-This tutorial takes Protobuf format as an example to explain how to set up the codec format in eKuiper, read and parse the data in this format by source, and write using this format to encode data in sink. This tutorial uses eKuiper Manager for rule creation and management, please refer to [UI Tutorial](../../operation/manager-ui/overview.md). You can also use the [REST API](../../api/restapi/overview.md) or run the [command line tool](../../api/cli/overview.md) on the same machine of the eKuiper instance to perform the same rule management operation.
+This tutorial takes Protobuf format as an example to explain how to set up the codec format in rekuiper, read and parse the data in this format by source, and write using this format to encode data in sink. This tutorial uses eKuiper Manager for rule creation and management, please refer to [UI Tutorial](../../operation/manager-ui/overview.md). You can also use the [REST API](../../api/restapi/overview.md) or run the [command line tool](../../api/cli/overview.md) on the same machine of the rekuiper instance to perform the same rule management operation.
 
 Before starting the hands-on operation, the following environment needs to be prepared.
 
-- MQTT broker for data transfer. This tutorial uses a standard MQTT broker running at `tcp://127.0.0.1:1883` (such as Eclipse Mosquitto). If you are running eKuiper locally, ensure your broker is accessible; if using Docker, you can set the environment variable `MQTT_SOURCE__DEFAULT__SERVER="tcp://127.0.0.1:1883"`.
+- MQTT broker for data transfer. This tutorial uses a standard MQTT broker running at `tcp://127.0.0.1:1883` (such as Eclipse Mosquitto). If you are running rekuiper locally, ensure your broker is accessible; if using Docker, you can set the environment variable `MQTT_SOURCE__DEFAULT__SERVER="tcp://127.0.0.1:1883"`.
 - To easily observe the results, we need to install an MQTT client, e.g. [MQTT X](https://mqttx.app/).
 
 ## Schema Registry
@@ -31,7 +31,7 @@ At this point, we have registered a schema named `schema1`, which defines the ty
 
 ## Read Protobuf Data
 
-In this section, we will use the MQTT source as an example to describe how to access and parse data transmitted based on Protobuf format so that it can be computed by eKuiper rules. Note that in Source, the encoding format is not bound to the transport protocol. Any source type such as MQTT, httpPull, etc. can be used with different encoding formats, such as ProtoBuf and JSON.
+In this section, we will use the MQTT source as an example to describe how to access and parse data transmitted based on Protobuf format so that it can be computed by rekuiper rules. Note that in Source, the encoding format is not bound to the transport protocol. Any source type such as MQTT, httpPull, etc. can be used with different encoding formats, such as ProtoBuf and JSON.
 
 Suppose we have an MQTT topic `demo` with Protobuf-encoded binary data for the purpose of saving transmission bandwidth. Next, we will configure the eKuiper data source to access the data from this topic and process it.
 
@@ -82,7 +82,7 @@ In this section, we show the usage of reading JSON formatted data, processing it
 
 ## Summary
 
-This tutorial describes how to read and write Protobuf data in eKuiper. ProtoBuf format is one of the formats that eKuiper connects to external systems and any combination of formats can be used as the internal format representation is used after integrating into the system. Firstly, the user needs to define the schema of Protobuf; after that, the Protobuf format can be configured in the stream creation and action creation, and the defined schema can be selected to encode and decode the data.
+This tutorial describes how to read and write Protobuf data in rekuiper. ProtoBuf format is one of the formats that eKuiper connects to external systems and any combination of formats can be used as the internal format representation is used after integrating into the system. Firstly, the user needs to define the schema of Protobuf; after that, the Protobuf format can be configured in the stream creation and action creation, and the defined schema can be selected to encode and decode the data.
 
 ## Further Readings
 

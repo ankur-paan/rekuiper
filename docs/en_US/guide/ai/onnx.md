@@ -1,4 +1,4 @@
-# Running ONNX Models with eKuiper Function Plugin
+# Running ONNX Models with rekuiper Function Plugin
 
 [LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is a lightweight IoT data analysis/streaming software
 designed for various resource-constrained IoT devices.
@@ -6,7 +6,7 @@ designed for various resource-constrained IoT devices.
 [ONNX](https://onnx.ai/get-started.html) is an open file format designed for machine learning to store trained models.
 It allows different AI frameworks to store model data and interact using the same format.
 
-By integrating eKuiper and ONNX, users can simply upload pre-built ONNX models and use them in rules to analyze streaming data. This tutorial demonstrates how to quickly invoke pre-trained ONNX models using eKuiper.
+By integrating eKuiper and ONNX, users can simply upload pre-built ONNX models and use them in rules to analyze streaming data. This tutorial demonstrates how to quickly invoke pre-trained ONNX models using rekuiper.
 
 ## Prerequisites
 
@@ -16,19 +16,19 @@ To run the ONNX interpreter, a trained model is needed. This tutorial will not c
 We can either train a new model or choose an existing one.
 In this tutorial, we will use the [yalue/go onnxruntime](https://github.com/yalue/onnxruntime_go_examples)  [sum_and_difference](https://github.com/yalue/onnxruntime_go_examples/tree/master/sum_and_difference) model and [MNIST-12](https://github.com/onnx/models/tree/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist) for demonstration.
 
-### Running eKuiper
+### Running rekuiper
 
 This tutorial uses the eKuiper v2 and Rest API released by the team. If you want to use the eKuiper manager Docker, you can find installation and usage details [here](https://hub.docker.com/r/emqx/ekuiper-manager).
 
 ### ONNX Plugin Installation
 
 Before running model inference, the ONNX plugin needs to be installed.
-Installing the ONNX plugin does not require manual building of the C API like TensorFlow Lite; it can be built similarly to other plugins like Echo. For details, refer to [Function Extensions](https://ekuiper.org/docs/zh/latest/extension/native/develop/function.html).
+Installing the ONNX plugin does not require manual building of the C API like TensorFlow Lite; it can be built similarly to other plugins like Echo. For details, refer to [Function Extensions](../../extension/native/develop/function.md).
 
 ## Running the MNIST-12 Model
 
 Download the [MNIST-12 model](https://github.com/onnx/models/blob/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist/model/mnist-12.onnx) to predict digits in images.
-Users need to prepare an MQTT Broker and create an MQTT source to send data to the eKuiper rule for processing and return the inference results to the MQTT Broker.
+Users need to prepare an MQTT Broker and create an MQTT source to send data to the rekuiper rule for processing and return the inference results to the MQTT Broker.
 
 ### MQTT Source
 
@@ -45,7 +45,7 @@ Content-Type: application/json
 
 ### Model Upload
 
-Users can upload the model file to eKuiper via the eKuiper manager as shown in the image below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
+Users can upload the model file to rekuiper via the eKuiper manager as shown in the image below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
 ![model upload](../../resources/sin_upload.png)
 
 ### Calling the Model
@@ -132,11 +132,11 @@ time.Sleep(1 * time.Second)
 ## Running the Sum_and_difference Model
 
 Download the[sum_and_difference model](https://github.com/yalue/onnxruntime_go_examples/blob/master/sum_and_difference/sum_and_difference.onnx) , the model estimate the sum and maximum difference of input values.
-For example, if the input is [0.2, 0.3, 0.6, 0.9], the estimated sum is 2 and the maximum difference is 0.7. Users need to prepare an MQTT Broker and create an MQTT source for sending data to the eKuiper rule for processing and returning the inference results.
+For example, if the input is [0.2, 0.3, 0.6, 0.9], the estimated sum is 2 and the maximum difference is 0.7. Users need to prepare an MQTT Broker and create an MQTT source for sending data to the rekuiper rule for processing and returning the inference results.
 
 ### Uploading the Sum_and_difference Model
 
-Users can upload the model file to eKuiper via the eKuiper manager as shown below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
+Users can upload the model file to rekuiper via the eKuiper manager as shown below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
 
 ![model upload](../../resources/mobilenet_upload.png)
 
@@ -199,5 +199,5 @@ Send test data like below through MQTT client.
 
 ## Conclusion
 
-In this tutorial, we directly invoked pre-trained ONNX models in eKuiper using the precompiled ONNX plugin, simplifying the inference steps without writing code.
-By supporting ONNX, we can easily implement various model inferences in eKuiper, including Pytorch and TensorFlow models.
+In this tutorial, we directly invoked pre-trained ONNX models in rekuiper using the precompiled ONNX plugin, simplifying the inference steps without writing code.
+By supporting ONNX, we can easily implement various model inferences in rekuiper, including Pytorch and TensorFlow models.

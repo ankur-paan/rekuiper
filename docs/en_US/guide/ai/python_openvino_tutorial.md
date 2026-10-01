@@ -15,7 +15,7 @@ A complete plugin package, including full source code, can be downloaded from [e
 
 Before starting the tutorial, please prepare the following products or environments.
 
-1. Install the Python 3.x environment. And set the `pythonBin` under the portable configuration of [eKuiper configuration file](../../configuration/global_configurations.md#portable-plugin-configurations) to match your Python command (e.g., 'python3' if applicable).
+1. Install the Python 3.x environment. And set the `pythonBin` under the portable configuration of [rekuiper configuration file](../../configuration/global_configurations.md#portable-plugin-configurations) to match your Python command (e.g., 'python3' if applicable).
 2. Install the opencv-python, numpy and openvino packages via `pip install opencv-python==4.7.0.* openvino==2023.0.0 numpy==1.24.3`.
 
 For Docker users:
@@ -26,7 +26,7 @@ earlier, either by extending the Dockerfile or running the command inside the Do
 
 ## Develop the Plugin
 
-To integrate eKuiper with OpenVINO, we will develop a custom eKuiper function plugin to use with eKuiper rules. This plugin will include an inference function that takes base64 encoded image data as input and outputs a JSON dictionary. The output dictionary will contain information such as the number of segmented defects, processed image data, and the cost of the inference process.
+To integrate eKuiper with OpenVINO, we will develop a custom eKuiper function plugin to use with rekuiper rules. This plugin will include an inference function that takes base64 encoded image data as input and outputs a JSON dictionary. The output dictionary will contain information such as the number of segmented defects, processed image data, and the cost of the inference process.
 
 To develop the function plugin, we need to：
 
@@ -97,7 +97,7 @@ def inference(file_bytes):
     return result
 ```
 
-The above code is only related to the business logic and can be tested without calling eKuiper's SDK. We just need to make sure that the input and output is of a type that can be converted to JSON format. For example, if the return value is a numpy array, it needs to be converted to a list type first. Developers can add main functions or unit tests to their business logic file or to another file for testing. For example, the following main function can be used to test the above business logic.
+The above code is only related to the business logic and can be tested without calling rekuiper's SDK. We just need to make sure that the input and output is of a type that can be converted to JSON format. For example, if the return value is a numpy array, it needs to be converted to a list type first. Developers can add main functions or unit tests to their business logic file or to another file for testing. For example, the following main function can be used to test the above business logic.
 
 Ensure the `model.xml` and `model.bin` files are in the `models` directory.
 
@@ -117,7 +117,7 @@ This file uses the `test.jpg` image file as input, calls the inference function 
 
 Similar to native plugins, Python plugins need to implement the corresponding interfaces, including the Source, Sink, and Function interfaces. The [Interface definition](../../extension/portable/python_sdk.md#development) for Python plugins is similar to the native plugins.
 
-Create the `inference.py` function to encapsulate the previously implemented functionalities. Import the Function class from eKuiper's plugin SDK and create the corresponding implementation class. The `validate` function is used to validate the parameters; `is_aggregate` is to define whether the function is an aggregate function. The core implementations are in the `exec` function. Here, we take the data in the eKuiper stream as an argument, call the previously implemented logic, and return the result to eKuiper.
+Create the `inference.py` function to encapsulate the previously implemented functionalities. Import the Function class from rekuiper's plugin SDK and create the corresponding implementation class. The `validate` function is used to validate the parameters; `is_aggregate` is to define whether the function is an aggregate function. The core implementations are in the `exec` function. Here, we take the data in the rekuiper stream as an argument, call the previously implemented logic, and return the result to rekuiper.
 
 ```python
 from typing import List, Any
@@ -151,7 +151,7 @@ Once the code is implemented, we also need to add a description file for each fu
 
 At this point, we have completed the development of the main functionality, and next we need to package these files into a plugin format:
 
-1. **Managing Plugin Dependencies**: If the plugin has additional dependencies, you need to create the dependency installation script `install.sh`. When the plugin is installed, eKuiper will search for this script within the plugin package and executes it if found. In this case, we create a `requirements.txt` file listing all the dependency packages. The installation of the dependencies is done in `install.sh` by calling `pip install -r $cur/requirements.txt`. For other plugins, you can reuse this script to update `requirements.txt` if you have no special requirements.
+1. **Managing Plugin Dependencies**: If the plugin has additional dependencies, you need to create the dependency installation script `install.sh`. When the plugin is installed, rekuiper will search for this script within the plugin package and executes it if found. In this case, we create a `requirements.txt` file listing all the dependency packages. The installation of the dependencies is done in `install.sh` by calling `pip install -r $cur/requirements.txt`. For other plugins, you can reuse this script to update `requirements.txt` if you have no special requirements.
 2. **Create a Python Entry File**: Because multiple extensions can be implemented in a single plugin, you need an entry file that defines the implementation classes for each extension. The entry file is a main function, which is the entry point for the plugin runtime. It calls the methods in the SDK to define the plugin, including the plugin name, and a list of keys for the implemented source, sink, and function. Here only a function plugin named `inference` is implemented, with `inferenceIns` as its corresponding implementation method. The Python plug-in process operates independently from the eKuiper main process.
 
     ```python
@@ -195,7 +195,7 @@ At this point we have completed the development of the plugin, next we just need
 
 ## Install the Plugin
 
-The same as installing native plugins, the Python plugins can be installed with REST API. To use the REST API, upload the zip file packaged above to the machine where eKuiper is located. Then use the following API to install it:
+The same as installing native plugins, the Python plugins can be installed with REST API. To use the REST API, upload the zip file packaged above to the machine where rekuiper is located. Then use the following API to install it:
 
 ```text
 ### Install pyai plugin
@@ -213,7 +213,7 @@ After installing the plugin, it can be incorporated into our rule. We'll create 
 
 ### Define the Stream
 
-Define the stream by eKuiper rest API. We create a stream named openvino_demo and the topic is openvino_demo.
+Define the stream by rekuiper rest API. We create a stream named openvino_demo and the topic is openvino_demo.
 
 ```shell
 POST http://{{host}}/streams
@@ -224,7 +224,7 @@ Content-Type: application/json
 
 ### Define the Rule
 
-Define the rule by eKuiper rest API. This rule will read base64 encoded images from the `openvino_demo` stream and apply the custom function `inference` to it.
+Define the rule by rekuiper rest API. This rule will read base64 encoded images from the `openvino_demo` stream and apply the custom function `inference` to it.
 If the number of segmented defects is non-zero, it will dispatch the base64 encoded original and processed images to the `ekuiper/defect` topic.
 
 ```shell
