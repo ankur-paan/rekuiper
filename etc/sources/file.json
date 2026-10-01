@@ -2,18 +2,18 @@
   "about": {
     "trial": true,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "helpUrl": {
-      "en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/file.html",
-      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/file.html"
+      "en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/guide/sources/builtin/file.html",
+      "zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/guide/sources/builtin/file.html"
     },
     "description": {
-      "en_US": "Monitor file system and load the content into the eKuiper processing pipeline.",
-      "zh_CN": "监控文件系统，读取文件内容，并且将数据放入 eKuiper 数据处理流水线中。"
+      "en_US": "Monitor file system and load the content into the rekuiper processing pipeline.",
+      "zh_CN": "监控文件系统，读取文件内容，并且将数据放入 rekuiper 数据处理流水线中。"
     }
   },
   "libs": [],
@@ -56,7 +56,7 @@
         "control": "text",
         "type": "string",
         "hint": {
-          "en_US": "The directory of the file relative to eKuiper root or an absolute path. Do not include the file name here. The file name should be defined in the stream data source.",
+          "en_US": "The directory of the file relative to rekuiper root or an absolute path. Do not include the file name here. The file name should be defined in the stream data source.",
           "zh_CN": "指定文件的目录，可以是软件根目录的相对路径，或绝对路径。请勿包含文件名，文件名应该在数据源中定义。"
         },
         "label": {

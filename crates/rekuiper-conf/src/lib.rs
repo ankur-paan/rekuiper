@@ -120,6 +120,8 @@ pub struct PathConfig {
     pub log_dir: PathBuf,
 }
 
+pub type RekuiperConfig = KuiperConfig;
+
 impl PathConfig {
     pub fn new(etc_path: Option<&str>, data_path: Option<&str>, log_path: Option<&str>) -> Self {
         let etc_dir = etc_path
@@ -140,16 +142,22 @@ impl PathConfig {
     }
 
     pub fn load_config(&self) -> Result<KuiperConfig> {
-        let conf_file = self.etc_dir.join("kuiper.yaml");
-        if !conf_file.exists() {
+        let rekuiper_file = self.etc_dir.join("rekuiper.yaml");
+        let kuiper_file = self.etc_dir.join("kuiper.yaml");
+        let conf_file = if rekuiper_file.exists() {
+            rekuiper_file
+        } else if kuiper_file.exists() {
+            kuiper_file
+        } else {
             tracing::warn!(
-                "Configuration file {:?} not found, using defaults",
-                conf_file
+                "Configuration file ({:?} or {:?}) not found, using defaults",
+                rekuiper_file,
+                kuiper_file
             );
             let mut config = KuiperConfig::default();
             apply_env_overrides(&mut config);
             return Ok(config);
-        }
+        };
 
         let content = std::fs::read_to_string(&conf_file)
             .with_context(|| format!("Failed to read configuration file: {:?}", conf_file))?;
@@ -221,13 +229,18 @@ fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
     }
 }
 
-/// Override configuration from `KUIPER__<SECTION>__<KEY>` environment
-/// variables (container deployments), accepting both `RESTIP`-style and
-/// `REST_IP`-style spellings. Unknown sections and keys are ignored, and
-/// unparseable numbers/bools leave the current value untouched.
+/// Override configuration from `REKUIPER__<SECTION>__<KEY>` or
+/// `KUIPER__<SECTION>__<KEY>` environment variables (container deployments),
+/// accepting both `RESTIP`-style and `REST_IP`-style spellings.
+/// Unknown sections and keys are ignored, and unparseable numbers/bools leave
+/// the current value untouched.
 pub fn apply_env_overrides(config: &mut KuiperConfig) {
     for (key, val) in std::env::vars() {
-        let Some(rest) = key.strip_prefix("KUIPER__") else {
+        let rest = if let Some(r) = key.strip_prefix("REKUIPER__") {
+            r
+        } else if let Some(r) = key.strip_prefix("KUIPER__") {
+            r
+        } else {
             continue;
         };
         let mut parts = rest.split("__");
@@ -269,5 +282,17 @@ mod tests {
         std::env::remove_var("KUIPER__BASIC__REST_PORT");
         std::env::remove_var("KUIPER__BASIC__PORT");
         std::env::remove_var("KUIPER__BASIC__DEBUG");
+    }
+
+    #[test]
+    fn rekuiper_env_overrides_take_effect() {
+        std::env::set_var("REKUIPER__BASIC__REST_PORT", "19082");
+        std::env::set_var("REKUIPER__BASIC__LOGLEVEL", "warn");
+        let mut config = KuiperConfig::default();
+        apply_env_overrides(&mut config);
+        assert_eq!(config.basic.rest_port, 19082);
+        assert_eq!(config.basic.log_level, "warn");
+        std::env::remove_var("REKUIPER__BASIC__REST_PORT");
+        std::env::remove_var("REKUIPER__BASIC__LOGLEVEL");
     }
 }

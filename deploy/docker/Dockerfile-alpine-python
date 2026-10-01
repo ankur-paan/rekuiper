@@ -24,7 +24,7 @@ RUN make build_with_edgex
 FROM python:3.12-alpine
 
 # Set environment vars
-ENV MAINTAINER="emqx.io" \
+ENV MAINTAINER="measure@i-dacs.com" \
     KUIPER_HOME="/kuiper" \
     KUIPER__BASIC__CONSOLELOG=true
 

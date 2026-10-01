@@ -4,12 +4,12 @@
   "x-source-tag": "https://github.com/lf-edge/ekuiper/tree/v2.4.1",
   "x-source-commit": "bf8c1258b2a80e41e575d674346636c9bb687d33",
   "info": {
-    "title": "LF Edge eKuiper REST Management API",
-    "description": "Authoritative OpenAPI contract for the management REST routes registered by LF Edge eKuiper v2.4.1. Optional components depend on build tags; JWT authentication, when enabled, expects a raw RS256 token in the Authorization header.",
-    "version": "2.4.1",
+    "title": "rekuiper REST Management API",
+    "description": "Authoritative OpenAPI contract for the management REST routes registered by rekuiper (100% wire-compatible with LF Edge eKuiper v2.4.1). Optional components depend on build tags; JWT authentication, when enabled, expects a raw RS256 token in the Authorization header.",
+    "version": "0.504.0",
     "contact": {
-      "name": "LF Edge eKuiper",
-      "url": "https://ekuiper.org"
+      "name": "I-Dacs Labs",
+      "url": "https://i-dacs.com"
     },
     "license": {
       "name": "Apache 2.0",
@@ -17,13 +17,13 @@
     }
   },
   "externalDocs": {
-    "description": "Tagged eKuiper v2.4.1 REST API documentation",
-    "url": "https://github.com/lf-edge/ekuiper/tree/v2.4.1/docs/en_US/api/restapi"
+    "description": "Tagged rekuiper REST API documentation",
+    "url": "https://github.com/ankur-paan/rekuiper/tree/main/docs/en_US/api/restapi"
   },
   "servers": [
     {
       "url": "http://localhost:9081",
-      "description": "Default eKuiper REST listener"
+      "description": "Default rekuiper REST listener"
     }
   ],
   "tags": [

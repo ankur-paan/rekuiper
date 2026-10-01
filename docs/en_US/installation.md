@@ -28,7 +28,7 @@ docker run -d \
   -p 9081:9081 \
   -p 20498:20498 \
   -p 20499:20499 \
-  ankurkrp/rekuiper:0.503-beta
+  ankurkrp/rekuiper:0.504-beta
 ```
 
 ### Production Run with Persistent Storage
@@ -47,7 +47,7 @@ docker run -d \
   -v /var/log/rekuiper:/kuiper/log \
   -e KUIPER__BASIC__PROMETHEUS="true" \
   -e LOG_LEVEL="info" \
-  ankurkrp/rekuiper:0.503-beta
+  ankurkrp/rekuiper:0.504-beta
 ```
 
 Verify service availability:
@@ -70,7 +70,7 @@ version: '3.8'
 
 services:
   rekuiper:
-    image: ankurkrp/rekuiper:0.503-beta
+    image: ankurkrp/rekuiper:0.504-beta
     container_name: rekuiper
     restart: unless-stopped
     ports:
@@ -144,8 +144,8 @@ Prebuilt binaries are published for every release on [GitHub Releases](https://g
 
 ```shell
 # Example for Linux x86_64 (replace with desired release tag)
-curl -LO https://github.com/ankur-paan/rekuiper/releases/download/v0.503-beta/kuiperd-x86_64-unknown-linux-musl.tar.gz
-tar -xzf kuiperd-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/ankur-paan/rekuiper/releases/download/v0.504-beta/rekuiperd-x86_64-unknown-linux-musl.tar.gz
+tar -xzf rekuiperd-x86_64-unknown-linux-musl.tar.gz
 cd rekuiper
 
 # Start the daemon

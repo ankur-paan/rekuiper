@@ -1,5 +1,5 @@
-kuiper (<VERSION>) unstable; urgency=medium
+rekuiper (<VERSION>) unstable; urgency=medium
 
-  * See github commit history: https://github.com/lf-edge/ekuiper
+  * See github commit history: https://github.com/ankur-paan/rekuiper
 
- -- kuiper <contact@emqx.io>  <DATETIME>
+ -- rekuiper <measure@i-dacs.com>  <DATETIME>

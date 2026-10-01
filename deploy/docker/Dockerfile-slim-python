@@ -53,7 +53,7 @@ WORKDIR /kuiper
 RUN rm -rf /sdk/python
 COPY ./deploy/docker/docker-entrypoint.sh /usr/bin/docker-entrypoint.sh
 
-ENV MAINTAINER="emqx.io"
+ENV MAINTAINER="measure@i-dacs.com"
 ENV KUIPER_HOME="/kuiper"
 ENV KUIPER__BASIC__CONSOLELOG=true
 

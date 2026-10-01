@@ -7,7 +7,7 @@
       "children": [
         {
           "title": "Architecture",
-          "path": "concepts/ekuiper"
+          "path": "concepts/rekuiper"
         },
         {
           "title": "Stream Processing",
@@ -79,7 +79,7 @@
           "path": "getting_started/quick_start_docker"
         },
         {
-          "title": "Run eKuiper with EdgeX Foundry",
+          "title": "Run rekuiper with EdgeX Foundry",
           "path": "edgex/edgex_rule_engine_tutorial"
         },
         {

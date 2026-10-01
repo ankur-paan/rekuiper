@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
 > No latency-histogram p99 is claimed.
 
+## [0.504.0-beta] - 2026-10-01
+
+### Added
+- **Native Dual-Binary Parity**: Introduced standalone binary entrypoints `rekuiperd` (server daemon) and `rekuiper` (CLI client) alongside `kuiperd` and `kuiper` drop-in aliases.
+- **Dual Configuration Resolution**: Added prioritized loading of `etc/rekuiper.yaml` with seamless fallback to `etc/kuiper.yaml`.
+- **Environment Variable Overrides**: Supported `REKUIPER__<SECTION>__<KEY>` alongside legacy `KUIPER__<SECTION>__<KEY>` environment variable hierarchies.
+
+### Changed
+- **Metadata Sanitization**: Replaced legacy EMQ author and `ekuiper.org` documentation metadata across all 30 connector/operator/function configuration definitions in `etc/` with I-Dacs Labs and the `rekuiper` GitHub repository.
+- **Docker & Packaging**: Updated Dockerfiles, debian packaging metadata, and entrypoints to native `rekuiperd`/`rekuiper` with `measure@i-dacs.com` maintainer.
+- **Documentation Overhaul**: Renamed core architecture to `concepts/rekuiper.md`, sanitized directory and tutorial path placeholders, and verified VitePress static build.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.504-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.504-beta`.
+
 ---
 
 ## [0.503.0-beta] - 2026-10-01

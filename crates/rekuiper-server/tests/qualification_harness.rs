@@ -354,6 +354,12 @@ fn find_kuiperd_bin() -> PathBuf {
             return pb;
         }
     }
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_rekuiperd") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return pb;
+        }
+    }
     if let Ok(p) = std::env::var("KUIPERD_BIN") {
         let pb = PathBuf::from(p);
         if pb.exists() {
@@ -373,6 +379,10 @@ fn find_kuiperd_bin() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let candidates = [
+        workspace_root.join("target/debug/rekuiperd.exe"),
+        workspace_root.join("target/debug/rekuiperd"),
+        workspace_root.join("target/release/rekuiperd.exe"),
+        workspace_root.join("target/release/rekuiperd"),
         workspace_root.join("target/debug/kuiperd.exe"),
         workspace_root.join("target/debug/kuiperd"),
         workspace_root.join("target/release/kuiperd.exe"),

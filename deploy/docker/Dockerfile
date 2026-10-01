@@ -39,7 +39,9 @@ RUN apk add --no-cache ca-certificates libgcc libssl3 sqlite-libs tzdata && \
 WORKDIR ${KUIPER_HOME}
 
 # Copy compiled binaries from builder stage
+COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/rekuiperd /kuiper/bin/rekuiperd
 COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiperd /kuiper/bin/kuiperd
+COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/rekuiper /kuiper/bin/rekuiper
 COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiper /kuiper/bin/kuiper
 COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/rekuiper-mcp /kuiper/bin/rekuiper-mcp
 
@@ -55,5 +57,5 @@ EXPOSE 9081 20498 20499
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:9081/ || exit 1
 
-ENTRYPOINT ["/kuiper/bin/kuiperd"]
+ENTRYPOINT ["/kuiper/bin/rekuiperd"]
 CMD ["--etc", "/kuiper/etc"]

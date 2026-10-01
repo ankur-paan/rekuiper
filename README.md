@@ -1,9 +1,9 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.503--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.504--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.503--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.504--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine for edge devices, written in Rust. It implements
@@ -71,7 +71,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.503-beta
+  ankurkrp/rekuiper:0.504-beta
 ```
 
 To run rekuiper together with Mosquitto and Redis:
@@ -89,7 +89,7 @@ Deploy rekuiper to your Kubernetes cluster using the bundled Helm chart:
 ```bash
 helm install rekuiper deploy/chart/ekuiper \
   --set image.repository=ankurkrp/rekuiper \
-  --set image.tag=0.503-beta
+  --set image.tag=0.504-beta
 ```
 
 See [deploy/chart/ekuiper](deploy/chart/ekuiper/README.md) for configurable values and persistence settings.
@@ -285,7 +285,8 @@ performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHM
 
 ## Release history
 
-- **0.503-beta** (current): 100% SQL function parity across all 162 functions in the eKuiper catalog with live MQTT streaming end-to-end verification; high-performance data transformation extensions (`compress`, `decompress` supporting zlib, gzip, flate, zstd with base64 serialization); flexible timezone conversions (`convert_tz`); sub-millisecond duration date arithmetic (`date_calc`); dynamic multi-column projection (`changed_cols`); multi-row expansion (`unnest`, `extract`); running stream accumulator collections (`acc_collect`); and complete object/map manipulation primitives (`object`, `zip`, `items`).
+- **0.504-beta** (current): full native dual binary entrypoints (`rekuiperd` daemon and `rekuiper` CLI) with drop-in kuiper parity; native `etc/rekuiper.yaml` config and dual `REKUIPER__` / `KUIPER__` environment variable overrides; complete repository and metadata sanitization to I-Dacs Labs; updated and verified documentation site with VitePress.
+- **0.503-beta**: 100% SQL function parity across all 162 functions in the eKuiper catalog with live MQTT streaming end-to-end verification; high-performance data transformation extensions (`compress`, `decompress` supporting zlib, gzip, flate, zstd with base64 serialization); flexible timezone conversions (`convert_tz`); sub-millisecond duration date arithmetic (`date_calc`); dynamic multi-column projection (`changed_cols`); multi-row expansion (`unnest`, `extract`); running stream accumulator collections (`acc_collect`); and complete object/map manipulation primitives (`object`, `zip`, `items`).
 - **0.502-beta**: native Rust Model Context Protocol (MCP) server (`rekuiper-mcp`) with 42 tools, 11 resources, and 5 prompts; offline streaming SQL simulation with `CREATE TABLE` and `CREATE STREAM` DDL validation; live runtime rule tracing controls (`start_rule_trace`, `stop_rule_trace`); 99.98% differential mathematical formula qualification; process-level reliability qualification harness with strictly bounded in-flight crash tracking, and unified multi-platform Docker container images.
 - **0.501-beta**: transactional storage atomicity (`KvOperation`, `apply_transaction`); strict configuration key consistency and 500 error propagation; IIoT MQTT ladder verification with 0.00% packet loss and drop-in ingestion compatibility.
 - **0.500-beta**: in-memory Redis-style catalog architecture, zero-disk hot path for

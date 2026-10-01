@@ -1,3 +1,19 @@
+# Release Notes - rekuiper v0.504-beta
+
+`rekuiper` v0.504-beta delivers native dual-binary target parity (`rekuiperd` engine daemon and `rekuiper` CLI tool), prioritized `etc/rekuiper.yaml` configuration and `REKUIPER__` environment variable loading, complete metadata and vendor sanitization, and full documentation site rebuild.
+
+Key highlights:
+- **Native Dual-Binary Target Parity**: Dedicated `rekuiperd` and `rekuiper` binary targets built alongside `kuiperd` and `kuiper` drop-in aliases with unified CLI parser metadata.
+- **Prioritized Configuration & Env Overrides**: Supports native `etc/rekuiper.yaml` with automatic fallback to `etc/kuiper.yaml`, plus full support for `REKUIPER__<SECTION>__<KEY>` alongside `KUIPER__<SECTION>__<KEY>`.
+- **Connector & Metadata Sanitization**: Cleaned all 30 connector, sink, function, and operator schemas in `etc/` to reference I-Dacs Labs author metadata and the active GitHub repository.
+- **Documentation Overhaul & VitePress Validation**: Restored and validated the complete VitePress documentation site with all pages and navigation links rendering with zero build errors.
+- **Docker & Packaging Parity**: Updated multi-stage Dockerfiles and Debian package controls to default to `rekuiperd` and `rekuiper`.
+
+- Docker image: `ankurkrp/rekuiper:0.504-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.504-beta`)
+
+---
+
 # Release Notes - rekuiper v0.503-beta
 
 `rekuiper` v0.503-beta achieves **100% SQL function parity (162 / 162 functions verified)** across the entire eKuiper SQL catalog with exhaustive live MQTT stream assertions, complete data transformation capabilities, sub-millisecond date arithmetic, timezone conversions, accumulator streaming aggregates, and multi-row/multi-column projections.

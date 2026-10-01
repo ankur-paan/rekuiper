@@ -3,10 +3,10 @@
   "about": {
     "trial": false,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "helpUrl": {
       "en_US": "https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/sqls/query_language_elements.md",

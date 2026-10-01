@@ -1,12 +1,12 @@
-Source: kuiper
+Source: rekuiper
 Section: unknown
 Priority: optional
-Maintainer: kuiper <contact@emqx.io>
+Maintainer: rekuiper <measure@i-dacs.com>
 Build-Depends: debhelper (>=9)
 Standards-Version: 3.9.6
-Homepage: https://www.emqx.io
+Homepage: https://i-dacs.com
 
-Package: kuiper
+Package: rekuiper
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: A lightweight IoT edge analytics software
+Description: A high-performance streaming SQL engine in Rust (kuiper drop-in)

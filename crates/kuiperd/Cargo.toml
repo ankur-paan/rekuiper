@@ -10,9 +10,17 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lib]
+name = "kuiperd"
+path = "src/lib.rs"
+
 [[bin]]
 name = "kuiperd"
 path = "src/main.rs"
+
+[[bin]]
+name = "rekuiperd"
+path = "src/bin/rekuiperd.rs"
 
 [dependencies]
 tokio = { workspace = true }

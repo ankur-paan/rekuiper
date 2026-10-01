@@ -2,10 +2,10 @@
   "about": {
     "trial": false,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "description": {
       "en_US": "The action is used for receive message through websocket connection.",
@@ -37,8 +37,8 @@
       "connection_related": true,
       "type": "string",
       "hint": {
-        "en_US": "websocket server address. If this address is defined, then eKuiper will apply for a websocket request to this address. If this address is not defined, then eKuiper will act as the websocket server itself.",
-        "zh_CN": "websocket server 端地址，如果定义了该地址，那么 eKuiper 将会向该地址申请 websocket 请求，如果没有定义该地址，那么 eKuiper 将会自己作为 websocket server 端"
+        "en_US": "websocket server address. If this address is defined, then rekuiper will apply for a websocket request to this address. If this address is not defined, then rekuiper will act as the websocket server itself.",
+        "zh_CN": "websocket server 端地址，如果定义了该地址，那么 rekuiper 将会向该地址申请 websocket 请求，如果没有定义该地址，那么 rekuiper 将会自己作为 websocket server 端"
       },
       "label": {
         "en_US": "websocket server address",

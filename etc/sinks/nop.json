@@ -2,14 +2,14 @@
   "about": {
     "trial": false,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "helpUrl": {
-      "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/builtin/nop.html",
-      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sinks/builtin/nop.html"
+      "en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/guide/sinks/builtin/nop.html",
+      "zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/guide/sinks/builtin/nop.html"
     },
     "description": {
       "en_US": "The action is an Nop sink, the result sent to this sink will be ignored. ",

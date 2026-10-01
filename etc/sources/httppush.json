@@ -3,18 +3,18 @@
 	"about": {
 		"trial": false,
 		"author": {
-			"name": "EMQ",
-			"email": "contact@emqx.io",
-			"company": "EMQ Technologies Co., Ltd",
-			"website": "https://www.emqx.io"
+			"name": "I-Dacs Labs",
+			"email": "measure@i-dacs.com",
+			"company": "I-Dacs Labs",
+			"website": "https://i-dacs.com"
 		},
 		"helpUrl": {
-          "en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/http_push.html",
-          "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/http_push.html"
+          "en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/guide/sources/builtin/http_push.html",
+          "zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/guide/sources/builtin/http_push.html"
         },
 		"description": {
-			"en_US": "eKuiper provides built-in support for HTTP server to receive the stream data pushed by HTTP protocol.",
-			"zh_CN": "eKuiper 提供了内置的 HTTP 服务支持，用于接收 HTTP 协议推送的流数据。"
+			"en_US": "rekuiper provides built-in support for HTTP server to receive the stream data pushed by HTTP protocol.",
+			"zh_CN": "rekuiper 提供了内置的 HTTP 服务支持，用于接收 HTTP 协议推送的流数据。"
 		}
 	},
 	"dataSource": {

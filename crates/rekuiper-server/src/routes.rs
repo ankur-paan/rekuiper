@@ -713,6 +713,11 @@ fn load_auth_public_key() -> Option<Vec<u8>> {
         return cached.clone();
     }
     let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("REKUIPER_AUTH_PUBLIC_KEY_FILE") {
+        if !path.trim().is_empty() {
+            candidates.push(path);
+        }
+    }
     if let Ok(path) = std::env::var("KUIPER_AUTH_PUBLIC_KEY_FILE") {
         if !path.trim().is_empty() {
             candidates.push(path);

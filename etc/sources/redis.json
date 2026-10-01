@@ -2,14 +2,14 @@
   "about": {
     "trial": true,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "helpUrl": {
-      "en_US": "https://ekuiper.org/docs/en/latest/guide/sources/builtin/redis.html",
-      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sources/builtin/redis.html"
+      "en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/guide/sources/builtin/redis.html",
+      "zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/guide/sources/builtin/redis.html"
     },
     "description": {
       "en_US": "Read message from Redis",

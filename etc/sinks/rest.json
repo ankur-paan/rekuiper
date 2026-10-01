@@ -2,14 +2,14 @@
   "about": {
     "trial": false,
     "author": {
-      "name": "EMQ",
-      "email": "contact@emqx.io",
-      "company": "EMQ Technologies Co., Ltd",
-      "website": "https://www.emqx.io"
+      "name": "I-Dacs Labs",
+      "email": "measure@i-dacs.com",
+      "company": "I-Dacs Labs",
+      "website": "https://i-dacs.com"
     },
     "helpUrl": {
-      "en_US": "https://ekuiper.org/docs/en/latest/guide/sinks/builtin/rest.html",
-      "zh_CN": "https://ekuiper.org/docs/zh/latest/guide/sinks/builtin/rest.html"
+      "en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/guide/sinks/builtin/rest.html",
+      "zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/guide/sinks/builtin/rest.html"
     },
     "description": {
       "en_US": "The action is used for publish output message into a RESTful API.",
@@ -197,7 +197,7 @@
         "body"
       ],
       "hint": {
-        "en_US": "Response type, could be `code` or `body`. If it is `code`, then eKuiper will check the HTTP response code for response status. If it is `body`, then eKuiper will check the HTTP response body with JSON format and examine the value of the code field.",
+        "en_US": "Response type, could be `code` or `body`. If it is `code`, then rekuiper will check the HTTP response code for response status. If it is `body`, then rekuiper will check the HTTP response body with JSON format and examine the value of the code field.",
         "zh_CN": "响应类型,可以是 `code` 或者 `body`，如果是 `code`，会检查 HTTP 响应码来判断响应状态。如果是 `body`，会检查 HTTP 响应正文，要求其为 JSON 格式，并且检查 code 字段的值。"
       },
       "label": {

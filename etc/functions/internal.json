@@ -2,14 +2,14 @@
 	"about": {
 		"trial": false,
 		"author": {
-			"name": "EMQ",
-			"email": "contact@emqx.io",
-			"company": "EMQ Technologies Co., Ltd",
-			"website": "https://www.emqx.io"
+			"name": "I-Dacs Labs",
+			"email": "measure@i-dacs.com",
+			"company": "I-Dacs Labs",
+			"website": "https://i-dacs.com"
 		},
 		"helpUrl": {
-			"en_US": "https://ekuiper.org/docs/en/latest/sqls/built-in_functions.html",
-			"zh_CN": "https://ekuiper.org/docs/zh/latest/sqls/built-in_functions.html"
+			"en_US": "https://github.com/ankur-paan/rekuiper/blob/main/docs/en_US/sqls/built-in_functions.html",
+			"zh_CN": "https://github.com/ankur-paan/rekuiper/blob/main/docs/zh_CN/sqls/built-in_functions.html"
 		},
 		"description": {
 			"en_US": "eKuiper has many built-in functions for performing calculations on data.",

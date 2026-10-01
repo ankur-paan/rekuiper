@@ -12,13 +12,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.503.0-beta"
+version = "0.504.0-beta"
 edition = "2021"
 authors = ["I-Dacs Labs <measure@i-dacs.com>", "LF Edge eKuiper Contributors"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ankur-paan/rekuiper"
 homepage = "https://i-dacs.com"
-documentation = "https://docs.ekuiper.org"
+documentation = "https://github.com/ankur-paan/rekuiper#documentation"
 readme = "README.md"
 keywords = ["iot", "stream-processing", "edge-computing", "sql", "mqtt"]
 categories = ["embedded", "network-programming", "science"]
