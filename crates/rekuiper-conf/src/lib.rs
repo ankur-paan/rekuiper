@@ -235,7 +235,15 @@ fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
 /// Unknown sections and keys are ignored, and unparseable numbers/bools leave
 /// the current value untouched.
 pub fn apply_env_overrides(config: &mut KuiperConfig) {
-    for (key, val) in std::env::vars() {
+    apply_env_overrides_from_iter(config, std::env::vars());
+}
+
+/// Override configuration from any iterator of key-value pairs (e.g. `std::env::vars()`).
+pub fn apply_env_overrides_from_iter<I>(config: &mut KuiperConfig, vars: I)
+where
+    I: IntoIterator<Item = (String, String)>,
+{
+    for (key, val) in vars {
         let rest = if let Some(r) = key.strip_prefix("REKUIPER__") {
             r
         } else if let Some(r) = key.strip_prefix("KUIPER__") {
@@ -268,31 +276,29 @@ mod tests {
 
     #[test]
     fn env_overrides_basic_network_settings() {
-        std::env::set_var("KUIPER__BASIC__RESTIP", "0.0.0.0");
-        std::env::set_var("KUIPER__BASIC__REST_PORT", "19081");
-        std::env::set_var("KUIPER__BASIC__PORT", "12001");
-        std::env::set_var("KUIPER__BASIC__DEBUG", "true");
+        let vars = vec![
+            ("KUIPER__BASIC__RESTIP".to_string(), "0.0.0.0".to_string()),
+            ("KUIPER__BASIC__REST_PORT".to_string(), "19081".to_string()),
+            ("KUIPER__BASIC__PORT".to_string(), "12001".to_string()),
+            ("KUIPER__BASIC__DEBUG".to_string(), "true".to_string()),
+        ];
         let mut config = KuiperConfig::default();
-        apply_env_overrides(&mut config);
+        apply_env_overrides_from_iter(&mut config, vars);
         assert_eq!(config.basic.rest_ip, "0.0.0.0");
         assert_eq!(config.basic.rest_port, 19081);
         assert_eq!(config.basic.port, 12001);
         assert!(config.basic.debug);
-        std::env::remove_var("KUIPER__BASIC__RESTIP");
-        std::env::remove_var("KUIPER__BASIC__REST_PORT");
-        std::env::remove_var("KUIPER__BASIC__PORT");
-        std::env::remove_var("KUIPER__BASIC__DEBUG");
     }
 
     #[test]
     fn rekuiper_env_overrides_take_effect() {
-        std::env::set_var("REKUIPER__BASIC__REST_PORT", "19082");
-        std::env::set_var("REKUIPER__BASIC__LOGLEVEL", "warn");
+        let vars = vec![
+            ("REKUIPER__BASIC__REST_PORT".to_string(), "19082".to_string()),
+            ("REKUIPER__BASIC__LOGLEVEL".to_string(), "warn".to_string()),
+        ];
         let mut config = KuiperConfig::default();
-        apply_env_overrides(&mut config);
+        apply_env_overrides_from_iter(&mut config, vars);
         assert_eq!(config.basic.rest_port, 19082);
         assert_eq!(config.basic.log_level, "warn");
-        std::env::remove_var("REKUIPER__BASIC__REST_PORT");
-        std::env::remove_var("REKUIPER__BASIC__LOGLEVEL");
     }
 }
