@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Packaging
 - Bundled `rekuiper-mcp` binary in official Docker container image (`ankurkrp/rekuiper:0.502-beta`).
+- Fully aligned and exposed network ports (9081 for REST/CLI, 20499 for Prometheus, 20498 for RPC) across Dockerfile, Docker Compose, and Kubernetes Helm service manifests.
 - Updated Helm chart `appVersion` to `0.502-beta`.
 
 ## [0.501.0-beta] - 2026-09-25

@@ -92,6 +92,14 @@ helm install rekuiper deploy/chart/ekuiper \
 
 See [deploy/chart/ekuiper](deploy/chart/ekuiper/README.md) for configurable values and persistence settings.
 
+#### Network Ports
+
+| Port | Protocol | Purpose | Default Bind |
+| :--- | :--- | :--- | :--- |
+| `9081` | HTTP / TCP | REST API, OpenAPI docs, stream/rule management, and `kuiper` CLI | `0.0.0.0:9081` |
+| `20499` | HTTP / TCP | Prometheus metrics (`/metrics`) when `KUIPER__BASIC__PROMETHEUS=true` | `0.0.0.0:20499` |
+| `20498` | TCP | Legacy eKuiper RPC protocol parity | `127.0.0.1:20498` |
+
 [![Docker Pull History](docs/docker-pulls.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 ### Prebuilt binaries

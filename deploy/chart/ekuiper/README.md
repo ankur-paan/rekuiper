@@ -44,12 +44,14 @@ helm uninstall rekuiper
 | persistence.existingClaim | string | `""` | Existing PersistentVolumeClaims The value is evaluated as a template So, for example, the name can depend on .Release or .Chart |
 | resources | object | `{}` |  |
 | service.annotations | object | `{}` | Provide any additional annotations which may be required. Evaluated as a template |
-| service.nodePorts | object | `{"ekuiper":null,"restapi":null}` | Specify the nodePort(s) value for the LoadBalancer and NodePort service types. ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport |
-| service.ports | object | `{"ekuiper":{"name":"ekuiper","port":20498},"restapi":{"name":"restapi","port":9081}}` | Service ports |
+| service.nodePorts | object | `{"ekuiper":null,"restapi":null,"prometheus":null}` | Specify the nodePort(s) value for the LoadBalancer and NodePort service types. ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport |
+| service.ports | object | `{"ekuiper":{"name":"ekuiper","port":20498},"restapi":{"name":"restapi","port":9081},"prometheus":{"name":"prometheus","port":20499}}` | Service ports |
 | service.ports.ekuiper.name | string | `"ekuiper"` | eKuiper port name |
 | service.ports.ekuiper.port | int | `20498` | eKuiper port |
 | service.ports.restapi.name | string | `"restapi"` | eKuiper restapi port name |
 | service.ports.restapi.port | int | `9081` | eKuiper restapi port |
+| service.ports.prometheus.name | string | `"prometheus"` | Prometheus metrics port name |
+| service.ports.prometheus.port | int | `20499` | Prometheus metrics port |
 | service.type | string | `"ClusterIP"` | service type |
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |

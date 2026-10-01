@@ -9,6 +9,7 @@ Key highlights:
 - **99.98% Differential Mathematical Qualification**: Verified mathematical and streaming SQL operator equivalence across trigonometric, logarithmic, aggregation, and window functions against Go-based eKuiper 2.4.1.
 - **Hardened Process-Level Qualification**: Strictly bounded in-flight transaction tracking during abrupt process termination and automated recovery validation.
 - **Unified Multi-Platform Docker Packaging**: Container image includes `rekuiper-mcp` alongside `kuiperd` and `kuiper` CLI with multi-arch support.
+- **Complete Port & Service Alignment**: Fully declares operational ports `9081` (REST API & CLI), `20499` (Prometheus metrics), and `20498` (RPC parity) across Dockerfile `EXPOSE`, Docker Compose, and Kubernetes Helm service manifests (`svc.yaml`, `statefulset.yaml`).
 
 - MCP Documentation: [`crates/rekuiper-mcp/README.md`](crates/rekuiper-mcp/README.md)
 - Qualification Report: [`test/e2e_diff/QUALIFICATION_REPORT.md`](test/e2e_diff/QUALIFICATION_REPORT.md)
