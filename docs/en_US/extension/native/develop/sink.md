@@ -1,5 +1,8 @@
 # Sink Extension
 
+> [!NOTE]
+> Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
+
 Sink feed data from eKuiper into external systems. eKuiper has built-in sink support
 for [MQTT broker](../../../guide/sinks/builtin/mqtt.md) and [log sink](../../../guide/sinks/builtin/log.md) etc. There
 are still needs to publish data to various external systems include messaging systems and database etc. Sink extension
@@ -15,7 +18,7 @@ implement [api.Sink](https://github.com/lf-edge/ekuiper/blob/master/contract/api
 golang plugin.
 
 Before starting the development, you
-must [setup the environment for golang plugin](./overview.md#setup-the-plugin-developing-environment).
+must [setup the environment for golang plugin](../overview.md#setup-the-plugin-developing-environment).
 
 Based on whether the data processed by the Sink is binary, Sinks can be categorized into two types of interfaces:
 

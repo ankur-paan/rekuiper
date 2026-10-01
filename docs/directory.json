@@ -427,15 +427,19 @@
       "path": "usecases/overview",
       "children": [
         {
-          "title": "IIoT case",
+          "title": "Industrial IoT (IIoT)",
           "path": "usecases/iiot"
         },
         {
-          "title": "IoV case",
+          "title": "Connected Vehicles & EV Charging",
           "path": "usecases/iov"
         },
         {
-          "title": "Public data analysis",
+          "title": "ESPHome Fleet Telemetry",
+          "path": "usecases/esphome"
+        },
+        {
+          "title": "Public Data Analysis",
           "path": "usecases/public_data_analysis"
         }
       ]

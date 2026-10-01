@@ -1,5 +1,8 @@
 # Function Extension
 
+> [!NOTE]
+> Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
+
 In the eKuiper SQL syntax, [many built-in functions](../../../sqls/functions/overview.md) are provided to server for
 various reusable business logic. However, the users still likely need various reusable business logic which is not
 covered by the built ins. The function extension is presented to customize the functions.

@@ -1,5 +1,8 @@
 # Source Extension
 
+> [!NOTE]
+> Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
+
 Sources feed data into eKuiper from other systems. eKuiper has built-in source support for [MQTT broker](../../../guide/sources/builtin/mqtt.md). There are still needs to consume data from various external systems include messaging systems and data pipelines etc. Source extension is presented to meet this requirement.
 
 ***Note***: v2.0.0 has modified the source extension API, which is not fully compatible with the v1.x plugin API.
@@ -14,7 +17,7 @@ implement [api.Source](https://github.com/lf-edge/ekuiper/blob/master/contract/a
 a golang plugin.
 
 Before starting the development, you
-must [setup the environment for golang plugin](./overview.md#setup-the-plugin-developing-environment).
+must [setup the environment for golang plugin](../overview.md#setup-the-plugin-developing-environment).
 
 Based on whether the data source is pulled on a schedule and whether the data is binary, sources can be categorized into
 four types of interfaces:

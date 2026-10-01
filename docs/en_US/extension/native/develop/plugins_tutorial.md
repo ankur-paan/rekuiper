@@ -1,9 +1,7 @@
-# A lightweight loT edge stream processing - eKuiper plugin development tutorial
+# eKuiper Native Plugin Development Tutorial
 
-[LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is a lightweight loT streaming data processing software
-based on SQL. It provides a set of plugin mechanism for implementing customized source, sink and SQL function to extend
-the ability of stream processing. This tutorial gives a detailed introduction to the process of development,
-compilation, and deployment of the eKuiper plugin.
+> [!NOTE]
+> Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This tutorial is preserved for legacy eKuiper installations.
 
 ## Overview
 

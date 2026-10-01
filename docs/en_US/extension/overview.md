@@ -1,49 +1,80 @@
-# Extension
+# Extension Architecture
 
-eKuiper allows users to customize extension to support more functions. Users can write plugins for extension by native golang plugin system or by the eKuiper portable plugin system which supports more languages. They can also extend functions in SQL through configuration to call existing external REST or RPC services.
+rekuiper provides a flexible extension architecture designed for high performance, portability, and safe sandboxing on resource-constrained edge hardware.
 
-All these 3 extension methods have their own suitable scenarios. Generally, native plugin has the best performance but have the biggest complexity and the least compatibility. While portable plugin has a better balance of performance and complexity. And the external extension does not need coding but has the most performance overhead and only supports function extension. Let's look at each extension method in a nutshell and discuss when to use which one.
+---
 
-## Native Plugin Extension
+## Extension Models in rekuiper
 
-Native plugin extension leverage the native golang plugin system to dynamically load the custom extensions in runtime. Native plugin was originally supported by eKuiper. But it has a log of limitations due to the golang plugin system itself such as:
+| Mechanism | Purpose | Supported Languages | Isolation & Safety | Performance |
+| :--- | :--- | :--- | :--- | :--- |
+| **Built-in Connectors** | Core sources and sinks (Kafka, SQL, Redis, WebSocket, File, MQTT, HTTP) | Rust (compiled in) | Process internal | Highest (zero copy, zero GC) |
+| **WebAssembly (Wasm)** | Custom scalar and analytic SQL functions | Rust, C, C++, Go, Zig (compile to `.wasm`) | Sandboxed bytecode runtime | High (near-native speed) |
+| **External Services** | Direct invocation of external RPC/HTTP services in SQL | Any language (REST / gRPC) | Separate network process | Network dependent |
+| **Script Functions (UDF)** | Lightweight scalar functions defined in SQL scripts | JavaScript | In-engine interpreter | Medium (interpreted) |
+| **Model Context Protocol (MCP)** | Autonomous AI assistant control, query simulation, and validation | Native Rust daemon (`rekuiper-mcp`) | Standard JSON-RPC stdio | Real-time |
 
-- Only support on Linux, FreeBSD and MacOS and hard to work on Alpine linux.
-- A plugin is only initialized once, and cannot be closed which means the plugin cannot be unloaded and managed after installed.
-- Very harsh requirements to build and deploy which brings a lot of problems in the community. For example, the plugin must be built with the exact same go version, dependency versions etc. with the eKuiper program. Which means, the plugin will always need to be rebuilt when upgrading eKuiper main program.
+> [!IMPORTANT]
+> **Status of Go Native (`.so`) Plugins**:
+> Legacy eKuiper Go-based C-shared dynamic plugins (`.so`) are not supported in rekuiper. High-demand connectors (including Kafka, SQL, and WebSocket) are compiled directly into the rekuiper engine binary. For custom user-defined logic, use WebAssembly (Wasm) or an external HTTP/gRPC service.
 
-After installed, the native plugin is actually running like the native code and can share or transfer data in memory with the main program which will guarantee the best performance.
+---
 
-Thus, the native plugin extension fits in scenarios where the user only runs in the supported os and environment, has the ability or infrastructure to rebuild the plugin during update, do not need to unload the plugin in runtime and is only using golang.
+## 1. WebAssembly (Wasm) Functions
 
-## Portable Plugin Extension
+[WebAssembly (Wasm)](./wasm/overview.md) provides sandboxed, high-performance function extensions. You can write algorithms in Rust, C, C++, or Go and compile them into a portable `.wasm` binary:
 
-Portable plugin extension leverages a plugin system implemented by eKuiper itself based on IPC communication. Potentially, it will support all programming languages. And currently, **go** and **python** are supported. Compared to native plugins, it is portable because the plugins will run in a separate process and do not have those harsh build/deployment requirements.
+- **Safe Execution**: Sandboxed memory space prevents memory corruption or engine panics.
+- **Portability**: The same `.wasm` binary runs across x86_64, ARMv7, and AArch64 architectures without recompilation.
+- **Hot Deployment**: Install and register Wasm modules dynamically at runtime via the REST API or CLI.
 
-Portable plugin extension aims to provide the equal functionality with native plugin but support much easier build and deployment. If developers use go, it is even possible to reuse the plugin code with very small modification, and only build and deploy standalone plugins.
+```sql
+SELECT
+  deviceId,
+  custom_filter(raw_reading) AS filtered_value
+FROM
+  sensor_stream
+```
 
-Thus, portable plugin extension is a supplement of native plugin. It is suitable to code with multiple programming languages and want to build once and run against all versions.
+For complete instructions, refer to the [WebAssembly Extension Guide](./wasm/overview.md).
 
-## Script Function Extension
+---
 
-Script function extensions provide a minimalist way to extend SQL functions. It does not require tedious compilation and packaging of traditional plug-ins,not to mention the deployment management process. Users only need to provide a script text, which can be used for hot reload of functions through the API, which is very flexible. Script functions use a built-in interpreter without additional dependencies. However, due to the low performance of scripting languages, it is not recommended to use script function extensions in cases with high performance requirements. For detailed usage methods, please refer to [script functions](./script/overview.md).
+## 2. External Services (gRPC & REST)
 
-## External Function Extension
+If you already maintain an external microservice, such as a Python machine learning inference server or a proprietary protocol gateway, rekuiper can call it directly in SQL without custom plugin code:
 
-A configuration method is provided that eKuiper can use SQL to directly call external services in a functional manner, including various rpc services, http services, and so on. This method will greatly improve the ease of eKuiper extensions. External functions will be used as a supplement to the plugin system, and plugins are only recommended for high performance requirements.
+```sql
+SELECT
+  deviceId,
+  inference(image_payload)->label AS defect_class
+FROM
+  camera_stream
+```
 
-Take the getFeature function as an example, and suppose an AI service provides getFeature service based on grpc. After eKuiper is configured, you can use the method of `SELECT getFeature(self) from demo` to call the AI service without customizing the plugin.
+- **Protocols**: Supports gRPC and standard HTTP REST endpoints.
+- **Zero Firmware Changes**: Point rekuiper to the service configuration and invoke functions immediately.
 
-For detailed configuration method, please refer to [External function](external/external_func.md).
+For details, refer to the [External Services Guide](external/external_func.md).
 
-It is useful when the users already have exported services and do not want to write codes. It is a way to easily extend SQL functions in batch.
+---
 
-## Comparison
+## 3. JavaScript Script Functions (UDF)
 
-Let's do some comparisons for all these 3 methods. In the table, *dynamic reload* means if the plugin can be updated or deleted during runtime. *Rebuild for update* means if the plugin needs to be rebuilt when updating the main program. If yes, the version update will become complex. *Separate process* means if the plugin is running standalone from the main program. If yes, the plugin crash won't affect the main program. *Communication* means how to communicate between the main program and the plugin. In memory must be the most efficient method and needs to be run in the same process. IPC requires running in the same machine and has the middle performance and reliance. Web means the communication is transported through web protocol like TCP, it is possible to run in different machines.
+For quick transformations that do not warrant a separate compilation step, rekuiper supports JavaScript functions registered directly through the REST API or CLI.
 
-| Extension | Extended types         | Need to code? | Language                          | OS                    | Dynamic Reload | Rebuild for update? | Separate Process? | Communication |
-|-----------|------------------------|---------------|-----------------------------------|-----------------------|----------------|---------------------|-------------------|---------------|
-| Native    | Source, Sink, Function | Yes           | Go                                | Linux, FreeBSD, MacOs | No             | Yes                 | No                | In memory     |
-| Portable  | Source, Sink,Function  | Yes           | Go, Python and more in the future | Any                   | Yes            | No                  | Yes               | IPC           |
-| External  | Function               | No            | JSON, protobuf                    | Any                   | Yes            | No                  | Yes               | Web           |
+These functions are interpreted inside the engine and are suitable for string formatting, mathematical conversions, and lightweight payload transformations. For high-frequency calculations (exceeding 50,000 msg/s), prefer built-in SQL functions or Wasm.
+
+For details, refer to the [Script Functions Guide](script/overview.md).
+
+---
+
+## 4. Model Context Protocol (MCP)
+
+For developer productivity and automated operational pipelines, rekuiper includes a native [Model Context Protocol (MCP)](../mcp/overview.md) server (`rekuiper-mcp`).
+
+It allows AI assistants (Cursor, Claude Desktop, Antigravity) to:
+- Parse and validate streaming SQL ASTs offline without network overhead.
+- Test SQL transformations in memory against mock event payloads.
+- Enumerate, inspect, and deploy stream definitions and rule topologies.
+- Query engine metrics and trace event latency across operator nodes.
