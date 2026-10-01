@@ -1,51 +1,153 @@
-## 5 minutes quick start
+# 5-Minute Quick Start with Docker
 
-1. Pull a eKuiper Docker image from `https://hub.docker.com/r/lfedge/ekuiper/tags`. It's recommended to use `alpine` image in this tutorial (refer to [eKuiper Docker](https://hub.docker.com/r/lfedge/ekuiper) for the difference of eKuiper Docker image variants).
+This guide walks you through running **rekuiper** in Docker and deploying your first real-time streaming rule in under five minutes.
 
-2. Set eKuiper source to an MQTT server. This sample uses server locating at `tcp://broker.emqx.io:1883`. `broker.emqx.io` is a public MQTT test server hosted by [EMQ](https://www.emqx.io).
+---
 
-   ```shell
-   docker run -p 9081:9081 -d --name kuiper -e MQTT_SOURCE__DEFAULT__SERVER="tcp://broker.emqx.io:1883" lfedge/ekuiper:$tag
-   ```
+## 1. Start rekuiper
 
-3. Create a stream - the stream is your stream data schema, similar to table definition in database. Let's say the temperature & humidity data are sent to `broker.emqx.io`, and those data will be processed in your **LOCAL RUN** eKuiper docker instance.  Below steps will create a stream named `demo`, and data are sent to `devices/device_001/messages` topic, while `device_001` could be other devices, such as `device_002`, all of those data will be subscribed and handled by `demo` stream.
+Launch rekuiper with all standard network ports exposed:
 
-   ```shell
-   -- In host
-   # docker exec -it kuiper /bin/sh
- 
-   -- In docker instance
-   # bin/kuiper create stream demo '(temperature float, humidity bigint) WITH (FORMAT="JSON", DATASOURCE="devices/+/messages")'
-   Connecting to 127.0.0.1:20498...
-   Stream demo is created.
- 
-   # bin/kuiper query
-   Connecting to 127.0.0.1:20498...
-   kuiper > select * from demo where temperature > 30;
-   Query was submit successfully.
- 
-   ```
+```shell
+docker run -d \
+  --name rekuiper \
+  -p 9081:9081 \
+  -p 20498:20498 \
+  -p 20499:20499 \
+  ankurkrp/rekuiper:0.502-beta
+```
 
-4. Publish sensor data to topic `devices/device_001/messages` of server `tcp://broker.emqx.io:1883` with any MQTT client such as [MQTT X](https://mqttx.app/).
+Verify that the engine is running and responding:
 
-   ```shell
-   # mqttx pub -h broker.emqx.io -m '{"temperature": 40, "humidity" : 20}' -t devices/device_001/messages
-   ```
+```shell
+curl http://localhost:9081/ping
+```
 
-5. If everything goes well,  you can see the message is print on docker `bin/kuiper query` window. Please try to publish another message with `temperature` less than 30, and it will be filtered by WHERE condition of the SQL.
+**Expected response:**
+```text
+pong
+```
 
-   ```shell
-   kuiper > select * from demo WHERE temperature > 30;
-   [{"temperature": 40, "humidity" : 20}]
-   ```
+---
 
-   If having any problems, please take a look at `log/stream.log`.
+## 2. Create a Data Stream
 
-6. To stop the test, just press `ctrl + c` in `bin/kuiper query` command console, or input `exit` and press enter.
+A **Stream** defines your incoming data schema and protocol source. Let's create an in-memory stream named `demo`:
 
-You can also refer to [eKuiper dashboard documentation](../operation/manager-ui/overview.md) for better using experience.
+```shell
+curl -X POST http://localhost:9081/streams \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql": "CREATE STREAM demo (temperature float, humidity bigint) WITH (DATASOURCE=\"demo\", FORMAT=\"JSON\")"
+  }'
+```
 
-Next for exploring more powerful features of eKuiper? Refer to below for how to apply LF Edge eKuiper in edge and integrate with AWS / Azure IoT cloud.
+**Expected response:**
+```text
+Stream demo is created.
+```
 
-- [Lightweight edge computing eKuiper and Azure IoT Hub integration solution](https://www.emqx.com/en/blog/lightweight-edge-computing-emqx-kuiper-and-azure-iot-hub-integration-solution)
-- [Lightweight edge computing eKuiper and AWS IoT Hub integration solution](https://www.emqx.com/en/blog/lightweight-edge-computing-emqx-kuiper-and-aws-iot-hub-integration-solution)
+---
+
+## 3. Deploy a Streaming Rule
+
+A **Rule** defines continuous SQL logic that processes incoming events and routes results to target actions (sinks).
+
+Create a rule named `rule_high_temp` that triggers whenever the `temperature` exceeds `30.0`°C and writes matches to the engine log:
+
+```shell
+curl -X POST http://localhost:9081/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "rule_high_temp",
+    "sql": "SELECT temperature, humidity FROM demo WHERE temperature > 30.0",
+    "actions": [
+      {
+        "log": {}
+      }
+    ]
+  }'
+```
+
+**Expected response:**
+```text
+Rule rule_high_temp was created
+```
+
+---
+
+## 4. Send Test Telemetry
+
+Inject test sensor readings directly using rekuiper's HTTP push endpoint:
+
+```shell
+# 1. Send an event below threshold (temperature = 22.0) - Should be filtered out
+curl -X POST http://localhost:9081/streams/demo/data \
+  -H "Content-Type: application/json" \
+  -d '{"temperature": 22.0, "humidity": 45}'
+
+# 2. Send an event above threshold (temperature = 34.8) - Should trigger the rule!
+curl -X POST http://localhost:9081/streams/demo/data \
+  -H "Content-Type: application/json" \
+  -d '{"temperature": 34.8, "humidity": 55}'
+```
+
+---
+
+## 5. Verify the Execution
+
+Check the live metrics of your rule:
+
+```shell
+curl http://localhost:9081/rules/rule_high_temp/status
+```
+
+**Output:**
+```json
+{
+  "source_demo_0_records_in_total": 2,
+  "source_demo_0_records_out_total": 2,
+  "op_filter_0_records_in_total": 2,
+  "op_filter_0_records_out_total": 1,
+  "op_project_0_records_in_total": 1,
+  "op_project_0_records_out_total": 1,
+  "sink_log_0_records_in_total": 1,
+  "sink_log_0_records_out_total": 1
+}
+```
+
+Notice:
+- `source_demo_0_records_in_total`: `2` (both events were received).
+- `op_filter_0_records_out_total`: `1` (the cold event was dropped; the hot event passed).
+- `sink_log_0_records_out_total`: `1` (the alert was logged).
+
+Inspect the container logs to view the output:
+
+```shell
+docker logs rekuiper | grep "LOG SINK"
+```
+
+---
+
+## 6. Optional: Visual Management with eKuiper Manager
+
+If you prefer a web-based dashboard for building rules and visual topologies:
+
+```shell
+docker run -d \
+  --name ekuiper-manager \
+  -p 9082:9082 \
+  -e DEFAULT_EKUIPER_ENDPOINT="http://localhost:9081" \
+  ankur-paan/ekuiper-manager:latest
+```
+
+Open `http://localhost:9082` in your browser to inspect streams, edit rules visually, and monitor real-time execution graphs.
+
+---
+
+## Next Steps
+
+- Explore [Core Architecture & Design](../concepts/ekuiper.md)
+- Learn about [Windowing Functions](../sqls/windows.md) (Tumbling, Hopping, Sliding, Session)
+- Configure [Production Deployments](../installation.md)
+- Connect external [MQTT Brokers](../guide/sources/builtin/mqtt.md)

@@ -1,121 +1,162 @@
-# LF Edge eKuiper - Lightweight data stream processing engine for IoT edge
+# rekuiper
 
-LF Edge eKuiper is a lightweight IoT data analytics and stream processing engine running on resource-constraint edge
-devices. The major goal for eKuiper is to provide a streaming software framework (similar
-to [Apache Flink](https://flink.apache.org)) on the edge side. eKuiper's **rule engine** allows users to provide either
-SQL-based or graph-based (similar to Node-RED) rules to create IoT edge analytics applications within a few minutes.
+> **High-Performance Stream Processing Engine for Edge Devices in Rust**
 
-![arch](./resources/arch.png)
+[![Release](https://img.shields.io/badge/release-v0.502--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
+[![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](https://github.com/ankur-paan/rekuiper/blob/main/LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.502--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
-## Features
+**rekuiper** is a lightweight, ultra-fast streaming SQL engine written in Rust. It serves as a **100% drop-in replacement** for eKuiper's REST API, SQL dialect, rule specifications, and `kuiper` CLI. Existing eKuiper streams, rules, and visualization dashboards—including [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager)—run against rekuiper without modification.
 
-- Lightweight
+Built specifically for resource-constrained environments—**IIoT gateways, ESPHome fleets, connected vehicles, and EV chargers**—rekuiper ingests high-frequency MQTT, HTTP, and WebSocket telemetry and filters, transforms, and routes it with sub-millisecond latency on a single CPU core.
 
-  - The core server package is only about 4.5M, the memory footprint is about 10MB.
+---
 
-- Cross-platform
+## How It Works
 
-  - CPU Arch：X86 AMD 32/64; ARM 32/64; PPC
-  - Popular Linux distributions, OpenWrt Linux, MacOS and Docker
-  - Industrial PC, Raspberry Pi, industrial gateway, home gateway, MEC edge cloud server
+Think of **rekuiper** as a high-speed traffic controller for IoT sensor data right on your device:
 
-- Data analysis support
+```mermaid
+flowchart LR
+    subgraph S["1. Input Sources"]
+        S1["Sensors & ESPHome\n(MQTT)"]
+        S2["HTTP & Webhooks\n(REST / Push)"]
+        S3["Message Queues\n(Kafka / WS)"]
+    end
 
-  - Supports data ETL
-  - Data order, group, aggregation and join with different data sources (the data from databases and files)
-  - 60+ functions, including mathematical, string, aggregate and hash, etc.
-  - 4 time windows and a count window
+    subgraph E["2. rekuiper Rust Engine"]
+        direction TB
+        E1["SQL Stream Parser"]
+        E2["Windowing & Aggregation\n(10s tumbling, sliding, session)"]
+        E3["Real-Time Filter & Alerting\n(temperature > 30)"]
+        E1 --> E2 --> E3
+    end
 
-- Highly extensible
+    subgraph O["3. Actionable Sinks"]
+        O1["Local Storage\n(SQLite / File / DB)"]
+        O2["Cloud / Brokers\n(Filtered MQTT / Kafka)"]
+        O3["Instant Alerts\n(Webhooks / Actuators)"]
+    end
 
-  It supports extending at `Source`, `Functions` and `Sink` with Golang or Python.
+    S1 --> E1
+    S2 --> E1
+    S3 --> E1
 
-  - Source: allows users to add more data sources for analytics.
-  - Sink: allows users to send the analysis result to different customized systems.
-  - UDF functions: allow users to add customized functions for data analysis (for example, AI/ML function invocation).
+    E3 --> O1
+    E3 --> O2
+    E3 --> O3
+```
 
-- Management
+1. **Listen**: Ingest continuous sensor streams via standard protocols (MQTT, HTTP, WebSockets, Kafka, Files).
+2. **Process**: Filter noise, calculate moving averages, and correlate events across time windows using familiar SQL syntax.
+3. **Act**: Route clean anomalies, aggregated metrics, or control commands directly to local databases, cloud brokers, or webhook endpoints.
 
-  - [A free web-based management dashboard](https://hub.docker.com/r/emqx/ekuiper-manager) for visualized management
-  - Plugins, streams and rules management through CLI, REST API and config maps (Kubernetes)
-  - Can be easily integrated with Kubernetes
-    frameworks [KubeEdge](https://github.com/kubeedge/kubeedge), [OpenYurt](https://openyurt.io/), [K3s](https://github.com/rancher/k3s), [Baetyl](https://github.com/baetyl/baetyl)
+---
 
-- Integration with EMQX products
+## Why rekuiper?
 
-  Seamless integration with [EMQX](https://www.emqx.io/), [Neuron](https://neugates.io/) and [NanoMQ](https://nanomq.io/), and provided an end-to-end solution from IIoT, IoV
+| Feature | rekuiper (Rust) | eKuiper (Go) | Why It Matters |
+| :--- | :--- | :--- | :--- |
+| **Throughput** | **150k – 200k msg/s** | 20k msg/s | **7.5x – 10x higher throughput** on a single CPU core |
+| **Memory Footprint** | **4.4 – 6.4 MiB** | 15 – 536 MiB | Never runs out of memory on low-cost edge gateways |
+| **Garbage Collection** | **Zero GC** (Deterministic) | GC Pauses (Go runtime) | Eliminates latency spikes and dropped sensor packets |
+| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Minimal attack surface; zero external dependencies |
+| **Compatibility** | **100% Wire-Compatible** | Upstream Reference | Drop-in replacement for REST API, SQL syntax, and CLI |
+| **AI Integration** | **Native MCP Server** | Not Available | AI assistants (Cursor, Claude, Antigravity) can manage rules |
 
-## Understand eKuiper
+---
 
-Learn about eKuiper and its fundamental concepts.
+## Performance Highlights
 
-- [Why eKuiper](./concepts/ekuiper.md)
-- [Stream Processing Concept](./concepts/streaming/overview.md)
-- [Rule Composition](./concepts/rules.md)
-- [Source](./concepts/sources/overview.md)
-- [Sink](./concepts/sinks.md)
-- [Rule logic by SQL](./concepts/sql.md)
-- [Extension](./concepts/extensions.md)
+In audited benchmark ladders comparing engines on a single CPU core with 1 GiB RAM against an identical Mosquitto broker:
 
-[View Concepts](./concepts/ekuiper.md)
+* **Highest Tested Rate with Exact, Loss-Free Result:**
+  * **Telemetry filter (1,000 devices):** rekuiper reaches **150k msg/s** (eKuiper caps at 20k msg/s).
+  * **10-second window per device:** rekuiper reaches **200k msg/s** (eKuiper caps at 20k msg/s).
+  * **ESPHome (10,000 topics, `meta(topic)`):** rekuiper reaches **150k msg/s** (eKuiper caps at 20k msg/s).
+  * **EV charger sessions (`SESSIONWINDOW`):** rekuiper reaches **126k msg/s** (eKuiper caps at 20k msg/s).
 
-## Try eKuiper
+* **Resource Usage at 20,000 msg/s:**
+  * **CPU utilization:** **41% – 50%** of one core (eKuiper: 86% – 99%).
+  * **Memory footprint:** **4.4 – 6.4 MiB** (eKuiper: 15 – 536 MiB).
 
-Follow the tutorials to learn how to use eKuiper.
+---
 
-- [Getting started locally](./getting_started/getting_started.md)
-- [Getting started in Docker](./getting_started/quick_start_docker.md)
-- [Getting started by dashboard](./operation/manager-ui/overview.md)
-- [Run as EdgeX Foundry rule engine](./edgex/edgex_rule_engine_tutorial.md)
-- [Deploy by OpenYurt](./integrations/deploy/openyurt_tutorial.md)
+## 5-Minute Quickstart
 
-[View Tutorials](./guide/ai/tensorflow_lite_tutorial.md)
+Run rekuiper in a single Docker command with standard network ports exposed:
 
-## Look up reference information
+```shell
+docker run -d \
+  --name rekuiper \
+  -p 9081:9081 \
+  -p 20498:20498 \
+  -p 20499:20499 \
+  ankurkrp/rekuiper:0.502-beta
+```
 
-Refer to the syntax and properties.
+Check health:
 
-- [Rule Syntax](./guide/rules/overview.md)
-- [Available Sources](./guide/sources/overview.md)
-- [Available Sinks](./guide/sinks/overview.md)
-- [Available Functions](./sqls/functions/overview.md)
-- [SQL Reference](./sqls/overview.md)
+```shell
+curl http://localhost:9081/ping
+# Response: pong
+```
 
-[View Reference](./sqls/overview.md)
+Create your first data stream:
 
-## Learn how to use eKuiper
+```shell
+curl -X POST http://localhost:9081/streams \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "CREATE STREAM demo () WITH (DATASOURCE=\"demo\", FORMAT=\"JSON\")"}'
+```
 
-Learn how to create and manage rules and how to modify configurations, etc.
+Create a rule to log events when temperature exceeds 30°C:
 
-- [Configuration](./configuration/configuration.md)
-- [Rest API](./api/restapi/overview.md)
-- [CLI](./api/cli/overview.md)
+```shell
+curl -X POST http://localhost:9081/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "rule_temp_alert",
+    "sql": "SELECT temperature, humidity FROM demo WHERE temperature > 30",
+    "actions": [{ "log": {} }]
+  }'
+```
 
-## Develop extensions
+Push test telemetry directly:
 
-Learn how to develop custom extensions.
+```shell
+curl -X POST http://localhost:9081/streams/demo/data \
+  -H "Content-Type: application/json" \
+  -d '{"temperature": 34.5, "humidity": 60.2}'
+```
 
-- [Native go plugin development](./extension/native/develop/overview.md)
-- [Portable go plugin development](./extension/portable/go_sdk.md)
-- [Python plugin development](./extension/portable/python_sdk.md)
+Inspect rule execution metrics:
 
-[View Extension Programming](./extension/overview.md)
+```shell
+curl http://localhost:9081/rules/rule_temp_alert/status
+```
 
-## Get Help
+---
 
-If you get stuck, check out our community support resources.
+## Key Capabilities
 
-- Open a GitHub [issue](https://github.com/lf-edge/ekuiper/issues).
-- Ask in the [forum](https://askemq.com/c/ekuiper).
-- Join our [Slack](https://slack.lfedge.org/), and then join the [ekuiper](https://lfedge.slack.com/archives/C024F4P7KCK) or [ekuiper-user](https://lfedge.slack.com/archives/C024F4SMEMR) channel.
-- Mail to eKuiper help [mail list](mailto:ekuiper+help@lists.lfedge.org).
-- Join the WeChat group, scan the QR code below and mark "eKuiper".
+* **Standard SQL Stream Processing**: Filter, project, join, and aggregate live data streams with support for tumbling, hopping, sliding, count, and session windows.
+* **Extensive Connector Ecosystem**:
+  * **Sources**: MQTT, HTTP (Pull & Push), WebSockets, File, Memory, Redis, Kafka, Simulator, SQL.
+  * **Sinks**: MQTT, HTTP/REST, Log, File, Memory, Redis, Kafka, WebSockets, Nop, SQL.
+* **Model Context Protocol (MCP)**: Native `rekuiper-mcp` server enables AI coding assistants and autonomous agents to validate SQL queries offline, simulate rule events, and manage streaming topologies.
+* **Web Management Dashboard**: Full compatibility with the open-source [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager) for visual stream, rule, and connector management.
 
-  <img src="./wechat.png" alt="drawing" width="200"/>
+---
 
-## Contribute
+## Explore the Documentation
 
-Anyone can contribute to anything, not just code.
-
-- [Edit Doc in GitHub](https://github.com/lf-edge/ekuiper/tree/master/docs)
-- [How to contribute](./CONTRIBUTING.md)
+* [Architecture & Rust Design](./concepts/ekuiper.md)
+* [Getting Started Guide](./getting_started/getting_started.md)
+* [Installation & Deployment](./installation.md)
+* [SQL Reference & Functions](./sqls/overview.md)
+* [Source & Sink Connectors](./guide/sources/overview.md)
+* [REST API Reference](./api/restapi/overview.md)
+* [kuiper CLI Reference](./api/cli/overview.md)
+* [Model Context Protocol (MCP)](https://github.com/ankur-paan/rekuiper/tree/main/crates/rekuiper-mcp)
