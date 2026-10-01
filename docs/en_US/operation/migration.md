@@ -94,4 +94,4 @@ docker restart ekuiper
 ## See Also
 
 - [Installation Guide](../installation.md)
-- [REST API Reference](../api/restapi.md)
+- [REST API Reference](../api/restapi/overview.md)

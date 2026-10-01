@@ -153,9 +153,9 @@ Login to: http://127.0.0.1:18083/ with admin/public.
 
 Use TOOLS/Websocket  to send data:
 
-Tpoic    : demo_fib
+Topic    : `demo_fib`
 
-Messages : {"num" : 25}
+Messages : `{"num" : 25}`
 
 Once the message is sent successfully, the terminal receives the execution result.
 
