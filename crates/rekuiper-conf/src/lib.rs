@@ -293,7 +293,10 @@ mod tests {
     #[test]
     fn rekuiper_env_overrides_take_effect() {
         let vars = vec![
-            ("REKUIPER__BASIC__REST_PORT".to_string(), "19082".to_string()),
+            (
+                "REKUIPER__BASIC__REST_PORT".to_string(),
+                "19082".to_string(),
+            ),
             ("REKUIPER__BASIC__LOGLEVEL".to_string(), "warn".to_string()),
         ];
         let mut config = KuiperConfig::default();
