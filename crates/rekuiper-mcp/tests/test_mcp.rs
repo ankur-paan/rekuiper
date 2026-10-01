@@ -143,10 +143,29 @@ async fn test_offline_sql_validation() {
     let text_ddl = res_ddl["content"][0]["text"].as_str().unwrap();
     assert!(text_ddl.contains("\"statement_type\": \"CREATE STREAM\""));
 
-    // 3. Invalid SQL
-    let req_invalid = JsonRpcRequest {
+    // 3. Valid SQL CREATE TABLE
+    let req_table = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(json!(12)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "validate_sql",
+            "arguments": {
+                "sql": "CREATE TABLE alerts () WITH (DATASOURCE=\"alerts\", TYPE=\"file\")"
+            }
+        })),
+    };
+    let resp_table = handler.handle_request(req_table).await.unwrap();
+    let res_table = resp_table.result.unwrap();
+    assert_eq!(res_table["isError"], false);
+    let text_table = res_table["content"][0]["text"].as_str().unwrap();
+    assert!(text_table.contains("\"statement_type\": \"CREATE TABLE\""));
+    assert!(text_table.contains("\"table_name\": \"alerts\""));
+
+    // 4. Invalid SQL
+    let req_invalid = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(13)),
         method: "tools/call".to_string(),
         params: Some(json!({
             "name": "validate_sql",

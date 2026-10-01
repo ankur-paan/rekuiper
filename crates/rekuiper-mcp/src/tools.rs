@@ -734,6 +734,18 @@ pub async fn execute_tool(
                             serde_json::to_string_pretty(&info).unwrap_or_default(),
                         );
                     }
+                    let mut p_table = Parser::new(sql);
+                    if let Ok(create_table_stmt) = p_table.parse_create_table() {
+                        let info = json!({
+                            "valid": true,
+                            "statement_type": "CREATE TABLE",
+                            "table_name": create_table_stmt.name,
+                            "options": create_table_stmt.options,
+                        });
+                        return CallToolResult::ok(
+                            serde_json::to_string_pretty(&info).unwrap_or_default(),
+                        );
+                    }
                     CallToolResult::err(format!("SQL Syntax / Grammar Error: {}", err))
                 }
             }
@@ -1012,13 +1024,16 @@ pub async fn execute_tool(
                 return CallToolResult::err("Missing required parameter: 'name'");
             };
             let path = format!("/rules/{}/trace/start", name);
-            let strategy = args.get("strategy").cloned().unwrap_or(json!("always"));
+            let strategy = args
+                .get("strategy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("always");
             forward_request(
                 client,
                 base_url,
                 reqwest::Method::POST,
                 &path,
-                Some(strategy),
+                Some(json!({ "strategy": strategy })),
             )
             .await
         }

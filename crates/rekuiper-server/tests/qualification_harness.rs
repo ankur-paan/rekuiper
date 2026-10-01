@@ -927,7 +927,8 @@ pub async fn run_qualification(
             let in_flight_start = tracker.lock().await.first_unconfirmed().min(current_seq);
             let in_flight = current_seq.saturating_sub(in_flight_start).min(500);
             metrics.in_flight_at_shutdown = in_flight;
-            let in_flight_ids: Vec<u64> = (in_flight_start..current_seq).collect();
+            let bounded_start = current_seq.saturating_sub(in_flight);
+            let in_flight_ids: Vec<u64> = (bounded_start..current_seq).collect();
             metrics.in_flight_ids_at_shutdown = in_flight_ids;
             println!(
                 "-> [PHASE 4] In-flight before crash: {} record(s) (IDs: {:?})",
