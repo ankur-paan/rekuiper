@@ -113,3 +113,13 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.502-beta
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:latest
+
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper
+          readme-filepath: ./deploy/docker/README.md
+          short-description: "Lightweight, ultra-fast streaming SQL engine for edge & IoT in Rust"
