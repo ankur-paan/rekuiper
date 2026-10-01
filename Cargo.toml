@@ -7,11 +7,12 @@ members = [
     "crates/rekuiper-server",
     "crates/rekuiper-cli",
     "crates/kuiperd",
+    "crates/rekuiper-mcp",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.501.0-beta"
+version = "0.502.0-beta"
 edition = "2021"
 authors = ["I-Dacs Labs <measure@i-dacs.com>", "LF Edge eKuiper Contributors"]
 license = "MIT OR Apache-2.0"

@@ -1,3 +1,23 @@
+# Release Notes - rekuiper v0.502-beta
+
+`rekuiper` v0.502-beta introduces the native Model Context Protocol (MCP) server for LLM assistants, complete offline streaming SQL intelligence, dynamic execution tracing, and hardened reliability qualification.
+
+Key highlights:
+- **Native Model Context Protocol Server (`rekuiper-mcp`)**: An enterprise-grade, native Rust MCP server implementing standard JSON-RPC 2.0 stdio transport with 42 tools, 11 queryable resources (`rekuiper://`), and 5 AI assistant prompts.
+- **Embedded Offline SQL Intelligence**: Static AST analysis, query deconstruction (`explain_sql`), in-memory transformation simulation (`test_sql_expression`), and schema validation (`validate_sql`) for both `CREATE STREAM` and `CREATE TABLE` DDL without network overhead.
+- **Dynamic Rule Tracing & Observability**: Real-time message execution tracing controls (`start_rule_trace`, `stop_rule_trace`, `get_rule_traces`, `get_trace_details`) with support for sampling strategies and step-by-step latency profiling.
+- **99.98% Differential Mathematical Qualification**: Verified mathematical and streaming SQL operator equivalence across trigonometric, logarithmic, aggregation, and window functions against Go-based eKuiper 2.4.1.
+- **Hardened Process-Level Qualification**: Strictly bounded in-flight transaction tracking during abrupt process termination and automated recovery validation.
+- **Unified Multi-Platform Docker Packaging**: Container image includes `rekuiper-mcp` alongside `kuiperd` and `kuiper` CLI with multi-arch support.
+- **Complete Port & Service Alignment**: Fully declares operational ports `9081` (REST API & CLI), `20499` (Prometheus metrics), and `20498` (RPC parity) across Dockerfile `EXPOSE`, Docker Compose, and Kubernetes Helm service manifests (`svc.yaml`, `statefulset.yaml`).
+
+- MCP Documentation: [`crates/rekuiper-mcp/README.md`](crates/rekuiper-mcp/README.md)
+- Qualification Report: [`test/e2e_diff/QUALIFICATION_REPORT.md`](test/e2e_diff/QUALIFICATION_REPORT.md)
+- Docker image: `ankurkrp/rekuiper:0.502-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.502-beta`)
+
+---
+
 # Release Notes - rekuiper v0.501-beta
 
 `rekuiper` v0.501-beta delivers transactional storage guarantees, strict configuration consistency, and process-level crash qualification.

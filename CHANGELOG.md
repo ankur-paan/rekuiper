@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.502.0-beta] - 2026-10-01
+
+### Added
+- Native Model Context Protocol server (`rekuiper-mcp`) providing 42 tools, 11 resources, and 5 interactive prompts for LLMs and AI agent integrations over JSON-RPC 2.0 stdio transport.
+- Offline streaming SQL simulation tools (`test_sql_expression`, `explain_sql`, `validate_sql`) using embedded `rekuiper-sql` AST parsing and static analysis.
+- DDL parsing support in `validate_sql` for `CREATE TABLE` and `CREATE STREAM` statements.
+- Dynamic rule execution tracing and span telemetry inspection endpoints (`start_rule_trace`, `stop_rule_trace`, `get_rule_traces`, `get_trace_details`).
+- End-to-end differential mathematical qualification suite comparing 10,000+ streaming records against eKuiper 2.4.1 across trigonometric, logarithmic, aggregation, and window operators.
+
+### Fixed
+- Fixed `start_rule_trace` JSON payload structure in `rekuiper-mcp` to match the server's `TraceStartBody` deserialization format.
+- Bounded in-flight ID vector collection in qualification harness to at most 500 items to prevent unbounded vector allocation under heavy load.
+
+### Packaging
+- Bundled `rekuiper-mcp` binary in official Docker container image (`ankurkrp/rekuiper:0.502-beta`).
+- Fully aligned and exposed network ports (9081 for REST/CLI, 20499 for Prometheus, 20498 for RPC) across Dockerfile, Docker Compose, and Kubernetes Helm service manifests.
+- Updated Helm chart `appVersion` to `0.502-beta`.
+
 ## [0.501.0-beta] - 2026-09-25
 
 ### Added

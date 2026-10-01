@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "rekuiper": {
+      "command": "wsl",
+      "args": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "--network",
+        "rekuiper-live-net",
+        "rekuiper-mcp:latest",
+        "--server-url",
+        "http://rekuiper-live:9081"
+      ],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}

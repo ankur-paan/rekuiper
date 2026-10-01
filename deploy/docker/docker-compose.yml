@@ -1,32 +1,37 @@
-version: '3.8'
-
 services:
   rekuiper:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: ankurkrp/rekuiper:0.423-beta
+    image: ${REKUIPER_IMAGE:-ankurkrp/rekuiper}:${REKUIPER_VERSION:-0.502-beta}
     container_name: rekuiper
     ports:
-      - "9081:9081"   # REST API & OpenAPI docs
-      - "20499:20499" # Prometheus metrics
+      # Port 9081: Primary REST API, OpenAPI docs, and CLI management
+      - "${REKUIPER_REST_PORT:-9081}:9081"
+      # Port 20499: Prometheus metrics endpoint (/metrics)
+      - "${REKUIPER_PROMETHEUS_PORT:-20499}:20499"
     volumes:
       - rekuiper-data:/kuiper/data
       - rekuiper-etc:/kuiper/etc
     depends_on:
       - mqtt-broker
     environment:
-      - KUIPER__BASIC__CONSOLELOG=true
-      - KUIPER__BASIC__PROMETHEUS=true
-      - KUIPER__BASIC__PROMETHEUSPORT=20499
-      - RUST_LOG=info
+      # Double-underscore variables map directly to etc/kuiper.yaml (KUIPER__<SECTION>__<KEY>)
+      - KUIPER__BASIC__LOGLEVEL=${KUIPER__BASIC__LOGLEVEL:-info}
+      - KUIPER__BASIC__CONSOLELOG=${KUIPER__BASIC__CONSOLELOG:-true}
+      - KUIPER__BASIC__PROMETHEUS=${KUIPER__BASIC__PROMETHEUS:-true}
+      - KUIPER__BASIC__PROMETHEUSPORT=${KUIPER__BASIC__PROMETHEUSPORT:-20499}
+      - KUIPER__BASIC__AUTHENTICATION=${KUIPER__BASIC__AUTHENTICATION:-false}
+      - KUIPER__BASIC__TIMEZONE=${KUIPER__BASIC__TIMEZONE:-Local}
+      - MQTT_SOURCE__DEFAULT__SERVER=${MQTT_SOURCE__DEFAULT__SERVER:-tcp://mqtt-broker:1883}
+      - RUST_LOG=${RUST_LOG:-info}
     restart: unless-stopped
 
   mqtt-broker:
     image: eclipse-mosquitto:2
     container_name: rekuiper-mosquitto
     ports:
-      - "1883:1883"
+      - "${MOSQUITTO_PORT:-1883}:1883"
     environment:
       - MOSQUITTO_USER=test
     command: sh -c "echo 'listener 1883 0.0.0.0' > /mosquitto.conf && echo 'allow_anonymous true' >> /mosquitto.conf && /usr/sbin/mosquitto -c /mosquitto.conf"
@@ -36,7 +41,7 @@ services:
     image: redis:7-alpine
     container_name: rekuiper-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     restart: unless-stopped
 
 volumes:

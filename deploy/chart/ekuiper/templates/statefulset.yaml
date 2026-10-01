@@ -119,6 +119,8 @@ spec:
             {{- $port := index .Values "kuiperConfig" "kuiper.yaml" "basic" "port" }}
             - name: ekuiper
               containerPort: {{ $port | default 20498 }}
+            - name: prometheus
+              containerPort: 20499
           volumeMounts:
           - name: ekuiper-log
             mountPath: "/kuiper/log"

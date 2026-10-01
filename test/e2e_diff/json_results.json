@@ -1,0 +1,49 @@
+{
+  "to_json": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": "{\"a\":1,\"b\":\"hello\"}"
+    }
+  },
+  "parse_json": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": {
+        "items": [
+          {
+            "id": 101
+          },
+          {
+            "id": 102
+          }
+        ],
+        "user": {
+          "name": "alice"
+        }
+      }
+    }
+  },
+  "json_path_exists": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": false
+    }
+  },
+  "json_path_query": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  },
+  "json_path_query_first": {
+    "supported": true,
+    "data_verified": true,
+    "output": {
+      "res": null
+    }
+  }
+}

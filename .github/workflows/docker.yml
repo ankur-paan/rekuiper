@@ -33,6 +33,10 @@ jobs:
       - name: Workspace Tests
         run: cargo test --workspace
 
+      - name: Validate Docker Compose Configuration
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml config
+
       - name: Provision Isolated Mosquitto Broker (Plaintext & TLS)
         run: |
           mkdir -p /tmp/mosquitto_cfg
@@ -107,5 +111,15 @@ jobs:
           file: ./deploy/docker/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.501-beta
+            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.502-beta
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:latest
+
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper
+          readme-filepath: ./deploy/docker/README.md
+          short-description: "Lightweight, ultra-fast streaming SQL engine for edge & IoT in Rust"

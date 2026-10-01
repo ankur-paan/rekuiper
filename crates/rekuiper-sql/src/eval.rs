@@ -254,6 +254,8 @@ impl Evaluator {
                 | "last_value"
                 | "merge_agg"
                 | "row_number"
+                | "last_agg_hit_count"
+                | "last_agg_hit_time"
         )
     }
 
@@ -277,6 +279,8 @@ impl Evaluator {
             "last_value" => Self::agg_last_value(args, records),
             "merge_agg" => Self::agg_merge_agg(args, records),
             "row_number" => Self::agg_row_number(args, records),
+            "last_agg_hit_count" => Self::agg_last_agg_hit_count(records),
+            "last_agg_hit_time" => Self::agg_last_agg_hit_time(records),
             _ => Value::Null,
         }
     }
@@ -732,6 +736,31 @@ impl Evaluator {
             guard.insert(state_key, Value::from(next));
             return Value::from(next);
         }
+        if lowered == "last_hit_count" {
+            let call_id = Self::column_name(expr, 0);
+            let state_key = format!(
+                "$$last_hit_count:{}:{}",
+                call_id,
+                partition_key.unwrap_or("")
+            );
+            let mut guard = state.state.write();
+            let current = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
+            guard.insert(state_key, Value::from(current.saturating_add(1)));
+            return Value::from(current);
+        }
+        if lowered == "last_hit_time" {
+            let call_id = Self::column_name(expr, 0);
+            let state_key = format!(
+                "$$last_hit_time:{}:{}",
+                call_id,
+                partition_key.unwrap_or("")
+            );
+            let event_time = Self::resolve_event_time(record).as_i64().unwrap_or(0);
+            let mut guard = state.state.write();
+            let prev = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
+            guard.insert(state_key, Value::from(event_time));
+            return Value::from(prev);
+        }
         // Contextual system functions resolve against the record itself.
         if let Some(v) = Self::eval_context_call(name, args, record) {
             return v;
@@ -1045,6 +1074,24 @@ impl Evaluator {
             }
             _ => Value::Null,
         }
+    }
+
+    fn agg_last_agg_hit_count(_records: &[HashMap<String, Value>]) -> Value {
+        static COUNT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let cur = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Value::from(cur)
+    }
+
+    fn agg_last_agg_hit_time(records: &[HashMap<String, Value>]) -> Value {
+        static LAST_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let prev = LAST_TIME.load(std::sync::atomic::Ordering::Relaxed);
+        let window_end = records
+            .first()
+            .and_then(|r| r.get("__window_end__").or_else(|| r.get("window_end")))
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        LAST_TIME.store(window_end, std::sync::atomic::Ordering::Relaxed);
+        Value::from(prev)
     }
 
     fn agg_count(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
@@ -2153,6 +2200,8 @@ impl Evaluator {
             "substr" | "substring" => Self::func_substr(args),
             "startswith" => Self::func_startswith(args),
             "endswith" => Self::func_endswith(args),
+            "indexof" => Self::func_indexof(args),
+            "format" => Self::func_format(args),
             // ---- Array & object ----
             "array_contains" => Self::func_array_contains(args),
             "array_join" => Self::func_array_join(args),
@@ -2180,7 +2229,7 @@ impl Evaluator {
             "current_timestamp" | "local_timestamp" => Self::func_now(args),
             "current_date" | "cur_date" => Self::func_current_date(args),
             "current_time" | "cur_time" | "local_time" => Self::func_current_time(args),
-            "format_date" => Self::func_format_date(args),
+            "format_date" | "format_time" => Self::func_format_date(args),
             "from_unix_time" => Self::func_from_unix_time(args),
             "date_parse" => Self::func_date_parse(args),
             "date_add" => Self::func_date_add(args),
@@ -2228,6 +2277,9 @@ impl Evaluator {
             // ---- Extended array ----
             "array_create" => Self::func_array_create(args),
             "array_position" => Self::func_array_position(args),
+            "array_last_position" => Self::func_array_last_position(args),
+            "array_shuffle" => Self::func_array_shuffle(args),
+            "array_map" => Self::func_array_map(args),
             "array_length" => Self::func_array_length(args),
             "array_slice" => Self::func_array_slice(args),
             "array_concat" => Self::func_array_concat(args),
@@ -2266,6 +2318,10 @@ impl Evaluator {
             // (With a record in scope, `eval_context_call` resolves them.)
             "window_start" | "window_end" => Value::Null,
             "rule_id" => Value::String(String::new()),
+            "rule_start" => serde_json::json!(chrono::Utc::now().timestamp_millis()),
+            "last_hit_count" | "last_hit_time" => Value::from(0),
+            "last_agg_hit_count" | "last_agg_hit_time" => Value::from(0),
+            "get_keyed_state" => Self::func_get_keyed_state(args),
             "meta" | "mqtt" => Value::Null,
             "event_time" => serde_json::json!(chrono::Utc::now().timestamp_millis()),
             // ---- Registered UDFs (anything not built in) ----
@@ -2276,6 +2332,43 @@ impl Evaluator {
     /// RFC 4122 UUID v4 as a hyphenated lowercase string.
     fn func_uuid(_args: &[Value]) -> Value {
         Value::String(uuid::Uuid::new_v4().to_string())
+    }
+
+    fn func_get_keyed_state(args: &[Value]) -> Value {
+        if args.len() != 3 {
+            return Value::Null;
+        }
+        let Some(key) = args[0].as_str() else {
+            return args.get(2).cloned().unwrap_or(Value::Null);
+        };
+        let Some(data_type) = args[1].as_str() else {
+            return args.get(2).cloned().unwrap_or(Value::Null);
+        };
+        let default_val = &args[2];
+
+        match rekuiper_core::get_keyed_state(key) {
+            Some(val_str) => match data_type.to_ascii_lowercase().as_str() {
+                "bigint" => val_str
+                    .parse::<i64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| default_val.clone()),
+                "float" => val_str
+                    .parse::<f64>()
+                    .map(|f| serde_json::json!(f))
+                    .unwrap_or_else(|_| default_val.clone()),
+                "boolean" => val_str
+                    .parse::<bool>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| default_val.clone()),
+                "string" => Value::String(val_str),
+                "datetime" => val_str
+                    .parse::<i64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| default_val.clone()),
+                _ => default_val.clone(),
+            },
+            None => default_val.clone(),
+        }
     }
 
     /// Resolve a contextual system function against the current record.
@@ -2299,6 +2392,7 @@ impl Evaluator {
             )),
             "event_time" => Some(Self::resolve_event_time(record)),
             "rule_id" => Some(Self::resolve_rule_id(record)),
+            "rule_start" => Some(Self::resolve_rule_start(record)),
             "window_start" => Some(Self::resolve_window_bound(
                 record,
                 &["window_start", "__window_start__"],
@@ -2367,6 +2461,13 @@ impl Evaluator {
         match record.get("__rule_id__") {
             Some(Value::String(s)) => Value::String(s.clone()),
             _ => Value::String(String::new()),
+        }
+    }
+
+    fn resolve_rule_start(record: &HashMap<String, Value>) -> Value {
+        match record.get("__rule_start__") {
+            Some(Value::Number(n)) => Value::Number(n.clone()),
+            _ => Value::from(chrono::Utc::now().timestamp_millis()),
         }
     }
 
@@ -3418,6 +3519,59 @@ impl Evaluator {
         )
     }
 
+    fn func_indexof(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(s), Some(sub)) = (args[0].as_str(), args[1].as_str()) else {
+            return Value::Null;
+        };
+        Value::from(s.find(sub).map(|i| i as i64).unwrap_or(-1))
+    }
+
+    fn func_format(args: &[Value]) -> Value {
+        if args.is_empty() || args.len() > 3 {
+            return Value::Null;
+        }
+        let Some(num) = Self::to_f64(&args[0]) else {
+            return Value::Null;
+        };
+        let decimals = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0).max(0) as usize;
+        let locale = args.get(2).and_then(|v| v.as_str()).unwrap_or("en_US");
+        let is_comma_decimal =
+            locale.starts_with("de") || locale.starts_with("fr") || locale.starts_with("it");
+        let (thousand_sep, decimal_sep) = if is_comma_decimal {
+            ('.', ',')
+        } else {
+            (',', '.')
+        };
+
+        let formatted_base = format!("{:.prec$}", num, prec = decimals);
+        let parts: Vec<&str> = formatted_base.split('.').collect();
+        let int_part = parts[0];
+        let is_neg = int_part.starts_with('-');
+        let raw_int = if is_neg { &int_part[1..] } else { int_part };
+
+        let mut with_commas = String::new();
+        let len = raw_int.len();
+        for (i, c) in raw_int.chars().enumerate() {
+            if i > 0 && (len - i) % 3 == 0 {
+                with_commas.push(thousand_sep);
+            }
+            with_commas.push(c);
+        }
+        let res = if is_neg {
+            format!("-{}", with_commas)
+        } else {
+            with_commas
+        };
+        if decimals > 0 && parts.len() > 1 {
+            Value::String(format!("{}{}{}", res, decimal_sep, parts[1]))
+        } else {
+            Value::String(res)
+        }
+    }
+
     fn func_keys(args: &[Value]) -> Value {
         if args.len() != 1 {
             return Value::Null;
@@ -3605,6 +3759,23 @@ impl Evaluator {
         Value::from(chrono::Utc::now().timestamp_millis())
     }
 
+    fn java_to_strftime(fmt: &str) -> String {
+        if fmt.contains('%') {
+            return fmt.to_string();
+        }
+        fmt.replace("YYYY", "%Y")
+            .replace("yyyy", "%Y")
+            .replace("yy", "%y")
+            .replace("MM", "%m")
+            .replace("dd", "%d")
+            .replace("DD", "%d")
+            .replace("HH", "%H")
+            .replace("hh", "%I")
+            .replace("mm", "%M")
+            .replace("ss", "%S")
+            .replace("SSS", "%3f")
+    }
+
     fn func_format_date(args: &[Value]) -> Value {
         if args.len() != 2 {
             return Value::Null;
@@ -3629,8 +3800,9 @@ impl Evaluator {
             }
             _ => None,
         };
+        let pattern = Self::java_to_strftime(fmt);
         match dt {
-            Some(dt) => Value::String(dt.format(fmt).to_string()),
+            Some(dt) => Value::String(dt.format(&pattern).to_string()),
             None => Value::Null,
         }
     }
@@ -4463,6 +4635,9 @@ impl Evaluator {
         if args.len() != 2 {
             return Value::Null;
         }
+        if args[0].is_null() {
+            return Value::from(-1);
+        }
         let Some(arr) = args[0].as_array() else {
             return Value::Null;
         };
@@ -4470,10 +4645,61 @@ impl Evaluator {
             .iter()
             .position(|item| Self::values_equal(item, &args[1]))
         {
-            // 1-based index, 0 when absent.
-            Some(i) => Value::from((i + 1) as i64),
-            None => Value::from(0),
+            // 0-based index, -1 when absent or nil (matching eKuiper specification).
+            Some(i) => Value::from(i as i64),
+            None => Value::from(-1),
         }
+    }
+
+    fn func_array_last_position(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::from(-1);
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        match arr
+            .iter()
+            .rposition(|item| Self::values_equal(item, &args[1]))
+        {
+            // 0-based index, -1 when absent or nil (matching eKuiper specification).
+            Some(i) => Value::from(i as i64),
+            None => Value::from(-1),
+        }
+    }
+
+    fn func_array_shuffle(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut out = arr.clone();
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        out.shuffle(&mut rng);
+        Value::Array(out)
+    }
+
+    fn func_array_map(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(func_name) = args[0].as_str() else {
+            return Value::Null;
+        };
+        let Some(arr) = args[1].as_array() else {
+            return Value::Null;
+        };
+        let mapped: Vec<Value> = arr
+            .iter()
+            .map(|item| Self::eval_call(func_name, std::slice::from_ref(item)))
+            .collect();
+        Value::Array(mapped)
     }
 
     fn func_array_length(args: &[Value]) -> Value {

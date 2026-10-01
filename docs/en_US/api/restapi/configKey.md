@@ -1,3 +1,14 @@
+# ConfigKey Management
+
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live MQTT broker binding on **2026-09-30 18:42:04 UTC**.  
+> **Scorecard**: **3 / 3 Methods Fully Verified**:
+> - `GET /metadata/sources/yaml/{name}` (list all configKeys for source) - Verified (HTTP 200 OK)
+> - `PUT /metadata/sources/{name}/confKeys/{confKey}` (register/upsert configKey) - Verified (HTTP 200 OK)
+> - `DELETE /metadata/sources/{name}/confKeys/{confKey}` (delete configKey) - Verified (HTTP 200 OK)
+> 
+> Dynamic config keys registered here are immediately available for binding in stream `CONF_KEY` options under live telemetry flow.
+
 eKuiper REST api allows you to manage Config Keys, e.g. list, delete, register.
 
 ## List all configKey
