@@ -33,6 +33,10 @@ jobs:
       - name: Workspace Tests
         run: cargo test --workspace
 
+      - name: Validate Docker Compose Configuration
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml config
+
       - name: Provision Isolated Mosquitto Broker (Plaintext & TLS)
         run: |
           mkdir -p /tmp/mosquitto_cfg

@@ -80,6 +80,8 @@ To run rekuiper together with Mosquitto and Redis:
 docker compose -f deploy/docker/docker-compose.yml up -d
 ```
 
+Customize image tags, published ports, and engine options by copying [deploy/docker/.env.example](deploy/docker/.env.example) to `deploy/docker/.env`. Any `etc/kuiper.yaml` setting can be overridden using `KUIPER__<SECTION>__<KEY>` (e.g. `KUIPER__BASIC__LOGLEVEL=debug`, `KUIPER__BASIC__AUTHENTICATION=true`).
+
 ### Kubernetes (Helm)
 
 Deploy rekuiper to your Kubernetes cluster using the bundled Helm chart:
