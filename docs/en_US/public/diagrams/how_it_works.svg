@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 380" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0e17" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#0a0e17" />
+    </linearGradient>
+
+    <!-- Column Header Gradients -->
+    <linearGradient id="blueGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="orangeGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="emeraldGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Connector Path Gradients with userSpaceOnUse so horizontal lines never lose their tails -->
+    <linearGradient id="streamGrad1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="354" y2="0">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <linearGradient id="streamGrad2" gradientUnits="userSpaceOnUse" x1="624" y1="0" x2="718" y2="0">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <!-- Card Background Gradient -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- Engine Core Gradient -->
+    <linearGradient id="engineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#241b2f" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#121829" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- Filters & Shadows -->
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+    <filter id="coreGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Marker Arrowheads with proper viewBox and size -->
+    <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb923c" />
+    </marker>
+    <marker id="arrowEmerald" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <style>
+    .title-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .card-subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .badge-text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container Box -->
+  <rect x="2" y="2" width="936" height="376" rx="16" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- Subtle Ambient Glows -->
+  <circle cx="140" cy="190" r="110" fill="#0284c7" opacity="0.08" filter="url(#coreGlow)" />
+  <circle cx="470" cy="190" r="140" fill="#f97316" opacity="0.10" filter="url(#coreGlow)" />
+  <circle cx="800" cy="190" r="110" fill="#10b981" opacity="0.08" filter="url(#coreGlow)" />
+
+  <!-- ==================== COLUMN 1: INGESTION ==================== -->
+  <g transform="translate(24, 24)">
+    <rect x="0" y="0" width="220" height="28" rx="6" fill="url(#blueGlow)" stroke="#0284c7" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#38bdf8" />
+    <text x="26" y="18" fill="#38bdf8" class="title-text">1. Input Sources</text>
+
+    <!-- Source Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="220" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#0369a1" />
+      <text x="20" y="27" font-size="10" fill="#bae6fd" text-anchor="middle" font-weight="700">M</text>
+      <text x="36" y="26" class="card-title">MQTT &amp; ESPHome</text>
+      <text x="36" y="44" class="card-subtitle">Wildcards, Dynamic Topics, QoS 0-2</text>
+    </g>
+
+    <!-- Source Node 2 -->
+    <g transform="translate(0, 122)">
+      <rect x="0" y="0" width="220" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#0284c7" />
+      <text x="20" y="27" font-size="10" fill="#e0f2fe" text-anchor="middle" font-weight="700">H</text>
+      <text x="36" y="26" class="card-title">HTTP Pull &amp; Push</text>
+      <text x="36" y="44" class="card-subtitle">REST Endpoints, JSON Webhooks</text>
+    </g>
+
+    <!-- Source Node 3 -->
+    <g transform="translate(0, 202)">
+      <rect x="0" y="0" width="220" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#0f766e" />
+      <text x="20" y="27" font-size="10" fill="#ccfbf1" text-anchor="middle" font-weight="700">K</text>
+      <text x="36" y="26" class="card-title">Kafka, Redis &amp; WS</text>
+      <text x="36" y="44" class="card-subtitle">Event Streams, File, EdgeX</text>
+    </g>
+  </g>
+
+  <!-- ==================== CONNECTORS: SOURCES -> ENGINE ==================== -->
+  <path d="M 244 100 C 290 100, 305 145, 344 145" fill="none" stroke="url(#streamGrad1)" stroke-width="2.5" marker-end="url(#arrowOrange)" />
+  <path d="M 244 175 C 285 175, 305 175, 344 175" fill="none" stroke="url(#streamGrad1)" stroke-width="2.5" marker-end="url(#arrowOrange)" />
+  <path d="M 244 250 C 290 250, 305 205, 344 205" fill="none" stroke="url(#streamGrad1)" stroke-width="2.5" marker-end="url(#arrowOrange)" />
+
+  <!-- ==================== COLUMN 2: REKUIPER ENGINE ==================== -->
+  <g transform="translate(354, 24)">
+    <rect x="0" y="0" width="270" height="328" rx="14" fill="url(#engineGrad)" stroke="#f97316" stroke-width="1.5" stroke-opacity="0.8" filter="url(#cardShadow)" />
+
+    <!-- Engine Header Badge -->
+    <rect x="14" y="14" width="242" height="30" rx="6" fill="url(#orangeGlow)" stroke="#f97316" stroke-width="1" stroke-opacity="0.6" />
+    <circle cx="28" cy="29" r="4" fill="#fb923c" />
+    <text x="40" y="33" fill="#fb923c" class="title-text">rekuiper Stream Engine (Rust)</text>
+
+    <!-- Sub-step 1: Parser -->
+    <g transform="translate(14, 56)">
+      <rect x="0" y="0" width="242" height="54" rx="8" fill="#1e1e2f" stroke="#475569" stroke-width="1" />
+      <text x="14" y="22" class="card-title">Zero-Copy Stream Parser</text>
+      <text x="14" y="40" class="card-subtitle">JSON, Protobuf, Binary &amp; Schemas</text>
+    </g>
+
+    <!-- Step Flow Arrow 1 with prominent visible shaft and head -->
+    <line x1="135" y1="112" x2="135" y2="128" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowOrange)" />
+
+    <!-- Sub-step 2: SQL Engine -->
+    <g transform="translate(14, 132)">
+      <rect x="0" y="0" width="242" height="54" rx="8" fill="#1e1e2f" stroke="#475569" stroke-width="1" />
+      <text x="14" y="22" class="card-title">SQL Evaluator &amp; Filter</text>
+      <text x="14" y="40" class="card-subtitle">AST evaluation, math &amp; transforms</text>
+    </g>
+
+    <!-- Step Flow Arrow 2 with prominent visible shaft and head -->
+    <line x1="135" y1="188" x2="135" y2="204" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowOrange)" />
+
+    <!-- Sub-step 3: Windows -->
+    <g transform="translate(14, 208)">
+      <rect x="0" y="0" width="242" height="54" rx="8" fill="#1e1e2f" stroke="#475569" stroke-width="1" />
+      <text x="14" y="22" class="card-title">Window State Engine</text>
+      <text x="14" y="40" class="card-subtitle">Tumbling, Hopping, Sliding, Session</text>
+    </g>
+
+    <!-- Engine Specs Bar -->
+    <g transform="translate(14, 276)">
+      <rect x="0" y="0" width="242" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <circle cx="14" cy="19" r="3" fill="#10b981" />
+      <text x="24" y="17" fill="#38bdf8" class="badge-text">150k - 200k msg/s</text>
+      <text x="24" y="29" fill="#94a3b8" font-size="9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Sub-5MB RAM  •  Zero GC Pauses</text>
+    </g>
+  </g>
+
+  <!-- ==================== CONNECTORS: ENGINE -> SINKS ==================== -->
+  <path d="M 624 145 C 665 145, 680 100, 710 100" fill="none" stroke="url(#streamGrad2)" stroke-width="2.5" marker-end="url(#arrowEmerald)" />
+  <path d="M 624 175 C 665 175, 680 175, 710 175" fill="none" stroke="url(#streamGrad2)" stroke-width="2.5" marker-end="url(#arrowEmerald)" />
+  <path d="M 624 205 C 665 205, 680 250, 710 250" fill="none" stroke="url(#streamGrad2)" stroke-width="2.5" marker-end="url(#arrowEmerald)" />
+
+  <!-- ==================== COLUMN 3: SINKS ==================== -->
+  <g transform="translate(718, 24)">
+    <rect x="0" y="0" width="198" height="28" rx="6" fill="url(#emeraldGlow)" stroke="#059669" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#34d399" />
+    <text x="26" y="18" fill="#34d399" class="title-text">2. Actionable Sinks</text>
+
+    <!-- Sink Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="198" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#065f46" />
+      <text x="20" y="27" font-size="10" fill="#a7f3d0" text-anchor="middle" font-weight="700">L</text>
+      <text x="36" y="26" class="card-title">Local Storage</text>
+      <text x="36" y="44" class="card-subtitle">SQLite, Files, Bounded Memory</text>
+    </g>
+
+    <!-- Sink Node 2 -->
+    <g transform="translate(0, 122)">
+      <rect x="0" y="0" width="198" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#047857" />
+      <text x="20" y="27" font-size="10" fill="#d1fae5" text-anchor="middle" font-weight="700">C</text>
+      <text x="36" y="26" class="card-title">Cloud &amp; Brokers</text>
+      <text x="36" y="44" class="card-subtitle">Filtered MQTT, Kafka, EdgeX</text>
+    </g>
+
+    <!-- Sink Node 3 -->
+    <g transform="translate(0, 202)">
+      <rect x="0" y="0" width="198" height="66" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-width="1" filter="url(#cardShadow)" />
+      <circle cx="20" cy="24" r="8" fill="#059669" />
+      <text x="20" y="27" font-size="10" fill="#ecfdf5" text-anchor="middle" font-weight="700">A</text>
+      <text x="36" y="26" class="card-title">Instant Alerts</text>
+      <text x="36" y="44" class="card-subtitle">HTTP Webhooks, Actuator Signals</text>
+    </g>
+  </g>
+</svg>

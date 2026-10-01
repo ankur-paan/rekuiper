@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgMcp" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#9333ea" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="orangeGlow2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="indigoGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="cardMcp" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- userSpaceOnUse ensures all lines have full visible gradient stroke -->
+    <linearGradient id="flowMcp1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="346" y2="0">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <linearGradient id="flowMcp2" gradientUnits="userSpaceOnUse" x1="626" y1="0" x2="716" y2="0">
+      <stop offset="0%" stop-color="#c084fc" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+
+    <filter id="mcpShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <marker id="arrP" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#c084fc" />
+    </marker>
+    <marker id="arrO2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb923c" />
+    </marker>
+  </defs>
+
+  <style>
+    .hdr { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .t1 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .t2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container -->
+  <rect x="2" y="2" width="936" height="356" rx="16" fill="url(#bgMcp)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ==================== 1. AI CLIENT ==================== -->
+  <g transform="translate(24, 24)">
+    <rect x="0" y="0" width="220" height="28" rx="6" fill="url(#indigoGlow)" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#818cf8" />
+    <text x="26" y="18" fill="#a5b4fc" class="hdr">1. AI Assistant / IDE</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">Cursor / Antigravity</text>
+      <text x="14" y="44" class="t2">In-editor code generation</text>
+      <text x="14" y="60" fill="#818cf8" class="mono">Agentic tool calling</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">Claude Desktop</text>
+      <text x="14" y="44" class="t2">Local conversational assistant</text>
+      <text x="14" y="60" fill="#a78bfa" class="mono">Stdio client bridge</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">CI/CD &amp; CLI Scripts</text>
+      <text x="14" y="44" class="t2">Automated rule verification</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">Headless batch runs</text>
+    </g>
+  </g>
+
+  <!-- Connectors Client -> MCP with userSpaceOnUse and prominent visible tails -->
+  <path d="M 244 115 C 290 115, 305 130, 340 130" fill="none" stroke="url(#flowMcp1)" stroke-width="2.5" marker-end="url(#arrP)" />
+  <path d="M 244 167 C 290 167, 305 167, 340 167" fill="none" stroke="url(#flowMcp1)" stroke-width="2.5" marker-end="url(#arrP)" />
+  <path d="M 244 255 C 290 255, 305 204, 340 204" fill="none" stroke="url(#flowMcp1)" stroke-width="2.5" marker-end="url(#arrP)" />
+
+  <!-- ==================== 2. REKUIPER-MCP SERVER ==================== -->
+  <g transform="translate(346, 24)">
+    <rect x="0" y="0" width="280" height="308" rx="14" fill="#1b122c" stroke="#a855f7" stroke-width="1.5" stroke-opacity="0.8" filter="url(#mcpShadow)" />
+
+    <rect x="14" y="14" width="252" height="28" rx="6" fill="url(#purpleGlow)" stroke="#a855f7" stroke-width="1" stroke-opacity="0.5" />
+    <circle cx="28" cy="28" r="4" fill="#c084fc" />
+    <text x="40" y="32" fill="#c084fc" class="hdr">2. rekuiper-mcp Server</text>
+
+    <!-- Sub-block 1: Stdio Interface -->
+    <g transform="translate(14, 52)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#130d24" stroke="#4c1d95" stroke-width="1" />
+      <text x="12" y="22" class="t1">JSON-RPC 2.0 Stdio</text>
+      <text x="12" y="39" class="t2">Direct IPC pipe, zero open network ports</text>
+    </g>
+
+    <!-- Visible arrow with shaft -->
+    <line x1="140" y1="106" x2="140" y2="116" stroke="#c084fc" stroke-width="2" marker-end="url(#arrP)" />
+
+    <!-- Sub-block 2: Offline AST & Simulation -->
+    <g transform="translate(14, 118)">
+      <rect x="0" y="0" width="252" height="66" rx="8" fill="#130d24" stroke="#4c1d95" stroke-width="1" />
+      <text x="12" y="22" class="t1">Offline AST &amp; Simulation</text>
+      <text x="12" y="40" class="t2">Embedded SQL validation engine</text>
+      <text x="12" y="55" fill="#c084fc" class="mono">validate_sql  •  simulate_query</text>
+    </g>
+
+    <!-- Visible arrow with shaft -->
+    <line x1="140" y1="184" x2="140" y2="194" stroke="#c084fc" stroke-width="2" marker-end="url(#arrP)" />
+
+    <!-- Sub-block 3: Universal Proxy -->
+    <g transform="translate(14, 196)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#130d24" stroke="#4c1d95" stroke-width="1" />
+      <text x="12" y="22" class="t1">Universal REST Proxy</text>
+      <text x="12" y="40" class="t2">CRUD streams, rules, schemas, traces</text>
+    </g>
+
+    <!-- Badge stats -->
+    <g transform="translate(14, 258)">
+      <rect x="0" y="0" width="252" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <text x="12" y="16" fill="#c084fc" class="mono">42 Tools  •  11 Resources  •  5 Prompts</text>
+      <text x="12" y="28" fill="#94a3b8" font-size="9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Native Rust binary  •  Instant response</text>
+    </g>
+  </g>
+
+  <!-- Connectors MCP -> Engine with visible tail -->
+  <path d="M 626 160 C 665 160, 675 160, 710 160" fill="none" stroke="url(#flowMcp2)" stroke-width="2.5" marker-end="url(#arrO2)" />
+
+  <!-- ==================== 3. REKUIPER ENGINE ==================== -->
+  <g transform="translate(716, 24)">
+    <rect x="0" y="0" width="200" height="28" rx="6" fill="url(#orangeGlow2)" stroke="#ea580c" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#fb923c" />
+    <text x="26" y="18" fill="#fb923c" class="hdr">3. rekuiper Engine</text>
+
+    <!-- Engine Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">REST API Daemon</text>
+      <text x="14" y="44" class="t2">Axum HTTP server</text>
+      <text x="14" y="60" fill="#fb923c" class="mono">Port 9081</text>
+    </g>
+
+    <!-- Engine Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">Tokio Stream Pipeline</text>
+      <text x="14" y="44" class="t2">Live rule topologies</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">MQTT, Kafka, Redis</text>
+    </g>
+
+    <!-- Engine Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardMcp)" stroke="#334155" stroke-width="1" filter="url(#mcpShadow)" />
+      <text x="14" y="26" class="t1">Telemetry &amp; Traces</text>
+      <text x="14" y="44" class="t2">Execution metrics &amp; logs</text>
+      <text x="14" y="60" fill="#10b981" class="mono">Prometheus /metrics</text>
+    </g>
+  </g>
+</svg>

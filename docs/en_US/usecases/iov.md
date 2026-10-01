@@ -10,33 +10,7 @@ rekuiper deploys directly onto automotive telematics boxes (T-BOX), in-vehicle M
 
 In automotive and charging architectures, rekuiper runs as a local streaming coprocessor:
 
-```mermaid
-flowchart LR
-    subgraph Ingest["1. Vehicle & Station Ingress"]
-        direction TB
-        I1["CAN Bus / Microcontrollers\n(SocketCAN / Serial)"]
-        I2["EV Charging Ports\n(OCPP / Modbus / MQTT)"]
-        I3["Navigation & Sensors\n(GPS / Accelerometers)"]
-    end
-
-    subgraph Engine["2. Edge Gateway (rekuiper)"]
-        direction TB
-        R1["Stream Parsing & Decoding"]
-        R2["Session Windows & Aggregates\n(SESSIONWINDOW, 10s Tumbling)"]
-        R3["Local Rules & Change Detection\n(CHANGED_COLS)"]
-        R1 --> R2 --> R3
-    end
-
-    subgraph Output["3. Action & Upstream Routing"]
-        direction TB
-        O1["In-Vehicle Actuators / IPC\n(Immediate safety response)"]
-        O2["Local Flash Storage\n(Offline event log)"]
-        O3["Cloud Broker / Telematics Core\n(Cellular uplink)"]
-    end
-
-    Ingest --> Engine
-    R3 --> Output
-```
+![Connected Vehicles and EV Charging Edge Architecture](../public/diagrams/iov_architecture.svg)
 
 ---
 

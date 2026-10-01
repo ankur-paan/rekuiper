@@ -10,33 +10,7 @@ rekuiper runs directly on industrial PCs, embedded gateways, and edge servers to
 
 In modern industrial architectures, rekuiper acts as the local real-time compute engine between factory-floor controllers and enterprise systems:
 
-```mermaid
-flowchart LR
-    subgraph Floor["1. Factory Floor"]
-        direction TB
-        F1["PLCs & CNCs\n(Modbus / OPC UA)"]
-        F2["Smart Meters & Sensors\n(MQTT / Serial)"]
-        F3["SCADA & MES\n(REST / Databases)"]
-    end
-
-    subgraph Edge["2. Edge Gateway (rekuiper)"]
-        direction TB
-        R1["Stream Ingestion\n(MQTT, HTTP, Kafka, Files)"]
-        R2["SQL Rules & Windows\n(10s tumbling, sliding, session)"]
-        R3["Edge AI Inference\n(Python & Wasm)"]
-        R1 --> R2 --> R3
-    end
-
-    subgraph Upstream["3. Control & Cloud"]
-        direction TB
-        U1["Local Actuators\n(Immediate Feedback)"]
-        U2["Plant Historian / InfluxDB\n(Aggregated Telemetry)"]
-        U3["Enterprise Cloud / Kafka\n(Analytics & Dashboards)"]
-    end
-
-    Floor --> Edge
-    R3 --> Upstream
-```
+![Industrial IoT Edge Architecture](../public/diagrams/iiot_architecture.svg)
 
 ---
 

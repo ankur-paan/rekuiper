@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgEsp" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="orangeGlow3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="greenGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="cardEsp" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- userSpaceOnUse ensures all lines have full visible gradient stroke -->
+    <linearGradient id="flowEsp1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="346" y2="0">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <linearGradient id="flowEsp2" gradientUnits="userSpaceOnUse" x1="626" y1="0" x2="716" y2="0">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <filter id="espShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <marker id="arrEspO" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb923c" />
+    </marker>
+    <marker id="arrEspG" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <style>
+    .hdr { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .t1 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .t2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container -->
+  <rect x="2" y="2" width="936" height="356" rx="16" fill="url(#bgEsp)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ==================== 1. ESPHOME FLEET ==================== -->
+  <g transform="translate(24, 24)">
+    <rect x="0" y="0" width="220" height="28" rx="6" fill="url(#cyanGlow)" stroke="#0891b2" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#06b6d4" />
+    <text x="26" y="18" fill="#22d3ee" class="hdr">1. ESPHome Fleet</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">ESP32 Climate Node</text>
+      <text x="14" y="44" class="t2">Temp, humidity, barometric</text>
+      <text x="14" y="60" fill="#22d3ee" class="mono">.../sensor/temp/state</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">ESP8266 Power Meter</text>
+      <text x="14" y="44" class="t2">Voltage, current, power factor</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">.../sensor/watts/state</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">ESP32 Air Quality</text>
+      <text x="14" y="44" class="t2">CO2 ppm, PM2.5, VOC index</text>
+      <text x="14" y="60" fill="#a5f3fc" class="mono">.../sensor/co2/state</text>
+    </g>
+  </g>
+
+  <!-- Connectors Fleet -> Gateway with userSpaceOnUse and visible tails -->
+  <path d="M 244 115 C 290 115, 305 130, 340 130" fill="none" stroke="url(#flowEsp1)" stroke-width="2.5" marker-end="url(#arrEspO)" />
+  <path d="M 244 167 C 290 167, 305 167, 340 167" fill="none" stroke="url(#flowEsp1)" stroke-width="2.5" marker-end="url(#arrEspO)" />
+  <path d="M 244 255 C 290 255, 305 204, 340 204" fill="none" stroke="url(#flowEsp1)" stroke-width="2.5" marker-end="url(#arrEspO)" />
+
+  <!-- ==================== 2. EDGE GATEWAY (REKUIPER) ==================== -->
+  <g transform="translate(346, 24)">
+    <rect x="0" y="0" width="280" height="308" rx="14" fill="#181329" stroke="#f97316" stroke-width="1.5" stroke-opacity="0.8" filter="url(#espShadow)" />
+
+    <rect x="14" y="14" width="252" height="28" rx="6" fill="url(#orangeGlow3)" stroke="#f97316" stroke-width="1" stroke-opacity="0.5" />
+    <circle cx="28" cy="28" r="4" fill="#fb923c" />
+    <text x="40" y="32" fill="#fb923c" class="hdr">2. Edge Gateway (rekuiper)</text>
+
+    <!-- Sub-block 1: Wildcard Subscription -->
+    <g transform="translate(14, 52)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#121827" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Wildcard Ingestion</text>
+      <text x="12" y="38" fill="#fb923c" class="mono">esphome/+/sensor/+/state</text>
+    </g>
+
+    <line x1="140" y1="106" x2="140" y2="116" stroke="#fb923c" stroke-width="2" marker-end="url(#arrEspO)" />
+
+    <!-- Sub-block 2: Dynamic Topic Extraction -->
+    <g transform="translate(14, 118)">
+      <rect x="0" y="0" width="252" height="66" rx="8" fill="#121827" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Dynamic Topic Extraction</text>
+      <text x="12" y="40" class="t2">Extract device and sensor names</text>
+      <text x="12" y="55" fill="#38bdf8" class="mono">meta(topic)  •  split(topic, '/')</text>
+    </g>
+
+    <line x1="140" y1="184" x2="140" y2="194" stroke="#fb923c" stroke-width="2" marker-end="url(#arrEspO)" />
+
+    <!-- Sub-block 3: Windows & Filter -->
+    <g transform="translate(14, 196)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#121827" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Aggregation &amp; Deadband</text>
+      <text x="12" y="40" class="t2">10s tumbling avg, spike rejection</text>
+    </g>
+
+    <!-- Specs Footer -->
+    <g transform="translate(14, 258)">
+      <rect x="0" y="0" width="252" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <text x="12" y="16" fill="#34d399" class="mono">150,000 msg/s  •  Sub-5MB RAM</text>
+      <text x="12" y="28" fill="#94a3b8" font-size="9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Raspberry Pi, industrial PC, router</text>
+    </g>
+  </g>
+
+  <!-- Connectors Gateway -> Downstream with visible tail -->
+  <path d="M 626 160 C 665 160, 675 160, 710 160" fill="none" stroke="url(#flowEsp2)" stroke-width="2.5" marker-end="url(#arrEspG)" />
+
+  <!-- ==================== 3. DOWNSTREAM ==================== -->
+  <g transform="translate(716, 24)">
+    <rect x="0" y="0" width="200" height="28" rx="6" fill="url(#greenGlow)" stroke="#059669" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#34d399" />
+    <text x="26" y="18" fill="#34d399" class="hdr">3. Storage &amp; Dashboards</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">Home Assistant</text>
+      <text x="14" y="44" class="t2">De-duplicated sensor state</text>
+      <text x="14" y="60" fill="#34d399" class="mono">MQTT state updates</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">TimescaleDB / Influx</text>
+      <text x="14" y="44" class="t2">Downsampled 1m time-series</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">SQL bulk insert</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardEsp)" stroke="#334155" stroke-width="1" filter="url(#espShadow)" />
+      <text x="14" y="26" class="t1">Local Alarm Relay</text>
+      <text x="14" y="44" class="t2">Immediate threshold alarm</text>
+      <text x="14" y="60" fill="#fb923c" class="mono">HTTP POST webhook</text>
+    </g>
+  </g>
+</svg>

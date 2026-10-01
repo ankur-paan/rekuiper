@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 240" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGs" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="cardGs" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- userSpaceOnUse ensures the 92px horizontal line always renders its gradient tail -->
+    <linearGradient id="flowGs1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="336" y2="0">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <linearGradient id="flowGs2" gradientUnits="userSpaceOnUse" x1="620" y1="0" x2="706" y2="0">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <filter id="gsShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+
+    <marker id="mO" markerWidth="8" markerHeight="8" refX="5" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#fb923c" />
+    </marker>
+    <marker id="mE" markerWidth="8" markerHeight="8" refX="5" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <style>
+    .t1 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .t2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container -->
+  <rect x="2" y="2" width="936" height="236" rx="14" fill="url(#bgGs)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- Node 1: Sensor Ingest -->
+  <g transform="translate(24, 34)">
+    <rect x="0" y="0" width="220" height="168" rx="10" fill="url(#cardGs)" stroke="#0284c7" stroke-width="1.5" filter="url(#gsShadow)" />
+    <rect x="14" y="14" width="60" height="20" rx="4" fill="#0369a1" />
+    <text x="44" y="28" fill="#e0f2fe" text-anchor="middle" class="mono">INGEST</text>
+    <text x="14" y="60" class="t1">Temperature Sensor</text>
+    <text x="14" y="78" class="t2">MQTT Stream Topic:</text>
+    <text x="14" y="96" fill="#38bdf8" class="mono">devices/+/telemetry</text>
+    <line x1="14" y1="112" x2="206" y2="112" stroke="#334155" stroke-width="1" />
+    <text x="14" y="130" fill="#cbd5e1" class="mono">{"temperature": 32.5,</text>
+    <text x="14" y="146" fill="#cbd5e1" class="mono"> "humidity": 64.0}</text>
+  </g>
+
+  <!-- Flow 1 -> 2: 92px prominent visible tail -->
+  <line x1="244" y1="118" x2="336" y2="118" stroke="url(#flowGs1)" stroke-width="2.5" marker-end="url(#mO)" />
+
+  <!-- Node 2: rekuiper Engine -->
+  <g transform="translate(340, 24)">
+    <rect x="0" y="0" width="280" height="188" rx="12" fill="#18182b" stroke="#f97316" stroke-width="1.5" filter="url(#gsShadow)" />
+    <rect x="14" y="14" width="80" height="20" rx="4" fill="#c2410c" />
+    <text x="54" y="28" fill="#ffedd5" text-anchor="middle" class="mono">REKUIPER</text>
+    <text x="14" y="60" class="t1">Filter &amp; Window Logic</text>
+
+    <!-- Sub-card SQL -->
+    <g transform="translate(14, 74)">
+      <rect x="0" y="0" width="252" height="66" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <text x="10" y="18" fill="#fb923c" class="mono">SELECT avg(temperature)</text>
+      <text x="10" y="34" fill="#94a3b8" class="mono">FROM demo_stream</text>
+      <text x="10" y="50" fill="#38bdf8" class="mono">WHERE temperature &gt; 30.0</text>
+    </g>
+
+    <text x="14" y="162" fill="#cbd5e1" font-size="11" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Sliding 10-Second Window</text>
+    <text x="14" y="176" fill="#10b981" class="mono">Sub-millisecond latency</text>
+  </g>
+
+  <!-- Flow 2 -> 3: 86px prominent curved tails -->
+  <path d="M 620 90 C 655 90, 665 74, 702 74" fill="none" stroke="url(#flowGs2)" stroke-width="2.5" marker-end="url(#mE)" />
+  <path d="M 620 146 C 655 146, 665 162, 702 162" fill="none" stroke="url(#flowGs2)" stroke-width="2.5" marker-end="url(#mE)" />
+
+  <!-- Node 3: Sinks (Two split targets) -->
+  <g transform="translate(706, 24)">
+    <!-- Sink 1: Engine Log -->
+    <g transform="translate(0, 8)">
+      <rect x="0" y="0" width="210" height="80" rx="8" fill="url(#cardGs)" stroke="#10b981" stroke-width="1.5" filter="url(#gsShadow)" />
+      <rect x="12" y="10" width="46" height="18" rx="4" fill="#047857" />
+      <text x="35" y="23" fill="#d1fae5" text-anchor="middle" class="mono">SINK 1</text>
+      <text x="12" y="46" class="t1">Engine Log (Stdout)</text>
+      <text x="12" y="64" class="t2">Instant console debugging</text>
+    </g>
+
+    <!-- Sink 2: MQTT Alert -->
+    <g transform="translate(0, 100)">
+      <rect x="0" y="0" width="210" height="80" rx="8" fill="url(#cardGs)" stroke="#10b981" stroke-width="1.5" filter="url(#gsShadow)" />
+      <rect x="12" y="10" width="46" height="18" rx="4" fill="#047857" />
+      <text x="35" y="23" fill="#d1fae5" text-anchor="middle" class="mono">SINK 2</text>
+      <text x="12" y="46" class="t1">MQTT / Webhook</text>
+      <text x="12" y="64" fill="#34d399" class="mono">topic: alerts/temperature</text>
+    </g>
+  </g>
+</svg>

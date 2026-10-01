@@ -16,37 +16,7 @@ We built it for IIoT gateways, ESPHome fleets, vehicles, and EV chargers: small 
 ## How It Works
 
 rekuiper processes live telemetry on the local machine before sending data upstream:
-
-```mermaid
-flowchart LR
-    subgraph S["1. Input Sources"]
-        S1["Sensors & ESPHome\n(MQTT)"]
-        S2["HTTP & Webhooks\n(REST / Push)"]
-        S3["Message Queues\n(Kafka / WS)"]
-    end
-
-    subgraph E["2. rekuiper Engine"]
-        direction TB
-        E1["SQL Stream Parser"]
-        E2["Windowing & Aggregation\n(10s tumbling, sliding, session)"]
-        E3["Real-Time Filter & Alerting\n(temperature > 30)"]
-        E1 --> E2 --> E3
-    end
-
-    subgraph O["3. Actionable Sinks"]
-        O1["Local Storage\n(SQLite / File / DB)"]
-        O2["Cloud / Brokers\n(Filtered MQTT / Kafka)"]
-        O3["Instant Alerts\n(Webhooks / Actuators)"]
-    end
-
-    S1 --> E1
-    S2 --> E1
-    S3 --> E1
-
-    E3 --> O1
-    E3 --> O2
-    E3 --> O3
-```
+![How rekuiper Works](./public/diagrams/how_it_works.svg)
 
 1. **Ingest**: Read continuous sensor streams via standard protocols (MQTT, HTTP, WebSockets, Kafka, Files).
 2. **Process**: Filter noise, compute moving averages, and correlate events across time windows with SQL.

@@ -8,33 +8,7 @@ When managing hundreds or thousands of devices, central brokers can become overw
 
 ## Fleet Architecture
 
-```mermaid
-flowchart LR
-    subgraph Nodes["1. ESPHome Fleet"]
-        direction TB
-        N1["ESP32 Climate Sensor\n(Temperature / Humidity)"]
-        N2["ESP8266 Power Monitor\n(Voltage / Current / Watts)"]
-        N3["ESP32 Environmental Node\n(Air Quality / CO2)"]
-    end
-
-    subgraph Edge["2. Edge Gateway (rekuiper)"]
-        direction TB
-        E1["MQTT Wildcard Ingestion\n(esphome/+/sensor/+/state)"]
-        E2["Dynamic Topic Extraction\n(meta(topic), split)"]
-        E3["Windowed Aggregation & Deadbanding\n(10s tumbling avg, filter spikes)"]
-        E1 --> E2 --> E3
-    end
-
-    subgraph Downstream["3. Storage & Dashboards"]
-        direction TB
-        D1["Home Assistant / OpenHAB\n(Filtered state updates)"]
-        D2["TimescaleDB / InfluxDB\n(Downsampled 1m averages)"]
-        D3["Local Alert Webhook\n(Immediate anomaly alarms)"]
-    end
-
-    Nodes --> Edge
-    E3 --> Downstream
-```
+![ESPHome Fleet Telemetry Architecture](../public/diagrams/esphome_fleet.svg)
 
 ---
 

@@ -8,44 +8,7 @@ rekuiper is a stream processing engine written in Rust. It runs continuous SQL q
 
 rekuiper operates as an asynchronous event-driven pipeline:
 
-```mermaid
-flowchart TB
-    subgraph Ingestion["1. Ingestion Layer"]
-        M[MQTT Source]
-        H[HTTP Push / Pull]
-        W[WebSocket Source]
-        K[Kafka / File / Redis]
-    end
-
-    subgraph Core["2. rekuiper Rust Engine (Tokio Runtime)"]
-        direction TB
-        subgraph Pipeline["Zero-Copy Event Pipeline"]
-            Dec["Decoder & Deserializer\n(JSON / Protobuf / Binary)"]
-            AST["SQL Engine & Filter\n(rekuiper-sql AST Evaluator)"]
-            Win["Window State Accumulator\n(Tumbling / Sliding / Session)"]
-            Dec --> AST --> Win
-        end
-        
-        subgraph Mgmt["Management & AI Layer"]
-            REST["Axum HTTP REST API\n(:9081)"]
-            CLI["Management RPC / IPC\n(:20499)"]
-            MCP["Model Context Protocol Server\n(rekuiper-mcp)"]
-        end
-    end
-
-    subgraph Sinks["3. Action & Egress Layer"]
-        L[Log & Local Files]
-        R[Filtered MQTT Broker]
-        DB[SQLite / SQL Database]
-        API[External REST Webhook]
-    end
-
-    Ingestion --> Dec
-    Win --> Sinks
-    REST -.-> Pipeline
-    CLI -.-> Pipeline
-    MCP -.-> AST
-```
+![rekuiper Architecture Overview](../public/diagrams/architecture_overview.svg)
 
 ### Event Lifecycle
 
@@ -108,13 +71,7 @@ rekuiper maintains wire and API compatibility with eKuiper while replacing the i
 
 Rules compile into a Directed Acyclic Graph (DAG) executed as asynchronous tasks on Tokio:
 
-```mermaid
-flowchart LR
-    Source["Source Node\n(MQTT / HTTP)"] --> Buffer["Tokio Channel\n(Bounded Queue)"]
-    Buffer --> Transform["Filter & Transform\n(rekuiper-sql)"]
-    Transform --> Window["Window Accumulator\n(Time / Count Trigger)"]
-    Window --> Egress["Sink Node\n(Log / MQTT / DB)"]
-```
+![Execution Graph and Topology DAG](../public/diagrams/topology_dag.svg)
 
 - **Bounded Buffers**: Stage-to-stage channels are bounded to provide backpressure if downstream sinks slow down.
 - **State Checkpoints**: Rule states and window accumulators can persist across restarts.

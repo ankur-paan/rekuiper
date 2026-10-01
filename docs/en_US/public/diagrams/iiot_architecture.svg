@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgIiot" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="amberGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="orangeGlow4" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="emeraldGlow2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="cardIiot" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- userSpaceOnUse ensures all lines have full visible gradient stroke -->
+    <linearGradient id="flowIiot1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="346" y2="0">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <linearGradient id="flowIiot2" gradientUnits="userSpaceOnUse" x1="626" y1="0" x2="716" y2="0">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <filter id="iiotShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <marker id="arrIiotO" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb923c" />
+    </marker>
+    <marker id="arrIiotG" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <style>
+    .hdr { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .t1 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .t2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container -->
+  <rect x="2" y="2" width="936" height="356" rx="16" fill="url(#bgIiot)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ==================== 1. FACTORY FLOOR ==================== -->
+  <g transform="translate(24, 24)">
+    <rect x="0" y="0" width="220" height="28" rx="6" fill="url(#amberGlow)" stroke="#d97706" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#f59e0b" />
+    <text x="26" y="18" fill="#fbbf24" class="hdr">1. Factory Floor</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">PLCs &amp; Machine Tools</text>
+      <text x="14" y="44" class="t2">Modbus, OPC UA gateways</text>
+      <text x="14" y="60" fill="#f59e0b" class="mono">High-speed register reads</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">Smart Sensors</text>
+      <text x="14" y="44" class="t2">Vibration, temperature, power</text>
+      <text x="14" y="60" fill="#fbbf24" class="mono">MQTT, RS-485 serial</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">SCADA &amp; Edge Databases</text>
+      <text x="14" y="44" class="t2">Plant operational states</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">SQL tables &amp; REST</text>
+    </g>
+  </g>
+
+  <!-- Connectors Floor -> Gateway with visible tails -->
+  <path d="M 244 115 C 290 115, 305 130, 340 130" fill="none" stroke="url(#flowIiot1)" stroke-width="2.5" marker-end="url(#arrIiotO)" />
+  <path d="M 244 167 C 290 167, 305 167, 340 167" fill="none" stroke="url(#flowIiot1)" stroke-width="2.5" marker-end="url(#arrIiotO)" />
+  <path d="M 244 255 C 290 255, 305 204, 340 204" fill="none" stroke="url(#flowIiot1)" stroke-width="2.5" marker-end="url(#arrIiotO)" />
+
+  <!-- ==================== 2. EDGE GATEWAY (REKUIPER) ==================== -->
+  <g transform="translate(346, 24)">
+    <rect x="0" y="0" width="280" height="308" rx="14" fill="#1c1626" stroke="#f97316" stroke-width="1.5" stroke-opacity="0.8" filter="url(#iiotShadow)" />
+
+    <rect x="14" y="14" width="252" height="28" rx="6" fill="url(#orangeGlow4)" stroke="#f97316" stroke-width="1" stroke-opacity="0.5" />
+    <circle cx="28" cy="28" r="4" fill="#fb923c" />
+    <text x="40" y="32" fill="#fb923c" class="hdr">2. Edge Gateway (rekuiper)</text>
+
+    <!-- Sub-block 1: Stream Ingestion -->
+    <g transform="translate(14, 52)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#131724" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Zero-Copy Ingestion</text>
+      <text x="12" y="40" class="t2">MQTT, Kafka, Redis, WebSocket, File</text>
+    </g>
+
+    <line x1="140" y1="106" x2="140" y2="116" stroke="#fb923c" stroke-width="2" marker-end="url(#arrIiotO)" />
+
+    <!-- Sub-block 2: Continuous SQL Rules -->
+    <g transform="translate(14, 118)">
+      <rect x="0" y="0" width="252" height="66" rx="8" fill="#131724" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Continuous SQL Rules</text>
+      <text x="12" y="40" class="t2">Windowing &amp; moving averages</text>
+      <text x="12" y="55" fill="#fb923c" class="mono">tumbling, hopping, sliding</text>
+    </g>
+
+    <line x1="140" y1="184" x2="140" y2="194" stroke="#fb923c" stroke-width="2" marker-end="url(#arrIiotO)" />
+
+    <!-- Sub-block 3: Edge AI -->
+    <g transform="translate(14, 196)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#131724" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Anomaly &amp; ML Inference</text>
+      <text x="12" y="40" class="t2">WebAssembly (Wasm) &amp; External UDF</text>
+    </g>
+
+    <!-- Specs Footer -->
+    <g transform="translate(14, 258)">
+      <rect x="0" y="0" width="252" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <text x="12" y="16" fill="#10b981" class="mono">Industrial PC  •  Sub-5MB Memory</text>
+      <text x="12" y="28" fill="#94a3b8" font-size="9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Zero garbage collection  •  Sub-ms latency</text>
+    </g>
+  </g>
+
+  <!-- Connectors Gateway -> Upstream with visible tail -->
+  <path d="M 626 160 C 665 160, 675 160, 710 160" fill="none" stroke="url(#flowIiot2)" stroke-width="2.5" marker-end="url(#arrIiotG)" />
+
+  <!-- ==================== 3. CONTROL & ENTERPRISE ==================== -->
+  <g transform="translate(716, 24)">
+    <rect x="0" y="0" width="200" height="28" rx="6" fill="url(#emeraldGlow2)" stroke="#059669" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#34d399" />
+    <text x="26" y="18" fill="#34d399" class="hdr">3. Control &amp; Cloud</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">Local Actuators</text>
+      <text x="14" y="44" class="t2">Immediate control loop feedback</text>
+      <text x="14" y="60" fill="#34d399" class="mono">Latency: &lt; 5ms</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">Plant Historian</text>
+      <text x="14" y="44" class="t2">TimescaleDB, InfluxDB, File</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">Filtered time-series</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIiot)" stroke="#334155" stroke-width="1" filter="url(#iiotShadow)" />
+      <text x="14" y="26" class="t1">Enterprise Cloud</text>
+      <text x="14" y="44" class="t2">Kafka clusters, AWS, Azure</text>
+      <text x="14" y="60" fill="#a78bfa" class="mono">Central dashboards</text>
+    </g>
+  </g>
+</svg>

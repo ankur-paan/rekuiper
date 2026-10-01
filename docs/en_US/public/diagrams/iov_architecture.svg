@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgIov" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <linearGradient id="roseGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#be123c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="orangeGlow5" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="emeraldGlow3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="cardIov" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- userSpaceOnUse ensures all lines have full visible gradient stroke -->
+    <linearGradient id="flowIov1" gradientUnits="userSpaceOnUse" x1="244" y1="0" x2="346" y2="0">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+    <linearGradient id="flowIov2" gradientUnits="userSpaceOnUse" x1="626" y1="0" x2="716" y2="0">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <filter id="iovShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <marker id="arrIovO" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb923c" />
+    </marker>
+    <marker id="arrIovG" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 1 1 L 7 4 L 1 7 Z" fill="#34d399" />
+    </marker>
+  </defs>
+
+  <style>
+    .hdr { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .t1 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #f8fafc; }
+    .t2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 400; fill: #94a3b8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Container -->
+  <rect x="2" y="2" width="936" height="356" rx="16" fill="url(#bgIov)" stroke="#1e293b" stroke-width="1.5" />
+
+  <!-- ==================== 1. VEHICLE & STATION INGRESS ==================== -->
+  <g transform="translate(24, 24)">
+    <rect x="0" y="0" width="220" height="28" rx="6" fill="url(#roseGlow)" stroke="#be123c" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#f43f5e" />
+    <text x="26" y="18" fill="#fda4af" class="hdr">1. Vehicle &amp; Station</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">CAN Bus Telemetry</text>
+      <text x="14" y="44" class="t2">SocketCAN, OBD-II, J1939</text>
+      <text x="14" y="60" fill="#f43f5e" class="mono">High-rate frames &gt; 10kHz</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">EV Charging Stations</text>
+      <text x="14" y="44" class="t2">OCPP 1.6/2.0, Modbus, MQTT</text>
+      <text x="14" y="60" fill="#fb7185" class="mono">Voltage, kWh, billing events</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="220" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">GPS &amp; Inertial Sensors</text>
+      <text x="14" y="44" class="t2">Lat/long, speed, gyro, heading</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">Geo-fencing coordinates</text>
+    </g>
+  </g>
+
+  <!-- Connectors Ingress -> Gateway with visible tails -->
+  <path d="M 244 115 C 290 115, 305 130, 340 130" fill="none" stroke="url(#flowIov1)" stroke-width="2.5" marker-end="url(#arrIovO)" />
+  <path d="M 244 167 C 290 167, 305 167, 340 167" fill="none" stroke="url(#flowIov1)" stroke-width="2.5" marker-end="url(#arrIovO)" />
+  <path d="M 244 255 C 290 255, 305 204, 340 204" fill="none" stroke="url(#flowIov1)" stroke-width="2.5" marker-end="url(#arrIovO)" />
+
+  <!-- ==================== 2. EDGE GATEWAY (REKUIPER) ==================== -->
+  <g transform="translate(346, 24)">
+    <rect x="0" y="0" width="280" height="308" rx="14" fill="#1c1424" stroke="#f97316" stroke-width="1.5" stroke-opacity="0.8" filter="url(#iovShadow)" />
+
+    <rect x="14" y="14" width="252" height="28" rx="6" fill="url(#orangeGlow5)" stroke="#f97316" stroke-width="1" stroke-opacity="0.5" />
+    <circle cx="28" cy="28" r="4" fill="#fb923c" />
+    <text x="40" y="32" fill="#fb923c" class="hdr">2. Edge Coprocessor (rekuiper)</text>
+
+    <!-- Sub-block 1: Session Windows -->
+    <g transform="translate(14, 52)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#131522" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">EV Session Windows</text>
+      <text x="12" y="38" fill="#fb923c" class="mono">SESSIONWINDOW(minute, 5, 1)</text>
+    </g>
+
+    <line x1="140" y1="106" x2="140" y2="116" stroke="#fb923c" stroke-width="2" marker-end="url(#arrIovO)" />
+
+    <!-- Sub-block 2: Change Detection & Downsample -->
+    <g transform="translate(14, 118)">
+      <rect x="0" y="0" width="252" height="66" rx="8" fill="#131522" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Signal Downsampling</text>
+      <text x="12" y="40" class="t2">Deadband filtering &amp; diff capture</text>
+      <text x="12" y="55" fill="#38bdf8" class="mono">CHANGED_COLS("", true, v, c)</text>
+    </g>
+
+    <line x1="140" y1="184" x2="140" y2="194" stroke="#fb923c" stroke-width="2" marker-end="url(#arrIovO)" />
+
+    <!-- Sub-block 3: BMS Thermal Guard -->
+    <g transform="translate(14, 196)">
+      <rect x="0" y="0" width="252" height="54" rx="8" fill="#131522" stroke="#334155" stroke-width="1" />
+      <text x="12" y="22" class="t1">Thermal Anomaly Rules</text>
+      <text x="12" y="40" class="t2">maxCellTemp &gt; 55°C, cellDelta &gt; 8°C</text>
+    </g>
+
+    <!-- Specs Footer -->
+    <g transform="translate(14, 258)">
+      <rect x="0" y="0" width="252" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1" />
+      <text x="12" y="16" fill="#10b981" class="mono">126,000 msg/s  •  Sub-5MB RAM</text>
+      <text x="12" y="28" fill="#94a3b8" font-size="9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Automotive Linux, QNX, Telematics Box</text>
+    </g>
+  </g>
+
+  <!-- Connectors Gateway -> Output with visible tail -->
+  <path d="M 626 160 C 665 160, 675 160, 710 160" fill="none" stroke="url(#flowIov2)" stroke-width="2.5" marker-end="url(#arrIovG)" />
+
+  <!-- ==================== 3. OUTPUT & UPSTREAM ==================== -->
+  <g transform="translate(716, 24)">
+    <rect x="0" y="0" width="200" height="28" rx="6" fill="url(#emeraldGlow3)" stroke="#059669" stroke-width="1" stroke-opacity="0.4" />
+    <circle cx="14" cy="14" r="4" fill="#34d399" />
+    <text x="26" y="18" fill="#34d399" class="hdr">3. Action &amp; Cloud</text>
+
+    <!-- Node 1 -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">In-Vehicle IPC</text>
+      <text x="14" y="44" class="t2">Immediate safety alarms</text>
+      <text x="14" y="60" fill="#f43f5e" class="mono">Unix socket / CAN transmit</text>
+    </g>
+
+    <!-- Node 2 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">Local Flash Log</text>
+      <text x="14" y="44" class="t2">Offline black-box log</text>
+      <text x="14" y="60" fill="#38bdf8" class="mono">Rotating file append</text>
+    </g>
+
+    <!-- Node 3 -->
+    <g transform="translate(0, 218)">
+      <rect x="0" y="0" width="200" height="74" rx="10" fill="url(#cardIov)" stroke="#334155" stroke-width="1" filter="url(#iovShadow)" />
+      <text x="14" y="26" class="t1">Cellular Telematics</text>
+      <text x="14" y="44" class="t2">Filtered cloud uplink</text>
+      <text x="14" y="60" fill="#34d399" class="mono">80% bandwidth saved</text>
+    </g>
+  </g>
+</svg>

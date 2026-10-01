@@ -13,13 +13,7 @@ An industrial sensor publishes temperature and humidity readings every second. W
 3. Compute a moving average over a sliding 10-second window.
 4. Route alerts to a local log or target MQTT broker without buffering or latency spikes.
 
-```mermaid
-flowchart LR
-    S[Temperature Sensor] -->|JSON Stream| R["rekuiper Engine"]
-    R -->|Filter & 10s Window| A[Alerting Logic]
-    A -->|Log Alert| L[Engine Log]
-    A -->|Publish Event| M[MQTT / Webhook]
-```
+![Getting Started Pipeline](../public/diagrams/getting_started_pipeline.svg)
 
 ---
 

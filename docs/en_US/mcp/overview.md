@@ -10,30 +10,7 @@ With `rekuiper-mcp`, assistants like Cursor, Claude Desktop, Antigravity IDE, an
 
 `rekuiper-mcp` acts as a protocol bridge between your AI development environment and the rekuiper engine:
 
-```mermaid
-flowchart LR
-    subgraph Client["1. AI Assistant / IDE"]
-        direction TB
-        C1["Cursor / Claude Desktop / Antigravity"]
-    end
-
-    subgraph MCP["2. rekuiper-mcp Server"]
-        direction TB
-        M1["JSON-RPC 2.0 (stdio)"]
-        M2["Embedded rekuiper-sql\n(Offline AST & Simulation)"]
-        M1 --> M2
-    end
-
-    subgraph Engine["3. rekuiper Engine"]
-        direction TB
-        E1["REST API Daemon\n(Port 9081)"]
-        E2["Tokio Stream Pipeline\n(MQTT / Kafka / Sinks)"]
-        E1 --> E2
-    end
-
-    Client -- "JSON-RPC via stdio" --> MCP
-    MCP -- "HTTP REST (port 9081)" --> Engine
-```
+![rekuiper-mcp Architecture](../public/diagrams/mcp_architecture.svg)
 
 ### Stdio Communication Discipline
 All JSON-RPC protocol frames are transmitted exclusively over standard input (`stdin`) and standard output (`stdout`). All diagnostic logging, connection notices, and errors are directed to standard error (`stderr`) to prevent protocol corruption.
