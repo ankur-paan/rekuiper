@@ -5073,7 +5073,9 @@ impl Evaluator {
         match decompressed {
             Some(bytes) => match String::from_utf8(bytes) {
                 Ok(s) => Value::String(s),
-                Err(e) => Value::String(base64::engine::general_purpose::STANDARD.encode(e.into_bytes())),
+                Err(e) => {
+                    Value::String(base64::engine::general_purpose::STANDARD.encode(e.into_bytes()))
+                }
             },
             None => Value::Null,
         }

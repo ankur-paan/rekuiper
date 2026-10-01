@@ -2373,39 +2373,61 @@ fn test_newly_implemented_functions_all() {
         json!(3)
     );
     assert_eq!(
-        eval_one("SELECT date_diff('hour', t1, t2) AS v FROM demo", &rec_dates),
+        eval_one(
+            "SELECT date_diff('hour', t1, t2) AS v FROM demo",
+            &rec_dates
+        ),
         json!(74)
     );
 
     // 4. Date calc
     assert_eq!(
-        eval_one("SELECT date_calc(1704067200000, '1h30m') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT date_calc(1704067200000, '1h30m') AS v FROM demo",
+            &empty()
+        ),
         json!(1704067200000i64 + 90 * 60 * 1000)
     );
     assert_eq!(
-        eval_one("SELECT date_calc(1704067200000, '-2d') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT date_calc(1704067200000, '-2d') AS v FROM demo",
+            &empty()
+        ),
         json!(1704067200000i64 - 2 * 86_400_000)
     );
 
     // 5. Convert TZ
     assert_eq!(
-        eval_one("SELECT convert_tz('2024-01-01 12:00:00', 'Asia/Shanghai') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT convert_tz('2024-01-01 12:00:00', 'Asia/Shanghai') AS v FROM demo",
+            &empty()
+        ),
         json!("2024-01-01 20:00:00")
     );
     assert_eq!(
-        eval_one("SELECT convert_tz('2024-01-01 12:00:00', 'UTC') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT convert_tz('2024-01-01 12:00:00', 'UTC') AS v FROM demo",
+            &empty()
+        ),
         json!("2024-01-01 12:00:00")
     );
 
     // 6. Compress and decompress roundtrips
     for method in &["zlib", "gzip", "flate", "zstd"] {
         let compressed = eval_one(
-            &format!("SELECT compress('hello rekuiper', '{}') AS v FROM demo", method),
+            &format!(
+                "SELECT compress('hello rekuiper', '{}') AS v FROM demo",
+                method
+            ),
             &empty(),
         );
         assert!(compressed.is_string());
         let decompressed = eval_one(
-            &format!("SELECT decompress('{}', '{}') AS v FROM demo", compressed.as_str().unwrap(), method),
+            &format!(
+                "SELECT decompress('{}', '{}') AS v FROM demo",
+                compressed.as_str().unwrap(),
+                method
+            ),
             &empty(),
         );
         assert_eq!(decompressed, json!("hello rekuiper"));
@@ -2429,7 +2451,8 @@ fn test_newly_implemented_functions_all() {
         &stmt_ext,
         &rec(&[("info", json!({"k1": "v1", "k2": "v2"}))]),
         &state,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(row_ext.get("k1"), Some(&json!("v1")));
     assert_eq!(row_ext.get("k2"), Some(&json!("v2")));
 
@@ -2441,7 +2464,8 @@ fn test_newly_implemented_functions_all() {
         &stmt_cc,
         &rec(&[("v1", json!(100)), ("v2", json!(200))]),
         &state_cc,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(row_cc1.get("diff_v1"), Some(&json!(100)));
     assert_eq!(row_cc1.get("diff_v2"), Some(&json!(200)));
     // Second run with only v2 changed
@@ -2449,8 +2473,8 @@ fn test_newly_implemented_functions_all() {
         &stmt_cc,
         &rec(&[("v1", json!(100)), ("v2", json!(250))]),
         &state_cc,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(row_cc2.get("diff_v1"), None);
     assert_eq!(row_cc2.get("diff_v2"), Some(&json!(250)));
 }
-
