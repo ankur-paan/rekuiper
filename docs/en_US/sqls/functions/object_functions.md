@@ -1,5 +1,10 @@
 # Object Functions
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 17:54:00 UTC**.  
+> **Scorecard**: **10 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (10)**: `keys`, `values`, `object`, `zip`, `items`, `object_construct`, `object_concat`, `erase`, `object_pick`, `obj_to_kvpair_array`.
+
 Object functions are used to manipulate objects/maps.
 
 ## KEYS

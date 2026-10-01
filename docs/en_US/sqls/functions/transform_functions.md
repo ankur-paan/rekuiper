@@ -1,5 +1,10 @@
 # Transform Functions
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 17:54:40 UTC**.  
+> **Scorecard**: **11 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (11)**: `cast`, `convert_tz`, `to_seconds`, `encode` (base64), `decode` (base64), `compress` (zlib/gzip/flate/zstd), `decompress` (zlib/gzip/flate/zstd), `trunc`, `chr`, `hex2dec`, `dec2hex`.
+
 Transform functions manipulate data in various ways like convert types, encode with base 64 and compression.
 
 ## CAST

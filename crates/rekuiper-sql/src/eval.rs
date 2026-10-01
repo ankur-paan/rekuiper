@@ -478,6 +478,68 @@ impl Evaluator {
                     let val = Self::eval_stateful_expr(field, record, state);
                     output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
                 }
+                Expr::Call { name, args } if name.eq_ignore_ascii_case("extract") => {
+                    if let Some(arg) = args.first() {
+                        let val = Self::eval_stateful_expr(arg, record, state);
+                        if let Value::Object(map) = val {
+                            for (k, v) in map {
+                                output.insert(k, v);
+                            }
+                        }
+                    }
+                }
+                Expr::Call { name, args }
+                    if name.eq_ignore_ascii_case("changed_cols") && args.len() >= 2 =>
+                {
+                    let prefix = match Self::eval_stateful_expr(&args[0], record, state) {
+                        Value::String(s) => s,
+                        _ => String::new(),
+                    };
+                    let ignore_null = match Self::eval_stateful_expr(&args[1], record, state) {
+                        Value::Bool(b) => b,
+                        _ => false,
+                    };
+                    for (arg_idx, expr_arg) in args[2..].iter().enumerate() {
+                        if matches!(expr_arg, Expr::Wildcard) {
+                            for (k, v) in record {
+                                if k == META_KEY {
+                                    continue;
+                                }
+                                if ignore_null && v.is_null() {
+                                    continue;
+                                }
+                                let state_key = format!("changed_cols:{}:{}:{}", idx, k, "");
+                                let prev = state.state.read().get(&state_key).cloned();
+                                let changed = match (&prev, v) {
+                                    (None, _) => true,
+                                    (Some(p), c) if p.is_null() && c.is_null() => false,
+                                    (Some(p), c) => !Self::values_equal(p, c),
+                                };
+                                if changed {
+                                    state.state.write().insert(state_key, v.clone());
+                                    output.insert(format!("{}{}", prefix, k), v.clone());
+                                }
+                            }
+                        } else {
+                            let col_name = Self::column_name(expr_arg, arg_idx);
+                            let val = Self::eval_stateful_expr(expr_arg, record, state);
+                            if ignore_null && val.is_null() {
+                                continue;
+                            }
+                            let state_key = format!("changed_cols:{}:{}:{}", idx, col_name, "");
+                            let prev = state.state.read().get(&state_key).cloned();
+                            let changed = match (&prev, &val) {
+                                (None, _) => true,
+                                (Some(p), c) if p.is_null() && c.is_null() => false,
+                                (Some(p), c) => !Self::values_equal(p, c),
+                            };
+                            if changed {
+                                state.state.write().insert(state_key, val.clone());
+                                output.insert(format!("{}{}", prefix, col_name), val);
+                            }
+                        }
+                    }
+                }
                 _ => {
                     let val = Self::eval_stateful_expr(field, record, state);
                     let name = alias.unwrap_or_else(|| Self::column_name(field, idx));
@@ -531,7 +593,7 @@ impl Evaluator {
             return Vec::new();
         };
         let unnest_pos = stmt.fields.iter().position(
-            |f| matches!(f, Expr::Call { name, .. } if name.eq_ignore_ascii_case("unnest")),
+            |f| matches!(f, Expr::Call { name, .. } if name.eq_ignore_ascii_case("unnest") || name.eq_ignore_ascii_case("extract")),
         );
         let Some(idx) = unnest_pos else {
             return vec![base];
@@ -721,6 +783,49 @@ impl Evaluator {
                 partition_key.unwrap_or(""),
             );
         }
+        if lowered == "changed_cols" && args.len() >= 2 {
+            let vals: Vec<Value> = args
+                .iter()
+                .map(|a| Self::eval_stateful_expr(a, record, state))
+                .collect();
+            let prefix = match vals.first() {
+                Some(Value::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let ignore_null = match vals.get(1) {
+                Some(Value::Bool(b)) => *b,
+                _ => false,
+            };
+            let mut result_map = serde_json::Map::new();
+            for (arg_idx, expr_arg) in args.iter().skip(2).enumerate() {
+                let col_name = Self::column_name(expr_arg, arg_idx);
+                let val = &vals[arg_idx + 2];
+                if ignore_null && val.is_null() {
+                    continue;
+                }
+                let call_id = Self::column_name(expr, 0);
+                let state_key = format!(
+                    "changed_cols:{}:{}:{}",
+                    call_id,
+                    col_name,
+                    partition_key.unwrap_or("")
+                );
+                let prev = state.state.read().get(&state_key).cloned();
+                let changed = match (&prev, val) {
+                    (None, _) => true,
+                    (Some(p), c) if p.is_null() && c.is_null() => false,
+                    (Some(p), c) => !Self::values_equal(p, c),
+                };
+                if changed {
+                    state.state.write().insert(state_key, (*val).clone());
+                    result_map.insert(format!("{}{}", prefix, col_name), (*val).clone());
+                }
+            }
+            if result_map.len() == 1 && args.len() == 3 {
+                return result_map.values().next().cloned().unwrap_or(Value::Null);
+            }
+            return Value::Object(result_map);
+        }
         if lowered == "row_number" {
             if !args.is_empty() {
                 return Value::Null;
@@ -783,6 +888,7 @@ impl Evaluator {
                 | "acc_count"
                 | "acc_sum"
                 | "acc_avg"
+                | "acc_collect"
         )
     }
 
@@ -816,6 +922,7 @@ impl Evaluator {
             "acc_count" => Self::acc_count(state, &state_key, args),
             "acc_sum" => Self::acc_sum(state, &state_key, args),
             "acc_avg" => Self::acc_avg(state, &state_key, args),
+            "acc_collect" => Self::acc_collect(state, &state_key, args),
             _ => Value::Null,
         }
     }
@@ -1074,6 +1181,29 @@ impl Evaluator {
             }
             _ => Value::Null,
         }
+    }
+
+    /// `acc_collect(val)`: accumulates non-null expression values into a running array.
+    fn acc_collect(state: &RuleState, state_key: &str, args: &[Value]) -> Value {
+        if args.is_empty() {
+            return Value::Null;
+        }
+        let mut list: Vec<Value> = {
+            let guard = state.state.read();
+            if let Some(Value::Array(arr)) = guard.get(state_key) {
+                arr.clone()
+            } else {
+                Vec::new()
+            }
+        };
+        if !args[0].is_null() {
+            list.push(args[0].clone());
+            state
+                .state
+                .write()
+                .insert(state_key.to_string(), Value::Array(list.clone()));
+        }
+        Value::Array(list)
     }
 
     fn agg_last_agg_hit_count(_records: &[HashMap<String, Value>]) -> Value {
@@ -1738,9 +1868,13 @@ impl Evaluator {
                 | "object_to_kvpair_array"
                 | "collect"
                 | "keys"
-                | "values" => "array",
+                | "values"
+                | "items"
+                | "acc_collect" => "array",
                 "object_construct"
                 | "object_concat"
+                | "object"
+                | "zip"
                 | "erase"
                 | "object_erase"
                 | "object_pick"
@@ -2207,9 +2341,18 @@ impl Evaluator {
             "array_join" => Self::func_array_join(args),
             "keys" => Self::func_keys(args),
             "values" => Self::func_values(args),
+            "object" => Self::func_object(args),
+            "zip" => Self::func_zip(args),
+            "items" => Self::func_items(args),
             // ---- Conversion & utility ----
             "cast" => Self::func_cast(args),
             "coalesce" => Self::func_coalesce(args),
+            "delay" => Self::func_delay(args),
+            "compress" => Self::func_compress(args),
+            "decompress" => Self::func_decompress(args),
+            "extract" => Self::func_extract(args),
+            "unnest" => Self::func_unnest_scalar(args),
+            "changed_cols" => Self::func_changed_cols_scalar(args),
             // ---- Validation & utility ----
             "isnan" => Self::func_isnan(args),
             "isnumeric" => Self::func_isnumeric(args),
@@ -2234,6 +2377,8 @@ impl Evaluator {
             "date_parse" => Self::func_date_parse(args),
             "date_add" => Self::func_date_add(args),
             "date_diff" => Self::func_date_diff(args),
+            "date_calc" => Self::func_date_calc(args),
+            "convert_tz" => Self::func_convert_tz(args),
             "year" => Self::func_year(args),
             "month" => Self::func_month(args),
             "day" => Self::func_day(args),
@@ -2902,6 +3047,13 @@ impl Evaluator {
             "float" | "double" => Self::cast_to_float(&args[0]),
             "string" => Self::cast_to_string(&args[0]),
             "boolean" | "bool" => Self::cast_to_bool(&args[0]),
+            "datetime" => {
+                if let Some(ms) = Self::to_epoch_millis(&args[0]) {
+                    Value::from(ms)
+                } else {
+                    Value::Null
+                }
+            }
             _ => Value::Null,
         }
     }
@@ -3592,6 +3744,65 @@ impl Evaluator {
         Value::Array(obj.values().cloned().collect())
     }
 
+    fn func_object(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(keys), Some(vals)) = (args[0].as_array(), args[1].as_array()) else {
+            return Value::Null;
+        };
+        if keys.len() != vals.len() {
+            return Value::Null;
+        }
+        let mut map = serde_json::Map::with_capacity(keys.len());
+        for (k, v) in keys.iter().zip(vals.iter()) {
+            let key_str = match k {
+                Value::String(s) => s.clone(),
+                other => Self::to_string_always(other),
+            };
+            map.insert(key_str, v.clone());
+        }
+        Value::Object(map)
+    }
+
+    fn func_zip(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(entries) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let mut map = serde_json::Map::with_capacity(entries.len());
+        for entry in entries {
+            let Some(pair) = entry.as_array() else {
+                return Value::Null;
+            };
+            if pair.len() != 2 {
+                return Value::Null;
+            }
+            let key_str = match &pair[0] {
+                Value::String(s) => s.clone(),
+                other => Self::to_string_always(other),
+            };
+            map.insert(key_str, pair[1].clone());
+        }
+        Value::Object(map)
+    }
+
+    fn func_items(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        let Some(obj) = args[0].as_object() else {
+            return Value::Null;
+        };
+        let items: Vec<Value> = obj
+            .iter()
+            .map(|(k, v)| Value::Array(vec![Value::String(k.clone()), v.clone()]))
+            .collect();
+        Value::Array(items)
+    }
+
     /// Builds an object from alternating key/value arguments:
     /// `object_construct(k1, v1, k2, v2, ...)`. Keys are stringified via
     /// [`Self::to_string_always`]; pairs with `Null` values are omitted
@@ -3744,6 +3955,17 @@ impl Evaluator {
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
                 return Some(dt.timestamp_millis());
             }
+            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S") {
+                return Some(dt.and_utc().timestamp_millis());
+            }
+            if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S") {
+                return Some(dt.and_utc().timestamp_millis());
+            }
+            if let Ok(d) = chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d") {
+                if let Some(dt) = d.and_hms_opt(0, 0, 0) {
+                    return Some(dt.and_utc().timestamp_millis());
+                }
+            }
         }
         Self::to_i64_arg(v)
     }
@@ -3861,6 +4083,19 @@ impl Evaluator {
     }
 
     fn func_date_diff(args: &[Value]) -> Value {
+        if args.len() == 2 {
+            let (Some(unit), Some(t1), Some(t2)) = (
+                Self::interval_unit_millis("day"),
+                Self::to_epoch_millis(&args[0]),
+                Self::to_epoch_millis(&args[1]),
+            ) else {
+                return Value::Null;
+            };
+            return match t2.checked_sub(t1) {
+                Some(diff) => Value::from(diff / unit),
+                None => Value::Null,
+            };
+        }
         if args.len() != 3 {
             return Value::Null;
         }
@@ -3878,6 +4113,122 @@ impl Evaluator {
             // Integer division truncates toward zero, matching SQL semantics.
             Some(diff) => Value::from(diff / unit),
             None => Value::Null,
+        }
+    }
+
+    fn parse_duration_millis(s: &str) -> Option<i64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        let (neg, s) = if let Some(rest) = s.strip_prefix('-') {
+            (true, rest)
+        } else if let Some(rest) = s.strip_prefix('+') {
+            (false, rest)
+        } else {
+            (false, s)
+        };
+
+        let mut total_millis: i64 = 0;
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let start_num = i;
+            let mut has_dot = false;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || (bytes[i] == b'.' && !has_dot)) {
+                if bytes[i] == b'.' {
+                    has_dot = true;
+                }
+                i += 1;
+            }
+            if i == start_num {
+                return None;
+            }
+            let num: f64 = s[start_num..i].parse().ok()?;
+
+            let start_unit = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphabetic() || s[i..].starts_with('µ')) {
+                if s[i..].starts_with('µ') {
+                    i += 'µ'.len_utf8();
+                } else {
+                    i += 1;
+                }
+            }
+            let unit = &s[start_unit..i];
+            let factor = match unit {
+                "ns" => 0.000_001,
+                "us" | "µs" => 0.001,
+                "ms" => 1.0,
+                "s" => 1_000.0,
+                "m" => 60_000.0,
+                "h" => 3_600_000.0,
+                "d" => 86_400_000.0,
+                _ => return None,
+            };
+            total_millis = total_millis.checked_add((num * factor).round() as i64)?;
+        }
+        if neg {
+            Some(-total_millis)
+        } else {
+            Some(total_millis)
+        }
+    }
+
+    fn func_date_calc(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let Some(ts) = Self::to_epoch_millis(&args[0]) else {
+            return Value::Null;
+        };
+        let Some(dur_str) = args[1].as_str() else {
+            return Value::Null;
+        };
+        let Some(diff_ms) = Self::parse_duration_millis(dur_str) else {
+            return Value::Null;
+        };
+        match ts.checked_add(diff_ms) {
+            Some(res) => Value::from(res),
+            None => Value::Null,
+        }
+    }
+
+    fn func_convert_tz(args: &[Value]) -> Value {
+        if args.len() < 2 || args.len() > 3 {
+            return Value::Null;
+        }
+        let Some(to_tz_name) = (match args.len() {
+            2 => args[1].as_str(),
+            3 => args[2].as_str(),
+            _ => None,
+        }) else {
+            return Value::Null;
+        };
+        let is_local = to_tz_name.eq_ignore_ascii_case("local");
+        let to_tz: Option<chrono_tz::Tz> = if is_local {
+            None
+        } else if to_tz_name.eq_ignore_ascii_case("utc") {
+            Some(chrono_tz::UTC)
+        } else {
+            to_tz_name.parse().ok()
+        };
+        if !is_local && to_tz.is_none() {
+            return Value::Null;
+        }
+
+        let Some(millis) = Self::to_epoch_millis(&args[0]) else {
+            return Value::Null;
+        };
+        let Some(dt) = Self::datetime_from_millis(millis) else {
+            return Value::Null;
+        };
+
+        if is_local {
+            let converted = dt.with_timezone(&chrono::Local);
+            Value::String(converted.format("%Y-%m-%d %H:%M:%S").to_string())
+        } else {
+            let converted = dt.with_timezone(&to_tz.unwrap());
+            Value::String(converted.format("%Y-%m-%d %H:%M:%S").to_string())
         }
     }
 
@@ -4623,6 +4974,143 @@ impl Evaluator {
             },
             Err(_) => Value::Null,
         }
+    }
+
+    fn func_compress(args: &[Value]) -> Value {
+        use std::io::Write;
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        let Some(method) = args[1].as_str() else {
+            return Value::Null;
+        };
+        let input_bytes = match &args[0] {
+            Value::String(s) => s.as_bytes().to_vec(),
+            other => Self::to_string_always(other).into_bytes(),
+        };
+        let compressed = match method.trim().to_ascii_lowercase().as_str() {
+            "zlib" => {
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+                if encoder.write_all(&input_bytes).is_err() {
+                    return Value::Null;
+                }
+                encoder.finish().ok()
+            }
+            "gzip" => {
+                let mut encoder =
+                    flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                if encoder.write_all(&input_bytes).is_err() {
+                    return Value::Null;
+                }
+                encoder.finish().ok()
+            }
+            "flate" | "deflate" => {
+                let mut encoder =
+                    flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+                if encoder.write_all(&input_bytes).is_err() {
+                    return Value::Null;
+                }
+                encoder.finish().ok()
+            }
+            "zstd" => zstd::encode_all(&input_bytes[..], 0).ok(),
+            _ => return Value::Null,
+        };
+        match compressed {
+            Some(bytes) => Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
+            None => Value::Null,
+        }
+    }
+
+    fn func_decompress(args: &[Value]) -> Value {
+        use std::io::Read;
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Null;
+        }
+        let Some(method) = args[1].as_str() else {
+            return Value::Null;
+        };
+        let compressed_bytes = match &args[0] {
+            Value::String(s) => base64::engine::general_purpose::STANDARD
+                .decode(s.trim())
+                .unwrap_or_else(|_| s.as_bytes().to_vec()),
+            other => Self::to_string_always(other).into_bytes(),
+        };
+        let decompressed = match method.trim().to_ascii_lowercase().as_str() {
+            "zlib" => {
+                let mut decoder = flate2::read::ZlibDecoder::new(&compressed_bytes[..]);
+                let mut out = Vec::new();
+                if decoder.read_to_end(&mut out).is_err() {
+                    return Value::Null;
+                }
+                Some(out)
+            }
+            "gzip" => {
+                let mut decoder = flate2::read::GzDecoder::new(&compressed_bytes[..]);
+                let mut out = Vec::new();
+                if decoder.read_to_end(&mut out).is_err() {
+                    return Value::Null;
+                }
+                Some(out)
+            }
+            "flate" | "deflate" => {
+                let mut decoder = flate2::read::DeflateDecoder::new(&compressed_bytes[..]);
+                let mut out = Vec::new();
+                if decoder.read_to_end(&mut out).is_err() {
+                    return Value::Null;
+                }
+                Some(out)
+            }
+            "zstd" => zstd::decode_all(&compressed_bytes[..]).ok(),
+            _ => return Value::Null,
+        };
+        match decompressed {
+            Some(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Value::String(s),
+                Err(e) => Value::String(base64::engine::general_purpose::STANDARD.encode(e.into_bytes())),
+            },
+            None => Value::Null,
+        }
+    }
+
+    fn func_delay(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if let Some(ms) = args[0].as_i64() {
+            if ms > 0 {
+                let sleep_ms = ms.min(10_000) as u64;
+                std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+            }
+        }
+        args[1].clone()
+    }
+
+    fn func_extract(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        args[0].clone()
+    }
+
+    fn func_unnest_scalar(args: &[Value]) -> Value {
+        if args.len() != 1 {
+            return Value::Null;
+        }
+        args[0].clone()
+    }
+
+    fn func_changed_cols_scalar(args: &[Value]) -> Value {
+        if args.len() < 3 {
+            return Value::Null;
+        }
+        args[2].clone()
     }
 
     // ---------- extended array functions ----------

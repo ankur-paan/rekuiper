@@ -10,7 +10,7 @@
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": 2
+      "res": 1
     }
   },
   "element_at": {
@@ -53,7 +53,7 @@
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": 2
+      "res": 1
     }
   },
   "array_contains_any": {
@@ -196,10 +196,10 @@
     "data_verified": true,
     "output": {
       "res": [
-        40,
         20,
+        10,
         30,
-        10
+        40
       ]
     }
   },

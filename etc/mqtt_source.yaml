@@ -19,3 +19,8 @@ default:
 # demo_conf: #Conf_key
 #   qos: 0
 #   server: "tcp://10.211.55.6:1883"
+
+e2e_broker:
+  qos: 0
+  server: "tcp://127.0.0.1:1883"
+

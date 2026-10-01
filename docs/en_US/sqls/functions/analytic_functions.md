@@ -1,5 +1,10 @@
 # Analytic Functions
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 17:58:30 UTC**.  
+> **Scorecard**: **15 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (15)**: `lag`, `lead`, `latest`, `changed_col`, `had_changed`, `changed_cols`, `acc_sum`, `acc_max`, `acc_min`, `acc_count`, `acc_avg`, `acc_collect`, `acc_max_by`, `acc_min_by`, `acc_map_agg`.
+
 Analytic functions use state to do analytic jobs. In streaming processing, analytic functions are evaluated first so
 that they are not affected by predicates in WHERE clause.
 

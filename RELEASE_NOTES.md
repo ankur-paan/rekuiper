@@ -1,3 +1,23 @@
+# Release Notes - rekuiper v0.503-beta
+
+`rekuiper` v0.503-beta achieves **100% SQL function parity (162 / 162 functions verified)** across the entire eKuiper SQL catalog with exhaustive live MQTT stream assertions, complete data transformation capabilities, sub-millisecond date arithmetic, timezone conversions, accumulator streaming aggregates, and multi-row/multi-column projections.
+
+Key highlights:
+- **100% SQL Function Parity (162 / 162 Verified)**: All 16 previously unsupported functions and 1 divergent function across Math, String, Array, Aggregate, JSON, Hashing, Window, Other, DateTime, Analytic, Transform, Object, Multi-Row, and Multi-Column categories are fully implemented and validated against live streaming MQTT payloads.
+- **High-Performance Compression & Decompression**: Native zero-copy implementations of `compress(data, method)` and `decompress(data, method)` supporting `zlib`, `gzip`, `flate`/`deflate`, and `zstd` with base64 serialization and deserialization.
+- **Timezone Conversion (`convert_tz`)**: Zero-heap timezone conversions powered by `chrono-tz` and `chrono::Local` supporting arbitrary IANA timezone identifiers (e.g. `'Asia/Shanghai'`, `'America/New_York'`, `'UTC'`, `'Local'`).
+- **Sub-Millisecond Date Arithmetic (`date_calc`) & Dual-Arity `date_diff`**: Complete duration parsing supporting combined expressions (`1h30m10s100ms`, `5d`, `250µs`, `500ns`) with nanosecond arithmetic, alongside both 2-argument (`date_diff(d1, d2)`) and 3-argument (`date_diff(unit, d1, d2)`) compatibility.
+- **Dynamic Multi-Column Projections (`changed_cols`)**: Stateful column delta generator in `SELECT` queries that tracks predecessor events and projects dynamically prefixed difference columns (`diff_<col>`).
+- **Multi-Row & Object Operators**: Added `unnest(array)` for flat record expansion, `extract(map)` for map-to-column unwrapping, and object manipulation primitives (`object(keys, values)`, `zip(pairs)`, `items(map)`).
+- **Streaming Accumulators (`acc_collect`)**: Stateful sliding window item collector and accumulator aggregation for real-time edge micro-batching.
+
+- Qualification Report: [`test/e2e_diff/`](test/e2e_diff/)
+- Function Documentation: [`docs/en_US/sqls/functions/overview.md`](docs/en_US/sqls/functions/overview.md)
+- Docker image: `ankurkrp/rekuiper:0.503-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.503-beta`)
+
+---
+
 # Release Notes - rekuiper v0.502-beta
 
 `rekuiper` v0.502-beta introduces the native Model Context Protocol (MCP) server for LLM assistants, complete offline streaming SQL intelligence, dynamic execution tracing, and hardened reliability qualification.

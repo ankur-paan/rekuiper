@@ -17,21 +17,21 @@
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": "a05599e4-7c7c-4e29-ad10-043f3c5357df"
+      "res": "fa5acb50-b237-4b7c-86bb-35d0dc71e8da"
     }
   },
   "tstamp": {
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": 1790802537627
+      "res": 1790872856177
     }
   },
   "event_time": {
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": 1790802538977
+      "res": 1790872857552
     }
   },
   "rule_id": {
@@ -45,7 +45,7 @@
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": 1790802541372
+      "res": 1790872860026
     }
   },
   "mqtt": {
@@ -96,5 +96,10 @@
     "output": {
       "res": 0.0
     }
+  },
+  "delay": {
+    "supported": false,
+    "status_code": 400,
+    "error": "{\"error\":1000,\"message\":\"invalid rule json: Parse SQL ... error: function delay not found.\"}"
   }
 }

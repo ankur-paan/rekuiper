@@ -54,7 +54,15 @@ math_funcs = [
     ("sinh", "sinh(norm)"),
     ("sqrt", "sqrt(abs(x))"),
     ("tan", "tan(norm)"),
-    ("tanh", "tanh(norm)")
+    ("tanh", "tanh(norm)"),
+    ("floor", "floor(x)"),
+    ("pi", "pi()"),
+    ("pow", "pow(x, 2)"),
+    ("rand", "rand()"),
+    ("cot", "cot(norm)"),
+    ("radians", "radians(deg)"),
+    ("degrees", "degrees(rad)"),
+    ("conv", "conv(hex_str, 16, 10)")
 ]
 
 def main():
@@ -113,7 +121,10 @@ def main():
                 "y": 2.0 + (i * 0.1),
                 "norm": 0.5,
                 "i1": 12,
-                "i2": 5
+                "i2": 5,
+                "deg": 180.0,
+                "rad": 3.141592653589793,
+                "hex_str": "1f"
             }).encode("utf-8"), qos=0)
             time.sleep(0.005)
 

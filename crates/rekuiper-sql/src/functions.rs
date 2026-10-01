@@ -423,6 +423,30 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "values(obj)"
         ),
         meta!(
+            "object",
+            "array",
+            "Construct an object from an array of keys and an array of values.",
+            false,
+            "2",
+            "object(['a', 'b'], [1, 2])"
+        ),
+        meta!(
+            "zip",
+            "array",
+            "Construct an object from an array of key-value pairs.",
+            false,
+            "1",
+            "zip([['a', 1], ['b', 2]])"
+        ),
+        meta!(
+            "items",
+            "array",
+            "Return an array of key-value pair arrays from an object.",
+            false,
+            "1",
+            "items(obj)"
+        ),
+        meta!(
             "object_construct",
             "array",
             "Build an object from key/value pairs.",
@@ -828,8 +852,24 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "datetime",
             "Difference of two timestamps in units.",
             false,
-            "3",
+            "2-3",
             "date_diff('day', t1, t2)"
+        ),
+        meta!(
+            "date_calc",
+            "datetime",
+            "Calculates date based on date and duration string.",
+            false,
+            "2",
+            "date_calc('2019-01-01', '1h30m')"
+        ),
+        meta!(
+            "convert_tz",
+            "datetime",
+            "Converts a timestamp to target timezone.",
+            false,
+            "2-3",
+            "convert_tz(ts, 'Asia/Shanghai')"
         ),
         meta!(
             "year",
@@ -1137,14 +1177,54 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "1",
             "base64_decode('YWJj')"
         ),
+        meta!(
+            "compress",
+            "crypto",
+            "Compress input with zlib, gzip, flate, or zstd.",
+            false,
+            "2",
+            "compress('abc', 'zlib')"
+        ),
+        meta!(
+            "decompress",
+            "crypto",
+            "Decompress input with zlib, gzip, flate, or zstd.",
+            false,
+            "2",
+            "decompress('eJzT0yMAAGUAAM8=', 'zlib')"
+        ),
         // Conversion & utility (9).
         meta!(
             "cast",
             "conversion",
             "Convert a value to the target type.",
             false,
+            "1-2",
+            "cast(x, 'bigint')"
+        ),
+        meta!(
+            "delay",
+            "conversion",
+            "Delay rule execution for the specified milliseconds and return value.",
+            false,
+            "2",
+            "delay(10, 'ok')"
+        ),
+        meta!(
+            "unnest",
+            "conversion",
+            "Expands an array into multiple rows.",
+            false,
             "1",
-            "cast(x AS BIGINT)"
+            "unnest(arr)"
+        ),
+        meta!(
+            "extract",
+            "conversion",
+            "Expands a map object onto the current row.",
+            false,
+            "1",
+            "extract(obj)"
         ),
         meta!(
             "coalesce",
@@ -1460,6 +1540,22 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "1-3",
             "lag(temp, 1)"
         ),
+        meta!(
+            "changed_cols",
+            "analytic",
+            "Columns that changed compared to previous emit.",
+            false,
+            "2+",
+            "changed_cols('', true, col1)"
+        ),
+        meta!(
+            "acc_collect",
+            "analytic",
+            "Collects non-nil expression results into an array.",
+            false,
+            "1",
+            "acc_collect(val)"
+        ),
         // Contextual / system (6).
         meta!(
             "event_time",
@@ -1561,7 +1657,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 197, "catalog must list 197 functions");
+        assert_eq!(catalog.len(), 209, "catalog must list 209 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(

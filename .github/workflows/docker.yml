@@ -111,7 +111,7 @@ jobs:
           file: ./deploy/docker/Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.502-beta
+            ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:0.503-beta
             ${{ secrets.DOCKERHUB_USERNAME }}/rekuiper:latest
 
       - name: Update Docker Hub Description

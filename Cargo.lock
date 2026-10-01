@@ -452,6 +452,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-tz"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93698b29de5e97ad0ae26447b344c482a7284c737d9ddc5f9e52b74a336671bb"
+dependencies = [
+ "chrono",
+ "chrono-tz-build",
+ "phf",
+ "serde",
+]
+
+[[package]]
+name = "chrono-tz-build"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c088aee841df9c3041febbb73934cfc39708749bf96dc827e3359cd39ef11b1"
+dependencies = [
+ "parse-zoneinfo",
+ "phf",
+ "phf_codegen",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1523,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "kuiperd"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -1918,6 +1941,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-zoneinfo"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1945,6 +1977,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
  "phf_macros",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_codegen"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
+dependencies = [
+ "phf_generator",
  "phf_shared",
 ]
 
@@ -2224,7 +2266,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-cli"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -2237,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-conf"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "serde",
@@ -2247,7 +2289,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-connectors"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2274,7 +2316,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-core"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2292,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-mcp"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "clap",
@@ -2307,7 +2349,7 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-server"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2339,12 +2381,14 @@ dependencies = [
 
 [[package]]
 name = "rekuiper-sql"
-version = "0.502.0-beta"
+version = "0.503.0-beta"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
+ "chrono-tz",
  "crc32fast",
+ "flate2",
  "md-5",
  "parking_lot",
  "rand",
@@ -2356,6 +2400,7 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

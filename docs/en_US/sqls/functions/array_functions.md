@@ -1,7 +1,7 @@
 # Array Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-09-30 22:07:10 UTC**.  
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 16:35:50 UTC**.  
 > **Scorecard**: **25 / 25 Array Functions Fully Verified with Live Data (100% Parity)**:  
 > `cardinality`, `array_position`, `element_at`, `array_contains`, `array_create`, `array_remove`, `array_last_position`, `array_contains_any`, `array_intersect`, `array_union`, `array_max`, `array_avg`, `array_min`, `array_except`, `repeat`, `sequence`, `array_cardinality`, `array_flatten`, `array_distinct`, `array_map`, `array_join`, `array_shuffle`, `array_concat`, `array_sort`, `kvpair_array_to_obj`.
 

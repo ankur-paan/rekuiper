@@ -1,5 +1,10 @@
 # Multiple Row Functions
 
+> [!NOTE]
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 17:56:45 UTC**.  
+> **Scorecard**: **2 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (2)**: `unnest`, `extract`.
+
 A multiple row function is a function that returns multiple rows.
 
 Multiple row function can only be used in the `SELECT` clause of a query and only allowed 1 multiple rows function in

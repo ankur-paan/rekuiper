@@ -3,8 +3,8 @@ import time
 import requests
 import paho.mqtt.client as mqtt
 
-REKUIPER_URL = "http://localhost:9081"
-MQTT_HOST = "localhost"
+REKUIPER_URL = "http://127.0.0.1:9081"
+MQTT_HOST = "127.0.0.1"
 MQTT_PORT = 1883
 
 OTHER_TESTS = [
@@ -22,17 +22,22 @@ OTHER_TESTS = [
     ("window_start", "window_start() AS res"),
     ("window_end", "window_end() AS res"),
     ("get_keyed_state", "get_keyed_state('dev1', 'float', 0.0) AS res"),
+    ("delay", "delay(10, 'delayed_val') AS res"),
 ]
+
+def make_client(cid):
+    if hasattr(mqtt, 'CallbackAPIVersion'):
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, cid)
+    return mqtt.Client(cid)
 
 def main():
     print("=== Testing ALL Other Functions in other_functions.md ===")
     results = {}
 
-    requests.put(f"{REKUIPER_URL}/metadata/sources/mqtt/confKeys/e2e_broker", json={"server": "tcp://kuiper-mosquitto:1883", "qos": 0})
     requests.delete(f"{REKUIPER_URL}/streams/other_test_stream")
     stream_sql = (
         'create stream other_test_stream () WITH ('
-        '  DATASOURCE="devices/other_test", FORMAT="json", TYPE="mqtt", CONF_KEY="e2e_broker"'
+        '  DATASOURCE="devices/other_test", FORMAT="json", TYPE="mqtt", SERVER="tcp://127.0.0.1:1883"'
         ')'
     )
     requests.post(f"{REKUIPER_URL}/streams", json={"sql": stream_sql})
@@ -47,7 +52,7 @@ def main():
             "sql": sql,
             "actions": [{
                 "mqtt": {
-                    "server": "tcp://kuiper-mosquitto:1883",
+                    "server": "tcp://127.0.0.1:1883",
                     "topic": f"sink/other_{name}",
                     "sendSingle": True
                 }
@@ -68,15 +73,15 @@ def main():
                     storage.append(msg.payload.decode("utf-8"))
             return cb
 
-        sub = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"sub_other_{name}")
+        sub = make_client(f"sub_other_{name}")
         sub.on_message = make_cb(sink_data)
         sub.connect(MQTT_HOST, MQTT_PORT, 60)
         sub.subscribe(f"sink/other_{name}")
         sub.loop_start()
 
-        time.sleep(0.3)
+        time.sleep(0.5)
 
-        pub = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"pub_other_{name}")
+        pub = make_client(f"pub_other_{name}")
         pub.connect(MQTT_HOST, MQTT_PORT, 60)
         sample = {"val": 42.0, "topic": "devices/other_test"}
         pub.publish("devices/other_test", json.dumps(sample))
@@ -97,7 +102,7 @@ def main():
 
     print("\n=== Other Functions Test Scorecard ===")
     print(json.dumps(results, indent=2))
-    with open("/mnt/c/Users/paanday/Documents/idacs/rekuiper/ekuiper/test/e2e_diff/other_results.json", "w") as f:
+    with open("test/e2e_diff/other_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
 if __name__ == "__main__":

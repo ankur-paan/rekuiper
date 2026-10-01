@@ -1,7 +1,7 @@
 # Aggregate Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live streaming window load on **2026-09-30 22:08:40 UTC**.  
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live streaming window load on **2026-10-01 16:34:28 UTC**.  
 > **Scorecard**: **18 / 18 Aggregate Functions Fully Verified with Live Data (100% Parity)**:  
 > `avg`, `count`, `count(*)`, `max`, `min`, `sum`, `collect`, `last_value`, `merge_agg`, `deduplicate`, `median`, `stddev`, `stddevs`, `var`, `vars`, `percentile`, `percentile_disc`, `last_agg_hit_count`, `last_agg_hit_time`.
 

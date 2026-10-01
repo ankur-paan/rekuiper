@@ -2343,3 +2343,114 @@ fn test_newly_implemented_functions() {
     let agg2 = eval_agg_one("SELECT last_agg_hit_count() AS v FROM demo", &batch);
     assert_eq!(agg2, json!(1));
 }
+
+#[test]
+fn test_newly_implemented_functions_all() {
+    // 1. Object functions
+    assert_eq!(
+        eval_one("SELECT object(['a', 'b'], [1, 2]) AS v FROM demo", &empty()),
+        json!({"a": 1, "b": 2})
+    );
+    assert_eq!(
+        eval_one("SELECT zip([['a', 1], ['b', 2]]) AS v FROM demo", &empty()),
+        json!({"a": 1, "b": 2})
+    );
+    let items_res = eval_one("SELECT items(object(['a'], [1])) AS v FROM demo", &empty());
+    assert_eq!(items_res, json!([["a", 1]]));
+
+    // 2. Delay
+    assert_eq!(
+        eval_one("SELECT delay(1, 'done') AS v FROM demo", &empty()),
+        json!("done")
+    );
+
+    // 3. Date diff (2-arg and 3-arg)
+    let t1 = 1_704_067_200_000i64; // 2024-01-01 00:00:00 UTC
+    let t2 = t1 + 86_400_000 * 3 + 3_600_000 * 2; // 3 days and 2 hours later
+    let rec_dates = rec(&[("t1", json!(t1)), ("t2", json!(t2))]);
+    assert_eq!(
+        eval_one("SELECT date_diff(t1, t2) AS v FROM demo", &rec_dates),
+        json!(3)
+    );
+    assert_eq!(
+        eval_one("SELECT date_diff('hour', t1, t2) AS v FROM demo", &rec_dates),
+        json!(74)
+    );
+
+    // 4. Date calc
+    assert_eq!(
+        eval_one("SELECT date_calc(1704067200000, '1h30m') AS v FROM demo", &empty()),
+        json!(1704067200000i64 + 90 * 60 * 1000)
+    );
+    assert_eq!(
+        eval_one("SELECT date_calc(1704067200000, '-2d') AS v FROM demo", &empty()),
+        json!(1704067200000i64 - 2 * 86_400_000)
+    );
+
+    // 5. Convert TZ
+    assert_eq!(
+        eval_one("SELECT convert_tz('2024-01-01 12:00:00', 'Asia/Shanghai') AS v FROM demo", &empty()),
+        json!("2024-01-01 20:00:00")
+    );
+    assert_eq!(
+        eval_one("SELECT convert_tz('2024-01-01 12:00:00', 'UTC') AS v FROM demo", &empty()),
+        json!("2024-01-01 12:00:00")
+    );
+
+    // 6. Compress and decompress roundtrips
+    for method in &["zlib", "gzip", "flate", "zstd"] {
+        let compressed = eval_one(
+            &format!("SELECT compress('hello rekuiper', '{}') AS v FROM demo", method),
+            &empty(),
+        );
+        assert!(compressed.is_string());
+        let decompressed = eval_one(
+            &format!("SELECT decompress('{}', '{}') AS v FROM demo", compressed.as_str().unwrap(), method),
+            &empty(),
+        );
+        assert_eq!(decompressed, json!("hello rekuiper"));
+    }
+
+    // 7. Acc_collect stateful
+    let state = RuleState::default();
+    let mut parser = Parser::new("SELECT acc_collect(x) AS v FROM demo");
+    let stmt = parser.parse_select().expect("parse");
+    let r1 = Evaluator::eval_select_stateful(&stmt, &rec(&[("x", json!(10))]), &state).unwrap();
+    assert_eq!(r1.get("v"), Some(&json!([10])));
+    let r2 = Evaluator::eval_select_stateful(&stmt, &rec(&[("x", json!(20))]), &state).unwrap();
+    assert_eq!(r2.get("v"), Some(&json!([10, 20])));
+    let r3 = Evaluator::eval_select_stateful(&stmt, &rec(&[("x", Value::Null)]), &state).unwrap();
+    assert_eq!(r3.get("v"), Some(&json!([10, 20])));
+
+    // 8. Extract
+    let mut parser_ext = Parser::new("SELECT extract(info) FROM demo");
+    let stmt_ext = parser_ext.parse_select().expect("parse");
+    let row_ext = Evaluator::eval_select_stateful(
+        &stmt_ext,
+        &rec(&[("info", json!({"k1": "v1", "k2": "v2"}))]),
+        &state,
+    ).unwrap();
+    assert_eq!(row_ext.get("k1"), Some(&json!("v1")));
+    assert_eq!(row_ext.get("k2"), Some(&json!("v2")));
+
+    // 9. Changed_cols multi-row/column projection
+    let state_cc = RuleState::default();
+    let mut parser_cc = Parser::new("SELECT changed_cols('diff_', true, v1, v2) FROM demo");
+    let stmt_cc = parser_cc.parse_select().expect("parse");
+    let row_cc1 = Evaluator::eval_select_stateful(
+        &stmt_cc,
+        &rec(&[("v1", json!(100)), ("v2", json!(200))]),
+        &state_cc,
+    ).unwrap();
+    assert_eq!(row_cc1.get("diff_v1"), Some(&json!(100)));
+    assert_eq!(row_cc1.get("diff_v2"), Some(&json!(200)));
+    // Second run with only v2 changed
+    let row_cc2 = Evaluator::eval_select_stateful(
+        &stmt_cc,
+        &rec(&[("v1", json!(100)), ("v2", json!(250))]),
+        &state_cc,
+    ).unwrap();
+    assert_eq!(row_cc2.get("diff_v1"), None);
+    assert_eq!(row_cc2.get("diff_v2"), Some(&json!(250)));
+}
+

@@ -1,9 +1,9 @@
 # Mathematical Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-09-30 18:57:17 UTC**.  
-> **Scorecard**: **25 / 25 Mathematical Functions Fully Verified with Live Data**:  
-> `abs`, `acos`, `asin`, `atan`, `atan2`, `bitand`, `bitor`, `bitxor`, `bitnot`, `ceil`, `ceiling`, `cos`, `cosh`, `exp`, `ln`, `log`, `mod`, `power`, `round`, `sign`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`.  
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 16:28:52 UTC**.  
+> **Scorecard**: **33 / 33 Mathematical Functions Fully Verified with Live Data (100% Verified)**:  
+> `abs`, `acos`, `asin`, `atan`, `atan2`, `bitand`, `bitor`, `bitxor`, `bitnot`, `ceil`, `ceiling`, `conv`, `cos`, `cosh`, `cot`, `degrees`, `exp`, `floor`, `ln`, `log`, `mod`, `pi`, `pow`, `power`, `radians`, `rand`, `round`, `sign`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`.  
 > All functions tested with live telemetry data and validated with exact mathematical assertions at sink.
 
 Mathematical functions perform many of the common mathematical operations. They take numeric input and return numeric

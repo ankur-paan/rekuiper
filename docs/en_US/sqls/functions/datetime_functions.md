@@ -1,7 +1,9 @@
 # Date and Time Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry load on **2026-09-30 18:45:00 UTC**.  
+> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry load on **2026-10-01 17:55:00 UTC**.  
+> **Scorecard**: **27 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (27)**: `now`, `current_timestamp`, `local_time`, `local_timestamp`, `cur_date`, `current_date`, `cur_time`, `current_time`, `format_time`, `date_calc`, `date_add`, `date_diff` (both 2-arg `date_diff(t1, t2)` and 3-arg `date_diff(part, t1, t2)`), `day_name`, `day_of_month`, `day`, `day_of_week`, `day_of_year`, `from_days`, `from_unix_time`, `hour`, `last_day`, `microsecond`, `minute`, `month`, `month_name`, `second`.  
 > **Key Runtime Characteristic**: In `rekuiper`, `now()` returns Int64 Unix epoch milliseconds (e.g., `1790794146577`). This enables direct numerical comparisons and arithmetic in filters and SELECT clauses (e.g., `WHERE now() - ts < 60000`).
 
 Date and time functions are used to perform operations on date and time type data.

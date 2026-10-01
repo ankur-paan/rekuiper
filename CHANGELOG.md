@@ -12,6 +12,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.503.0-beta] - 2026-10-01
+
+### Added
+- **100% SQL Function Parity**: Implemented all remaining unsupported and divergent functions across the complete 162-function eKuiper catalog, verified with live streaming MQTT ingestion, execution, and sink verification.
+- Native compression and decompression functions (`compress`, `decompress`) supporting `zlib`, `gzip`, `flate`, and `zstd` with base64 serialization.
+- Timezone transformation function `convert_tz(dt, [from_tz], to_tz)` with `chrono-tz` and `Local` system clock support.
+- Multi-unit sub-millisecond date arithmetic `date_calc(timestamp, duration_str)` parsing compound intervals (`1h30m10s100ms`, `5d`, `250µs`, `500ns`).
+- Dynamic multi-column delta projection function `changed_cols(prefix, is_changed_only, col1, col2, ...)` in `SELECT` queries.
+- Streaming array unnesting `unnest(array)` and map unwrapping `extract(map)` multi-row/multi-column capabilities.
+- Stateful sliding window item accumulator `acc_collect(val)` for streaming collections.
+- Object and dictionary manipulation primitives: `object(keys_arr, vals_arr)`, `zip(pairs_arr)`, `items(map)`.
+- Non-blocking delay execution `delay(ms, val)` for throttling and simulation pipelines.
+
+### Changed
+- Extended `date_diff` to seamlessly support both 2-argument (`date_diff(d1, d2)`) defaulting to day units and standard 3-argument (`date_diff(unit, d1, d2)`) invocations.
+- Upgraded documentation scorecards across all 16 SQL documentation modules to 100% verified status.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.503-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.503-beta`.
+
+---
+
 ## [0.502.0-beta] - 2026-10-01
 
 ### Added

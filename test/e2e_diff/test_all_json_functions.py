@@ -10,9 +10,9 @@ MQTT_PORT = 1883
 JSON_TESTS = [
     ("to_json", "to_json(payload) AS res"),
     ("parse_json", "parse_json(raw_str) AS res"),
-    ("json_path_exists", "json_path_exists(raw_str, '$.user.name') AS res"),
-    ("json_path_query", "json_path_query(raw_str, '$.items[*].id') AS res"),
-    ("json_path_query_first", "json_path_query_first(raw_str, '$.user.name') AS res"),
+    ("json_path_exists", "json_path_exists(user_obj, '$.name') AS res"),
+    ("json_path_query", "json_path_query(items_obj, '$.items[*].id') AS res"),
+    ("json_path_query_first", "json_path_query_first(user_obj, '$.name') AS res"),
 ]
 
 def main():
@@ -71,7 +71,9 @@ def main():
         pub.connect(MQTT_HOST, MQTT_PORT, 60)
         sample = {
             "payload": {"a": 1, "b": "hello"},
-            "raw_str": json.dumps({"user": {"name": "alice"}, "items": [{"id": 101}, {"id": 102}]})
+            "raw_str": json.dumps({"user": {"name": "alice"}, "items": [{"id": 101}, {"id": 102}]}),
+            "user_obj": {"name": "alice"},
+            "items_obj": {"items": [{"id": 101}, {"id": 102}]}
         }
         pub.publish("devices/json_test", json.dumps(sample))
         pub.disconnect()

@@ -29,21 +29,24 @@
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": false
+      "res": true
     }
   },
   "json_path_query": {
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": null
+      "res": [
+        101,
+        102
+      ]
     }
   },
   "json_path_query_first": {
     "supported": true,
     "data_verified": true,
     "output": {
-      "res": null
+      "res": "alice"
     }
   }
 }
