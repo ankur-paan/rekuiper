@@ -1,9 +1,9 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.501--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.502--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.501--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.502--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine for edge devices, written in Rust. It implements
@@ -71,7 +71,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.501-beta
+  ankurkrp/rekuiper:0.502-beta
 ```
 
 To run rekuiper together with Mosquitto and Redis:
@@ -79,6 +79,18 @@ To run rekuiper together with Mosquitto and Redis:
 ```bash
 docker compose -f deploy/docker/docker-compose.yml up -d
 ```
+
+### Kubernetes (Helm)
+
+Deploy rekuiper to your Kubernetes cluster using the bundled Helm chart:
+
+```bash
+helm install rekuiper deploy/chart/ekuiper \
+  --set image.repository=ankurkrp/rekuiper \
+  --set image.tag=0.502-beta
+```
+
+See [deploy/chart/ekuiper](deploy/chart/ekuiper/README.md) for configurable values and persistence settings.
 
 [![Docker Pull History](docs/docker-pulls.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
@@ -263,7 +275,8 @@ performance claim here. The original data is kept in [BENCHMARK-AUDIT.md](BENCHM
 
 ## Release history
 
-- **0.501-beta** (current): native Rust Model Context Protocol (MCP) server (`rekuiper-mcp`) with 42 tools, 11 resources, and 5 prompts; transactional storage atomicity (`KvOperation`, `apply_transaction`); strict configuration key consistency and 500 error propagation; 99.98% differential mathematical formula qualification; process-level reliability qualification harness with bounded in-flight crash tracking, and drop-in ingestion compatibility.
+- **0.502-beta** (current): native Rust Model Context Protocol (MCP) server (`rekuiper-mcp`) with 42 tools, 11 resources, and 5 prompts; offline streaming SQL simulation with `CREATE TABLE` and `CREATE STREAM` DDL validation; live runtime rule tracing controls (`start_rule_trace`, `stop_rule_trace`); 99.98% differential mathematical formula qualification; process-level reliability qualification harness with strictly bounded in-flight crash tracking, and unified multi-platform Docker container images.
+- **0.501-beta**: transactional storage atomicity (`KvOperation`, `apply_transaction`); strict configuration key consistency and 500 error propagation; IIoT MQTT ladder verification with 0.00% packet loss and drop-in ingestion compatibility.
 - **0.500-beta**: in-memory Redis-style catalog architecture, zero-disk hot path for
   rule execution and REST dispatch, multi-row SQL batch insertions, hot-path connection pooling,
   and exact peak capacity benchmarks certifying up to 200,000 msg/s per core.

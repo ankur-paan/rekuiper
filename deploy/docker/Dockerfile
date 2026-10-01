@@ -41,6 +41,7 @@ WORKDIR ${KUIPER_HOME}
 # Copy compiled binaries from builder stage
 COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiperd /kuiper/bin/kuiperd
 COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/kuiper /kuiper/bin/kuiper
+COPY --from=builder --chown=${KUIPER_USER}:${KUIPER_USER} /usr/src/rekuiper/target/release/rekuiper-mcp /kuiper/bin/rekuiper-mcp
 
 # Copy default configurations
 COPY --chown=${KUIPER_USER}:${KUIPER_USER} etc/ /kuiper/etc/

@@ -1,26 +1,28 @@
-# eKuiper
-A lightweight IoT edge analytic software
+# rekuiper Helm Chart
+A lightweight, high-performance edge streaming SQL engine for Kubernetes.
 
-![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.423--beta](https://img.shields.io/badge/AppVersion-0.423--beta-informational?style=flat-square)
+![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.502--beta](https://img.shields.io/badge/AppVersion-0.502--beta-informational?style=flat-square)
 
 ## Install the Chart
 
-- From GitHub
-```
+```bash
 git clone https://github.com/ankur-paan/rekuiper.git
-cd deploy/chart/ekuiper
-helm install my-ekuiper .
+cd rekuiper
+helm install rekuiper deploy/chart/ekuiper
 ```
 
-- From Helm repo
-```
-helm install my-ekuiper oci://ghcr.io/lf-edge/ekuiper-charts/ekuiper
-```
+## Custom Values Example
 
+```bash
+helm install rekuiper deploy/chart/ekuiper \
+  --set image.repository=ankurkrp/rekuiper \
+  --set image.tag=0.502-beta
+```
 
 ## Uninstall Chart
-```
-helm uninstall my-ekuiper
+
+```bash
+helm uninstall rekuiper
 ```
 
 ## Values
@@ -31,7 +33,7 @@ helm uninstall my-ekuiper
 | clusterDomain | string | `"cluster.local"` | clusterDomain Kubernetes Cluster Domain |
 | ekuiperEnv | object | `{"enabled":true,"key":{"mqttDefaultServer":"MQTT_SOURCE__DEFAULT__SERVER"},"value":{"mqttDefaultServer":"tcp://broker.emqx.io:1883"}}` | remove this when the mqtt_source configmap is available |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
-| image.repository | string | `"lfedge/ekuiper"` |  |
+| image.repository | string | `"ankurkrp/rekuiper"` |  |
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | nodeSelector | object | `{}` |  |
 | persistence.enabled | bool | `false` |  |
