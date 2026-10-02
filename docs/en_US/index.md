@@ -26,15 +26,18 @@ rekuiper processes real-time telemetry on the local machine before it sends data
 
 ## Why rekuiper?
 
-| Feature | rekuiper (Rust) | eKuiper (Go) | Details |
+rekuiper is engineered specifically for resource-constrained edge hardware. All comparative performance metrics below reflect tests executed inside a container limited to **exactly 1 physical CPU core** (`--cpuset-cpus=2 --cpus=1`) and **1 GiB RAM** (`--memory=1g --memory-swap=1g`).
+
+| Capability | rekuiper (Rust) [1 Core, 1 GiB RAM] | eKuiper (Go) [1 Core, 1 GiB RAM] | Edge Hardware Advantage |
 | :--- | :--- | :--- | :--- |
-| **Throughput** | **150k to 200k msg/s** | 20k msg/s | Provides 7.5x to 10x higher message throughput on a single CPU core |
-| **Rule Concurrency** | **1,000 rules** | 100 rules | Executes 10x more parallel SQL rules on a shared stream without queue accumulation |
-| **Memory Footprint** | **4.4 to 6.4 MiB** | 15 to 536 MiB | Maintains small deterministic memory under load. Fits low-memory edge devices |
-| **Garbage Collection** | **Zero GC** | GC pauses (Go runtime) | Provides predictable latency without garbage collection stops or packet loss |
-| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Provides a single binary with zero external runtime dependencies |
-| **Compatibility** | **Wire-compatible** | Reference implementation | Operates with existing eKuiper REST API, SQL syntax, and CLI |
-| **AI Integration** | **Native MCP Server** | Not available | Enables AI assistants (Cursor, Claude, Antigravity) to query and validate rules |
+| **Single-Core Throughput** | **150,000 to 200,000 msg/s** | 20,000 msg/s | **7.5x to 10x higher throughput** without packet loss. eKuiper saturates CPU at 50k+. |
+| **Rule Concurrency** | **1,000 parallel rules** | 100 parallel rules | **10x higher rule concurrency** on a shared stream (500k evals/s). eKuiper lags at 200. |
+| **Heap Memory at Load** | **4.4 to 10.2 MiB** | 15 to 886 MiB | Bounded incremental aggregations prevent out-of-memory crashes on small gateways. |
+| **Memory Stability** | **Flat level plateau ($\Delta M \le 2\text{ MiB}$)** | Accumulates to 613+ MiB | Zero queue accumulation. Go-based engines accumulate buffer backlog under load. |
+| **Garbage Collection** | **Zero GC (Deterministic)** | Unpredictable GC pauses | Eliminates latency spikes, dropped MQTT packets, and unpredictable edge restarts. |
+| **Binary Footprint** | **Single static binary (~30 MB)** | Dynamic Go runtime | Minimal flash storage consumption with zero external runtime dependencies. |
+| **eKuiper Compatibility** | **100% Wire-compatible** | Reference implementation | Drop-in replacement for existing eKuiper REST endpoints, SQL rules, and eKuiper Manager. |
+| **AI Integration** | **Native MCP Server** | Not available | Provides 42 Model Context Protocol tools for AI code editors (Antigravity, Cursor, Claude). |
 
 ---
 
