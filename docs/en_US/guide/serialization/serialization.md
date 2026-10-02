@@ -35,6 +35,7 @@ The following table summarizes supported formats and their capabilities:
 | `binary` | Built-in | Unsupported | Unsupported |
 | `delimited` | Built-in (specify delimiter) | Unsupported | Unsupported |
 | `protobuf` | Built-in | Supported | Supported and required |
+| `parquet` | Built-in (Arrow/Snappy) | Unsupported | Inferred automatically |
 | `custom` | Not built-in | Supported and required | Supported and optional |
 
 ### Format Extensions
@@ -136,6 +137,45 @@ For high-throughput requirements, compile static Protobuf plugins instead of usi
 6. Reference the registered schema in stream and action definitions.
 
 Refer to the [helloworld protobuf sample](https://github.com/lf-edge/ekuiper/tree/master/internal/converter/protobuf/test) for a full implementation.
+
+### Parquet Format
+
+`parquet` is an open-source columnar storage format. `rekuiper` includes built-in support for Apache Parquet through Apache Arrow.
+
+Parquet provides high compression ratios and fast analytical scan performance on edge devices.
+
+#### Capabilities
+
+- **Columnar Storage**: Data is organized into row groups and columns.
+- **Snappy Compression**: `rekuiper` compresses Parquet files with Snappy by default.
+- **Automatic Schema Inference**: The engine creates the Arrow schema automatically from your stream data. You do not need to register a schema file.
+
+#### File Sink Example
+
+To write stream outputs to a Parquet file, set `format` to `"parquet"` in the file action:
+
+```json
+{
+  "file": {
+    "path": "/kuiper/data/telemetry.parquet",
+    "format": "parquet",
+    "rollingCount": 1000
+  }
+}
+```
+
+#### File Source Example
+
+To read records from a Parquet file, create a stream with `FORMAT = "PARQUET"`:
+
+```sql
+CREATE STREAM parquet_history () WITH (
+    TYPE = "file",
+    FILETYPE = "parquet",
+    PATH = "/kuiper/data/telemetry.parquet",
+    FORMAT = "PARQUET"
+);
+```
 
 ## Schema Registry
 

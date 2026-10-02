@@ -16,6 +16,8 @@ Connectors support one or both ingestion modes. Documentation pages indicate sup
 rekuiper includes the following built-in source connectors:
 
 - [MQTT source](./builtin/mqtt.md): Subscribes to MQTT topics.
+- [RabbitMQ source](./builtin/rabbitmq.md): Consumes messages from RabbitMQ queues using AMQP 0-9-1.
+- [EdgeX source](./builtin/edgex.md): Ingests sensor readings and events from the EdgeX message bus.
 - [HTTP pull source](./builtin/http_pull.md): Periodically pulls data from HTTP endpoints.
 - [HTTP push source](./builtin/http_push.md): Ingests data pushed to rekuiper through HTTP POST requests.
 - [WebSocket source](./builtin/websocket.md): Ingests real-time events over WebSocket connections.

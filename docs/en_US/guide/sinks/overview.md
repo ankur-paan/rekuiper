@@ -7,6 +7,8 @@ In rekuiper, core sink connectors are compiled directly into the binary to provi
 rekuiper includes the following built-in sink connectors:
 
 - [MQTT sink](./builtin/mqtt.md): Publishes messages to an external MQTT broker.
+- [RabbitMQ sink](./builtin/rabbitmq.md): Publishes messages to RabbitMQ exchanges using AMQP 0-9-1.
+- [EdgeX sink](./builtin/edgex.md): Publishes events to the EdgeX Foundry message bus.
 - [REST sink](./builtin/rest.md): Sends HTTP requests (`POST`, `PUT`, `PATCH`) to webhooks and REST endpoints.
 - [Redis sink](./builtin/redis.md): Writes keys and stream entries to Redis.
 - [RedisSub sink](./builtin/redisPub.md): Publishes messages to Redis pub/sub channels.

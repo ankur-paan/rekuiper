@@ -17,7 +17,7 @@ use rekuiper_connectors::{
     HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink,
     MqttSource, PayloadFormat, RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig,
     SimulatorSource, Sink, SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink,
-    WebSocketSource,
+    WebSocketSource, RabbitMqConfig, RabbitMqSink, RabbitMqSource,
 };
 use rekuiper_core::{
     model::{
@@ -2141,6 +2141,37 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
         SqlSource::new(config, stream_tx).spawn(cancel_rx);
     }
 
+    // RabbitMQ source streams consume an AMQP queue into the stream bus.
+    if let Some(def) = state.stream_manager.get_stream(stream_name) {
+        let is_rmq = def
+            .options
+            .get("TYPE")
+            .is_some_and(|t| t.eq_ignore_ascii_case("rabbitmq") || t.eq_ignore_ascii_case("amqp"));
+        if is_rmq {
+            let mut config = RabbitMqConfig::default();
+            if let Some(ds) = def.options.get("DATASOURCE") {
+                config.queue = ds.clone();
+            }
+            if let Some(key) = def.options.get("CONF_KEY").cloned() {
+                let lookup = format!("rabbitmq/{}", key);
+                if let Some(conf_val) = state.source_configs.read().get(&lookup).cloned() {
+                    if let Ok(c) = serde_json::from_value::<RabbitMqConfig>(conf_val) {
+                        config = c;
+                    }
+                }
+            }
+            let stream_tx = state.stream_bus.get_or_create(stream_name);
+            let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+            state
+                .source_cancels
+                .write()
+                .entry(rule_id.to_string())
+                .or_default()
+                .push(cancel_tx);
+            RabbitMqSource::new(config, stream_tx).spawn(cancel_rx);
+        }
+    }
+
     // Simulator source streams replay configured data into the stream bus.
     // Stream options are upper-cased by the SQL parser.
     if let Some(def) = state.stream_manager.get_stream(stream_name) {
@@ -2604,6 +2635,7 @@ enum PreparedAction {
         path: std::path::PathBuf,
         template: Option<String>,
         delimited: bool,
+        parquet: bool,
         has_header: bool,
         delimiter: String,
     },
@@ -2630,6 +2662,10 @@ enum PreparedAction {
     },
     Memory {
         topic: String,
+    },
+    RabbitMq {
+        config: Box<RabbitMqConfig>,
+        template: Option<String>,
     },
     EdgeX {
         device_name: String,
@@ -2664,10 +2700,24 @@ fn prepare_actions(
                                 .file_type
                                 .as_deref()
                                 .is_some_and(|t| t.eq_ignore_ascii_case("csv"));
+                        let parquet = sink
+                            .format
+                            .as_deref()
+                            .is_some_and(|f| f.eq_ignore_ascii_case("parquet"))
+                            || sink
+                                .file_type
+                                .as_deref()
+                                .is_some_and(|t| t.eq_ignore_ascii_case("parquet"))
+                            || sink
+                                .path
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
                         out.push(PreparedAction::File {
                             path: sink.path.clone(),
                             template: action_template(opts).map(|s| s.to_string()),
                             delimited,
+                            parquet,
                             has_header: sink.has_header,
                             delimiter: sink
                                 .delimiter
@@ -2739,6 +2789,17 @@ fn prepare_actions(
                         .unwrap_or("default")
                         .to_string(),
                 }),
+                "rabbitmq" | "amqp" => {
+                    match serde_json::from_value::<RabbitMqConfig>(opts.clone()) {
+                        Ok(config) => out.push(PreparedAction::RabbitMq {
+                            config: Box::new(config),
+                            template: action_template(opts).map(|s| s.to_string()),
+                        }),
+                        Err(_) => out.push(PreparedAction::Unknown {
+                            kind: "rabbitmq".to_string(),
+                        }),
+                    }
+                }
                 "edgex" => {
                     let mut config = MqttConfig::default();
                     config.format = PayloadFormat::EdgeX;
@@ -3492,6 +3553,7 @@ struct ActionRuntime {
     action: PreparedAction,
     mqtt: Option<MqttSink>,
     sql: Option<SqlSink>,
+    rabbitmq: Option<RabbitMqSink>,
     cache: Option<SinkCache>,
     /// Earliest time the next resend may be attempted.
     retry_at: tokio::time::Instant,
@@ -3505,6 +3567,7 @@ impl ActionRuntime {
             action,
             mqtt: None,
             sql: None,
+            rabbitmq: None,
             cache,
             retry_at: tokio::time::Instant::now(),
             last_warn: None,
@@ -3561,21 +3624,27 @@ async fn send_action(
             path,
             template,
             delimited,
+            parquet,
             has_header,
             delimiter,
         } => {
-            let writer = files
-                .entry(path.clone())
-                .or_insert_with(|| FileBatchWriter::new(path.clone()));
-            if *delimited {
-                writer.push_delimited(&output.data, delimiter, *has_header);
-            } else if let Some(tpl) = template {
-                writer.push_text(&apply_data_template(
-                    tpl,
-                    &record_template_map(&output.data),
-                ));
+            if *parquet {
+                rekuiper_connectors::parquet_io::append_record_to_parquet(output, path)
+                    .map_err(|e| SendError::Permanent(format!("parquet append error: {}", e)))?;
             } else {
-                writer.push_json(&output.data);
+                let writer = files
+                    .entry(path.clone())
+                    .or_insert_with(|| FileBatchWriter::new(path.clone()));
+                if *delimited {
+                    writer.push_delimited(&output.data, delimiter, *has_header);
+                } else if let Some(tpl) = template {
+                    writer.push_text(&apply_data_template(
+                        tpl,
+                        &record_template_map(&output.data),
+                    ));
+                } else {
+                    writer.push_json(&output.data);
+                }
             }
             Ok(())
         }
@@ -3679,6 +3748,20 @@ async fn send_action(
                 Err(SendError::Dropped)
             }
         },
+        PreparedAction::RabbitMq { config, template } => {
+            if rt.rabbitmq.is_none() {
+                rt.rabbitmq = Some(RabbitMqSink::new((**config).clone()));
+            }
+            let sink = rt.rabbitmq.as_ref().unwrap();
+            let mut rec = output.clone();
+            if let Some(tpl) = template {
+                let rendered = apply_data_template(tpl, &record_template_map(&output.data));
+                rec.data.insert("result".to_string(), Value::String(rendered));
+            }
+            sink.send(&rec)
+                .await
+                .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
+        }
         PreparedAction::EdgeX {
             device_name,
             profile_name,

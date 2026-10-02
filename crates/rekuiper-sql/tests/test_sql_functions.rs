@@ -2478,3 +2478,58 @@ fn test_newly_implemented_functions_all() {
     assert_eq!(row_cc2.get("diff_v1"), None);
     assert_eq!(row_cc2.get("diff_v2"), Some(&json!(250)));
 }
+
+#[test]
+fn test_vector_similarity_and_search() {
+    let empty = rec(&[]);
+    // 1. Cosine similarity
+    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [1.0, 0.0]) AS v FROM demo", &empty);
+    assert!((r.as_f64().unwrap() - 1.0).abs() < 1e-6);
+
+    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [0.0, 1.0]) AS v FROM demo", &empty);
+    assert!((r.as_f64().unwrap() - 0.0).abs() < 1e-6);
+
+    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [-1.0, 0.0]) AS v FROM demo", &empty);
+    assert!((r.as_f64().unwrap() - (-1.0)).abs() < 1e-6);
+
+    // 2. Vector L2 (Euclidean distance): sqrt(3^2 + 4^2) = 5.0
+    let r = eval_one("SELECT vector_l2([1.0, 2.0], [4.0, 6.0]) AS v FROM demo", &empty);
+    assert!((r.as_f64().unwrap() - 5.0).abs() < 1e-6);
+
+    // 3. Vector dot product: 1*3 + 2*4 = 11.0
+    let r = eval_one("SELECT vector_dot([1.0, 2.0], [3.0, 4.0]) AS v FROM demo", &empty);
+    assert!((r.as_f64().unwrap() - 11.0).abs() < 1e-6);
+
+    // 4. Vector match: top-k search
+    let r = eval_one("SELECT vector_match([1.0, 0.0], [[0.0, 1.0], [0.9, 0.1], [-1.0, 0.0]], 2) AS v FROM demo", &empty);
+    let arr = r.as_array().expect("array of matches");
+    assert_eq!(arr.len(), 2);
+    let top1 = &arr[0];
+    let top1_sim = top1.get("similarity").unwrap().as_f64().unwrap();
+    assert!(top1_sim > 0.95);
+}
+
+#[test]
+fn test_wasm_function_plugin_sql_execution() {
+    let wasm_binary = vec![
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Magic + version
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, // Type: (i32, i32) -> i32
+        0x03, 0x02, 0x01, 0x00, // Function index 0
+        0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00, // Export "add"
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b, // Code: add
+    ];
+
+    rekuiper_core::get_global_wasm_registry()
+        .register_module_as_udfs("math_wasm", &wasm_binary)
+        .expect("register wasm module");
+
+    let empty = rec(&[]);
+
+    // 1. Direct call via wasm_run built-in function
+    let r1 = eval_one("SELECT wasm_run('math_wasm', 'add', 40, 2) AS v FROM demo", &empty);
+    assert_eq!(r1, json!(42));
+
+    // 2. Call via registered UDF name
+    let r2 = eval_one("SELECT add(15, 25) AS v FROM demo", &empty);
+    assert_eq!(r2, json!(40));
+}

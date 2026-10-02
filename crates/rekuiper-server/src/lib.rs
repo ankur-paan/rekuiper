@@ -147,6 +147,19 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         state.version, config.basic.port, rest_http_type, addr
     );
 
+    // Support EdgeX dual port (59720) concurrently alongside default port (9081)
+    let edgex_port = 59720;
+    if config.basic.rest_port != edgex_port {
+        let edgex_app = app.clone();
+        tokio::spawn(async move {
+            let edgex_addr = SocketAddr::from(([0, 0, 0, 0], edgex_port));
+            if let Ok(listener) = tokio::net::TcpListener::bind(edgex_addr).await {
+                tracing::info!("Serving EdgeX dual-port REST API on http://0.0.0.0:{}", edgex_port);
+                let _ = axum::serve(listener, edgex_app).tcp_nodelay(true).await;
+            }
+        });
+    }
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("Server initialized and ready in {:?}", init_start.elapsed());
     axum::serve(listener, app).tcp_nodelay(true).await?;

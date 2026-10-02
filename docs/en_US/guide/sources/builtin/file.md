@@ -14,6 +14,7 @@ The file connector supports the following file structures:
 - **JSON**: Files containing standard JSON arrays.
 - **CSV**: Comma-separated or custom-delimited tabular text files.
 - **Lines**: Text files with one record per line.
+- **Parquet**: Columnar Apache Parquet files using Arrow schema inference.
 - **Raw**: Reads the entire file as a single binary payload.
 
 ### JSON Array Example

@@ -18,15 +18,17 @@
 > | **Analytic** | [analytic_functions.md](./analytic_functions.md) | 15 | 15 | 0 | 0 | **100%** |
 > | **Transform** | [transform_functions.md](./transform_functions.md) | 11 | 11 | 0 | 0 | **100%** |
 > | **Object** | [object_functions.md](./object_functions.md) | 10 | 10 | 0 | 0 | **100%** |
+> | **Vector** | [vector_functions.md](./vector_functions.md) | 4 | 4 | 0 | 0 | **100%** |
 > | **Multi-Row** | [multi_row_functions.md](./multi_row_functions.md) | 2 | 2 | 0 | 0 | **100%** |
 > | **Multi-Column** | [multi_column_functions.md](./multi_column_functions.md) | 1 | 1 | 0 | 0 | **100%** |
 > | **Custom** | [custom_functions.md](./custom_functions.md) | Ext | Ext | Ext | 0 | *Plugin-Dependent* |
-> | **TOTAL** | | **162** | **162** | **0** | **0** | **100.0%** |
+> | **TOTAL** | | **166** | **166** | **0** | **0** | **100.0%** |
 
 ## Built-in Scalar and Aggregate Functions
 
 - [Aggregate Functions](./aggregate_functions.md)
 - [Mathematical Functions](./mathematical_functions.md)
+- [Vector Functions](./vector_functions.md)
 - [String Functions](./string_functions.md)
 - [Array Functions](./array_functions.md)
 - [Object Functions](./object_functions.md)

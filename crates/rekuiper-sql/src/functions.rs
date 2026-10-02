@@ -1637,6 +1637,48 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "3",
             "get_keyed_state('k', 'string', '')"
         ),
+        // Vector similarity & distance (4).
+        meta!(
+            "cosine_similarity",
+            "vector",
+            "Cosine similarity between two numerical vectors [-1.0, 1.0].",
+            false,
+            "2",
+            "cosine_similarity([1.0, 0.0], [0.0, 1.0])"
+        ),
+        meta!(
+            "vector_l2",
+            "vector",
+            "Euclidean L2 distance between two numerical vectors.",
+            false,
+            "2",
+            "vector_l2([1.0, 2.0], [4.0, 6.0])"
+        ),
+        meta!(
+            "vector_dot",
+            "vector",
+            "Dot product between two numerical vectors.",
+            false,
+            "2",
+            "vector_dot([1.0, 2.0], [3.0, 4.0])"
+        ),
+        meta!(
+            "vector_match",
+            "vector",
+            "Find top K nearest candidate vectors or objects by cosine similarity.",
+            false,
+            "2-3",
+            "vector_match([1.0, 0.0], [[1.0, 0.0], [0.0, 1.0]], 1)"
+        ),
+        // WebAssembly function plugin (1).
+        meta!(
+            "wasm_run",
+            "plugin",
+            "Execute an exported scalar function from a loaded WebAssembly module.",
+            false,
+            "2+",
+            "wasm_run('math', 'add', 10, 20)"
+        ),
     ];
     CATALOG
 }
@@ -1657,7 +1699,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 209, "catalog must list 209 functions");
+        assert_eq!(catalog.len(), 214, "catalog must list 214 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(

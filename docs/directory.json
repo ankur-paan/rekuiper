@@ -199,6 +199,10 @@
                   "path": "guide/sources/builtin/mqtt"
                 },
                 {
+                  "title": "RabbitMQ Source",
+                  "path": "guide/sources/builtin/rabbitmq"
+                },
+                {
                   "title": "EdgeX Source",
                   "path": "guide/sources/builtin/edgex"
                 },
@@ -279,6 +283,10 @@
                 {
                   "title": "MQTT Sink",
                   "path": "guide/sinks/builtin/mqtt"
+                },
+                {
+                  "title": "RabbitMQ Sink",
+                  "path": "guide/sinks/builtin/rabbitmq"
                 },
                 {
                   "title": "EdgeX Sink",
@@ -456,6 +464,10 @@
             {
               "title": "Global Configurations",
               "path": "configuration/global_configurations"
+            },
+            {
+              "title": "Dynamic Secrets",
+              "path": "configuration/secrets"
             }
           ]
         },
@@ -711,6 +723,10 @@
             {
               "title": "Mathematical Functions",
               "path": "sqls/functions/mathematical_functions"
+            },
+            {
+              "title": "Vector Functions",
+              "path": "sqls/functions/vector_functions"
             },
             {
               "title": "String Functions",

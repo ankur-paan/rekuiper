@@ -1,42 +1,59 @@
 # WebAssembly (Wasm) Plugins
 
-WebAssembly (Wasm) plugins provide sandboxed, high-performance function extensions. You can write extensions in languages that compile to WebAssembly bytecode, including Rust, C, C++, and Go.
+WebAssembly (Wasm) plugins provide safe, sandboxed function extensions for `rekuiper`.
 
-Development workflow:
-1. Implement the function logic in your chosen programming language.
-2. Compile the source code into a `.wasm` binary module.
-3. Package the binary and register the plugin in rekuiper.
+You can write plugins in any language that compiles to WebAssembly bytecode. Supported languages include Rust, C, C++, and Go.
 
-## Prerequisites and Tooling
+`rekuiper` contains an embedded WebAssembly interpreter. You do not need to install external runtimes or system libraries.
 
-This guide uses TinyGo to compile Go source code into WebAssembly modules running on the WasmEdge runtime.
+## Development Workflow
 
-1. Verify the Go compiler installation:
+Follow these steps to create a Wasm plugin:
+1. Write your function logic in Rust, C, or Go.
+2. Compile the source code to a WebAssembly module (`.wasm`).
+3. Place or register the module in `rekuiper`.
+4. Call your function in SQL rules.
 
-   ```shell
-   go version
-   ```
+---
 
-2. Verify the [TinyGo](https://github.com/tinygo-org/tinygo/releases) compiler:
+## 1. Implement the Function
 
-   ```shell
-   tinygo version
-   ```
+### Example in Rust
 
-3. Verify the [WasmEdge](https://wasmedge.org/book/en/quick_start/install.html) runtime:
+Create a simple Rust library project:
 
-   ```shell
-   wasmedge -v
-   ```
+```bash
+cargo new --lib fibonacci_wasm
+```
 
-   To install WasmEdge on Linux or macOS:
+In `Cargo.toml`, set the crate type to `cdylib`:
 
-   ```shell
-   curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
-   source $HOME/.wasmedge/env
-   ```
+```toml
+[lib]
+crate-type = ["cdylib"]
+```
 
-## Function Implementation
+Implement the calculation in `src/lib.rs`:
+
+```rust
+#[no_mangle]
+pub extern "C" fn fib(n: i32) -> i32 {
+    if n <= 1 {
+        return n;
+    }
+    fib(n - 1) + fib(n - 2)
+}
+```
+
+Compile the project to the WebAssembly target:
+
+```bash
+cargo build --target wasm32-unknown-unknown --release
+```
+
+The output file is at `target/wasm32-unknown-unknown/release/fibonacci_wasm.wasm`.
+
+### Example in Go (TinyGo)
 
 Create `fibonacci.go`:
 
@@ -46,99 +63,79 @@ package main
 func main() {}
 
 //export fib
-func fibArray(n int32) int32 {
-  arr := make([]int32, n)
-  for i := int32(0); i < n; i++ {
-    switch {
-    case i < 2:
-      arr[i] = i
-    default:
-      arr[i] = arr[i-1] + arr[i-2]
+func fib(n int32) int32 {
+    if n <= 1 {
+        return n
     }
-  }
-  return arr[n-1]
+    return fib(n-1) + fib(n-2)
 }
 ```
 
-Compile the source code to a WASI bytecode target:
+Compile using TinyGo:
 
-```shell
-tinygo build -o fibonacci.wasm -target wasi fibonacci.go
+```bash
+tinygo build -o fibonacci.wasm -target wasm fibonacci.go
 ```
 
-Verify execution with WasmEdge:
+---
 
-```shell
-wasmedge --reactor fibonacci.wasm fib 10
-```
+## 2. Plugin Installation
 
-Expected output: `34`.
+Package your plugin into a `.zip` file with:
+- `fibonacci.wasm`: The compiled WebAssembly bytecode.
+- `fibonacci.json`: The plugin metadata file.
 
-## Packaging
-
-Package the plugin files into a `.zip` archive containing:
-- `fibonacci.json`: Plugin descriptor matching the plugin name.
-- `fibonacci.wasm`: Compiled bytecode module matching the plugin name.
-
-Example descriptor `fibonacci.json`:
+Example `fibonacci.json`:
 
 ```json
 {
   "version": "v1.0.0",
   "functions": [
     "fib"
-  ],
-  "wasmEngine": "wasmedge"
+  ]
 }
 ```
 
-## Compilation and Installation
+Install the plugin using the REST API:
 
-To enable Wasm support when building from source:
+```http
+POST http://localhost:9081/plugins/wasm
+Content-Type: application/json
 
-```shell
-make build_with_wasm
+{
+  "name": "fibonacci",
+  "file": "file:///plugins/wasm/fibonacci.zip"
+}
 ```
 
-Install the packaged plugin using the CLI:
+You can also place `.wasm` files directly into the `plugins/wasm` directory. `rekuiper` loads them automatically on startup.
 
-```shell
-bin/kuiper create plugin wasm fibonacci '{"file":"file:///$HOME/ekuiper/internal/plugin/testzips/wasm/fibonacci.zip"}'
+---
+
+## 3. Query Execution
+
+You can execute WebAssembly functions in SQL rules in two ways:
+
+### Method A: Direct Function Call
+
+When a plugin is registered, its exported functions become available directly:
+
+```sql
+SELECT fib(num) AS fib_result FROM sensor_stream;
 ```
 
-Verify the plugin installation:
+### Method B: Generic `wasm_run` Function
 
-```shell
-bin/kuiper describe plugin wasm fibonacci
+You can also call the generic `wasm_run` scalar function:
+
+```sql
+SELECT wasm_run('fib', num) AS fib_result FROM sensor_stream;
 ```
 
-## Query Execution
+---
 
-1. Create a stream and start a query:
+## Performance and Isolation
 
-   ```shell
-   bin/kuiper create stream demo_fib '(num float) WITH (FORMAT="JSON", DATASOURCE="demo_fib")'
-   bin/kuiper query
-   SELECT fib(num) FROM demo_fib;
-   ```
-
-2. Send test telemetry using HTTP push:
-
-   ```shell
-   curl -X POST http://localhost:9081/streams/demo_fib/data \
-     -H "Content-Type: application/json" \
-     -d '{"num": 25}'
-   ```
-
-   Or publish using MQTT:
-
-   ```shell
-   mosquitto_pub -h 127.0.0.1 -t demo_fib -m '{"num": 25}'
-   ```
-
-3. The query invokes the Wasm function and returns the computed Fibonacci result.
-
-## Management
-
-- **File System Autoload**: Place uncompressed plugin directories under `plugins/wasm/{pluginName}` to load modules at engine startup.
-- **Dynamic API**: Manage Wasm plugins at runtime through the [REST API](../../api/restapi/plugins.md) or the [CLI](../../api/cli/plugins.md).
+The embedded Wasm engine offers strong operational guarantees:
+- **Memory Safety**: Each module runs in an isolated linear memory space. A crash in a plugin cannot corrupt the `rekuiper` process.
+- **Portability**: The same `.wasm` binary runs identically on x86_64, ARMv7, and AArch64 edge hardware.

@@ -189,6 +189,64 @@ Response sample:
 }
 ```
 
+## Zero-Trust Security with OpenZiti Overlay
+
+In hostile or untrusted edge environments (such as factory floors, public clouds, or remote wind turbines), exposing EdgeX and rekuiper management ports to local networks introduces attack surfaces. OpenZiti provides a zero-trust network overlay that eliminates listening ports on public interfaces.
+
+### Architecture
+
+```
+[EdgeX Microservices] <---> [rekuiper (Port 59720)]
+         |                           |
+         +-------------+-------------+
+                       |
+             [ziti-edge-tunnel]
+                       | (mTLS Over Port 443 Only)
+             [OpenZiti Edge Fabric]
+                       |
+             [Authorized Operator / Cloud]
+```
+
+1. **Dark Services**: Neither EdgeX nor rekuiper exposes host ports (`59720`, `1883`, `59880`). All traffic is intercepted locally by `ziti-edge-tunnel`.
+2. **Mutual TLS (mTLS)**: Every connection through the overlay is cryptographically authenticated with per-workload identities.
+3. **Least Privilege**: Only operators with valid OpenZiti JWT service policies can access the rekuiper REST API or query EdgeX metrics.
+
+### Step-by-Step Configuration
+
+#### 1. Enroll the Edge Identity
+
+Generate an enrollment token for rekuiper in the OpenZiti Controller:
+
+```shell
+ziti edge create identity device "rekuiper-edge-01" -a "edgex-nodes" -o rekuiper.jwt
+```
+
+Enroll the token into the persistent storage volume:
+
+```shell
+ziti-edge-tunnel enroll -j rekuiper.jwt -i /ziti-edge-tunnel/rekuiper-edge.json
+```
+
+#### 2. Define the Zero-Trust Service
+
+Create an OpenZiti service intercepting the rekuiper management API:
+
+```shell
+ziti edge create config rekuiper-host-cfg host.v1 '{"protocol":"tcp", "address":"edgex-kuiper", "port":59720}'
+ziti edge create config rekuiper-intercept-cfg intercept.v1 '{"protocols":["tcp"], "addresses":["kuiper.edgex.ziti"], "portRanges":[{"low":59720, "high":59720}]}'
+ziti edge create service rekuiper-service --configs rekuiper-host-cfg,rekuiper-intercept-cfg
+```
+
+#### 3. Run with Docker Compose
+
+Deploy the zero-trust stack using [deploy/docker/docker-compose-edgex-openziti.yml](../../deploy/docker/docker-compose-edgex-openziti.yml):
+
+```shell
+docker-compose -f deploy/docker/docker-compose-edgex-openziti.yml up -d
+```
+
+Verify that no host ports are bound (`0.0.0.0:*`) while rekuiper remains fully accessible over the zero-trust overlay address `kuiper.edgex.ziti:59720`.
+
 ## Cross References
 
 - [Management Web UI](../operation/manager-ui/overview.md)

@@ -1,0 +1,65 @@
+version: '3.8'
+
+# Zero-Trust EdgeX Foundry + rekuiper deployment using OpenZiti Overlay
+# Eliminates all public/host port mappings for EdgeX and rekuiper.
+
+networks:
+  edgex-internal:
+    driver: bridge
+  ziti-overlay:
+    driver: bridge
+
+volumes:
+  ziti-identity:
+
+services:
+  # OpenZiti Edge Tunnel Sidecar: Provides encrypted zero-trust transport
+  # between the edge environment and the enterprise cloud / management plane.
+  ziti-tunnel:
+    image: openziti/ziti-edge-tunnel:latest
+    container_name: ziti-edge-tunnel
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ziti-identity:/ziti-edge-tunnel
+      - ./ziti-identity.jwt:/opt/openziti/identity.jwt:ro
+    environment:
+      - ZITI_IDENTITY_FILE=/ziti-edge-tunnel/rekuiper-edge.json
+    networks:
+      - ziti-overlay
+      - edgex-internal
+
+  # EdgeX Message Bus (MQTT)
+  edgex-mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: edgex-mqtt-broker
+    restart: unless-stopped
+    command: mosquitto -c /mosquitto-no-auth.conf
+    networks:
+      - edgex-internal
+
+  # rekuiper Rule Engine: Connects to EdgeX message bus internally and 
+  # exposes REST management API (59720) strictly through the OpenZiti overlay.
+  rules-engine:
+    image: rekuiper:edge-compat
+    container_name: edgex-kuiper
+    restart: unless-stopped
+    environment:
+      - PORT=59720
+      - KUIPER__BASIC__PORT=59720
+      - KUIPER__BASIC__RESTPORT=59720
+      - CONNECTION__EDGEX__MQTTMSGBUS__SERVER=edgex-mqtt-broker
+      - CONNECTION__EDGEX__MQTTMSGBUS__PORT=1883
+      - CONNECTION__EDGEX__MQTTMSGBUS__PROTOCOL=tcp
+      - CONNECTION__EDGEX__MQTTMSGBUS__TYPE=mqtt
+      - CONNECTION__EDGEX__MQTTMSGBUS__OPTIONAL__CLIENTID=rekuiper-rules-engine
+      - RUST_LOG=info
+    networks:
+      - edgex-internal
+      - ziti-overlay
+    depends_on:
+      - edgex-mqtt-broker
+      - ziti-tunnel

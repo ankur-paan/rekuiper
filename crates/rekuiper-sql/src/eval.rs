@@ -2336,6 +2336,13 @@ impl Evaluator {
             "endswith" => Self::func_endswith(args),
             "indexof" => Self::func_indexof(args),
             "format" => Self::func_format(args),
+            // ---- Vector similarity & math ----
+            "cosine_similarity" => Self::func_cosine_similarity(args),
+            "vector_l2" | "euclidean_distance" => Self::func_vector_l2(args),
+            "vector_dot" | "vector_dot_product" => Self::func_vector_dot(args),
+            "vector_match" => Self::func_vector_match(args),
+            // ---- WebAssembly (WASM) plugin functions ----
+            "wasm" | "wasm_run" => Self::func_wasm_run(args),
             // ---- Array & object ----
             "array_contains" => Self::func_array_contains(args),
             "array_join" => Self::func_array_join(args),
@@ -3634,6 +3641,172 @@ impl Evaluator {
             return Value::Null;
         }
         Value::String(Self::to_string_always(&args[0]).chars().rev().collect())
+    }
+
+    // ---------- vector similarity & distance functions ----------
+
+    fn extract_f64_vec(val: &Value) -> Option<Vec<f64>> {
+        match val {
+            Value::Array(arr) => {
+                let mut res = Vec::with_capacity(arr.len());
+                for item in arr {
+                    if let Some(f) = item.as_f64() {
+                        res.push(f);
+                    } else if let Some(i) = item.as_i64() {
+                        res.push(i as f64);
+                    } else if let Some(s) = item.as_str() {
+                        if let Ok(f) = s.trim().parse::<f64>() {
+                            res.push(f);
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                Some(res)
+            }
+            Value::String(s) => {
+                if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(s.trim()) {
+                    Self::extract_f64_vec(&Value::Array(arr))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn func_cosine_similarity(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+            return Value::Null;
+        };
+        if v1.is_empty() || v1.len() != v2.len() {
+            return Value::Null;
+        }
+
+        let mut dot = 0.0f64;
+        let mut norm1 = 0.0f64;
+        let mut norm2 = 0.0f64;
+
+        for (a, b) in v1.iter().zip(v2.iter()) {
+            dot += a * b;
+            norm1 += a * a;
+            norm2 += b * b;
+        }
+
+        if norm1 <= 0.0 || norm2 <= 0.0 {
+            return serde_json::json!(0.0);
+        }
+
+        let sim = (dot / (norm1.sqrt() * norm2.sqrt())).clamp(-1.0, 1.0);
+        serde_json::json!(sim)
+    }
+
+    fn func_vector_l2(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+            return Value::Null;
+        };
+        if v1.is_empty() || v1.len() != v2.len() {
+            return Value::Null;
+        }
+
+        let sum_sq: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+        serde_json::json!(sum_sq.sqrt())
+    }
+
+    fn func_vector_dot(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+            return Value::Null;
+        };
+        if v1.is_empty() || v1.len() != v2.len() {
+            return Value::Null;
+        }
+
+        let dot: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| a * b).sum();
+        serde_json::json!(dot)
+    }
+
+    fn func_vector_match(args: &[Value]) -> Value {
+        if args.len() < 2 || args.len() > 3 {
+            return Value::Null;
+        }
+        let Some(query_vec) = Self::extract_f64_vec(&args[0]) else {
+            return Value::Null;
+        };
+        let Some(candidates) = args[1].as_array() else {
+            return Value::Null;
+        };
+        let top_k = if args.len() == 3 {
+            args[2].as_u64().unwrap_or(5) as usize
+        } else {
+            5
+        };
+
+        let mut scored: Vec<(f64, Value)> = Vec::new();
+
+        for candidate in candidates {
+            let cand_vec_opt = if let Some(obj) = candidate.as_object() {
+                obj.get("embedding")
+                    .or_else(|| obj.get("vector"))
+                    .and_then(Self::extract_f64_vec)
+            } else {
+                Self::extract_f64_vec(candidate)
+            };
+
+            if let Some(cand_vec) = cand_vec_opt {
+                if cand_vec.len() == query_vec.len() {
+                    let mut dot = 0.0f64;
+                    let mut norm1 = 0.0f64;
+                    let mut norm2 = 0.0f64;
+                    for (a, b) in query_vec.iter().zip(cand_vec.iter()) {
+                        dot += a * b;
+                        norm1 += a * a;
+                        norm2 += b * b;
+                    }
+                    let sim = if norm1 > 0.0 && norm2 > 0.0 {
+                        (dot / (norm1.sqrt() * norm2.sqrt())).clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let mut item_obj = serde_json::Map::new();
+                    item_obj.insert("similarity".to_string(), serde_json::json!(sim));
+                    item_obj.insert("item".to_string(), candidate.clone());
+                    scored.push((sim, Value::Object(item_obj)));
+                }
+            }
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let results: Vec<Value> = scored.into_iter().take(top_k).map(|(_, v)| v).collect();
+        Value::Array(results)
+    }
+
+    // ---------- WebAssembly plugin invocation ----------
+
+    fn func_wasm_run(args: &[Value]) -> Value {
+        if args.len() < 2 {
+            return Value::Null;
+        }
+        let Some(module_name) = args[0].as_str() else {
+            return Value::Null;
+        };
+        let Some(func_name) = args[1].as_str() else {
+            return Value::Null;
+        };
+        let func_args = &args[2..];
+        rekuiper_core::get_global_wasm_registry()
+            .call_module_func(module_name, func_name, func_args)
+            .unwrap_or(Value::Null)
     }
 
     // ---------- array & object functions ----------

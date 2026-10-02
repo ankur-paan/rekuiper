@@ -14,6 +14,12 @@ use tokio::io::AsyncBufReadExt;
 
 pub mod codec;
 pub use codec::*;
+pub mod parquet_io;
+pub use parquet_io::*;
+pub mod secrets;
+pub use secrets::*;
+pub mod rabbitmq;
+pub use rabbitmq::*;
 
 #[async_trait]
 pub trait Sink: Send + Sync {
@@ -143,6 +149,21 @@ impl FileSink {
                 .is_some_and(|t| t.eq_ignore_ascii_case("csv"))
     }
 
+    fn is_parquet(&self) -> bool {
+        self.format
+            .as_deref()
+            .is_some_and(|f| f.eq_ignore_ascii_case("parquet"))
+            || self
+                .file_type
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case("parquet"))
+            || self
+                .path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"))
+    }
+
     fn delimiter_str(&self) -> &str {
         match self.delimiter.as_deref() {
             Some(d) if !d.is_empty() => d,
@@ -161,7 +182,9 @@ impl Sink for FileSink {
                     .with_context(|| format!("Failed to create parent dirs for {:?}", self.path))?;
             }
         }
-        if self.is_delimited() {
+        if self.is_parquet() {
+            parquet_io::append_record_to_parquet(record, &self.path)
+        } else if self.is_delimited() {
             self.send_delimited(record).await
         } else {
             let mut line = serde_json::to_string(&record.data)?;
@@ -271,6 +294,14 @@ impl FileSource {
 
     /// Read all records from the file without sending them anywhere.
     pub async fn read_records(&self) -> Result<Vec<StreamRecord>> {
+        if self.config.format.eq_ignore_ascii_case("parquet")
+            || Path::new(&self.config.path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"))
+        {
+            return parquet_io::read_parquet_file(Path::new(&self.config.path));
+        }
         let content = tokio::fs::read_to_string(&self.config.path)
             .await
             .with_context(|| format!("Failed to read file {:?}", self.config.path))?;
@@ -497,6 +528,20 @@ impl MqttConfig {
             }
         }
         generate_client_id()
+    }
+
+    /// Dynamically resolve any secrets (e.g. `vault://` or `env://`) in password, username, or key.
+    pub async fn resolve_secrets(&mut self, resolver: &SecretResolver) -> Result<()> {
+        if let Some(pwd) = &self.password {
+            self.password = Some(resolver.resolve(pwd).await?);
+        }
+        if let Some(user) = &self.username {
+            self.username = Some(resolver.resolve(user).await?);
+        }
+        if let Some(key_raw) = &self.private_key_raw {
+            self.private_key_raw = Some(resolver.resolve(key_raw).await?);
+        }
+        Ok(())
     }
 }
 
@@ -2149,6 +2194,44 @@ impl FileSource {
         mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            let is_parquet = self.config.format.eq_ignore_ascii_case("parquet")
+                || Path::new(&self.config.path)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
+
+            if is_parquet {
+                match parquet_io::read_parquet_file(Path::new(&self.config.path)) {
+                    Ok(records) => {
+                        for record in records {
+                            if self.tx.send(record).await.is_err() {
+                                return;
+                            }
+                            if self.config.interval > 0 {
+                                tokio::select! {
+                                    _ = tokio::time::sleep(std::time::Duration::from_millis(
+                                        self.config.interval,
+                                    )) => {}
+                                    exit = Self::is_cancelled(&mut cancel_rx) => {
+                                        if exit {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "File source cannot open/parse Parquet file {}: {}",
+                            self.config.path,
+                            e
+                        );
+                    }
+                }
+                return;
+            }
+
             let file = match tokio::fs::File::open(&self.config.path).await {
                 Ok(file) => file,
                 Err(e) => {

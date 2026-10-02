@@ -7,7 +7,7 @@ The file sink writes analysis results to a specified file. It overwrites the fil
 | Property name | Optional | Description |
 |---|---|---|
 | path | false | The target file path, such as `/tmp/result.txt`. Supports template syntax for dynamic file names. Refer to [dynamic properties](../overview.md#dynamic-properties). |
-| fileType | true | The file type: `lines`, `json`, or `csv`. Default: `lines`. Refer to [File Types](#file-types). |
+| fileType | true | The file type: `lines`, `json`, `csv`, or `parquet`. Default: `lines`. Refer to [File Types](#file-types). |
 | hasHeader | true | Controls whether to generate a header line. Applies only to `csv` files. Deduces the header from the first record and sorts keys alphabetically. |
 | rollingInterval | true | Minimum time interval in milliseconds before rolling to a new file. rekuiper checks this interval based on `checkInterval`. |
 | checkInterval | true | Interval in milliseconds for checking time-based rolling policies. |
@@ -28,6 +28,7 @@ The file sink supports the following file formats:
 - `lines`: Default type. Writes line-separated records. For example, to write newline-delimited JSON strings, set `fileType` to `lines` and `format` to `json`.
 - `json`: Writes records as a standard JSON array. To use this format, set `format` to `json`.
 - `csv`: Writes comma-delimited CSV records. Custom delimiters are supported. To use this format, set `format` to `delimited`.
+- `parquet`: Writes columnar Apache Parquet files using Arrow schema inference and Snappy compression. To use this format, set `format` to `parquet` or `fileType` to `parquet`.
 
 ### Rolling Strategy
 
