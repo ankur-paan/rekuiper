@@ -1,5 +1,15 @@
-# Log action
+# Log Sink Connector
 
-The action is used for print output message into log file, the log file is at `$rekuiper_install/log/stream.log` by default.
+The Log sink connector writes output messages to the engine log file for diagnostic debugging.
 
-The common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+By default, the engine writes messages to `$rekuiper_install/log/stream.log`.
+
+The Log sink supports all [common sink properties](../overview.md#common-properties).
+
+## Example Configuration
+
+```json
+{
+  "log": {}
+}
+```

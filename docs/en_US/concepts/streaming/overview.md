@@ -1,30 +1,40 @@
 # Stream Processing
 
-Streaming data is a sequence of data elements made available over time. Stream processing is the processing of streaming data in motion. Unlike batch processing, streaming data is processed one at a time once it is produced.
+Streaming data is a continuous sequence of data records generated over time. Stream processing processes records in motion. Unlike batch processing, the engine processes each record immediately upon arrival.
 
-## Streaming Characteristic
+## Streaming Characteristics
 
-Stream processing has the below characteristics:
+Stream processing features these primary characteristics:
 
-- Unbounded data: streaming data is a type of ever-growing, essentially infinite data set which cannot be operated as a whole.
-- Unbounded data processing: As applying to unbounded data, the stream processing itself is also unbounded. The workload can distribute evenly across time compared to batch processing.
-- Low-latency, near real-time: stream processing can process data once it is produced to get the result in a very low latency.
+- **Unbounded Data**: Streaming data is an infinite dataset that cannot be processed as a static whole.
+- **Continuous Execution**: Because input data is unbounded, processing pipelines run continuously. Workloads distribute evenly over time rather than concentrating in batch intervals.
+- **Low Latency**: Processing records upon generation achieves near real-time response times.
 
-Stream processing unifies applications and analytics. This simplifies the overall infrastructure, because many systems can be built on a common architecture, and also allows a developer to build applications that use analytical results to respond to insights in the data to take action directly.
+Stream processing unifies operational logic and analytical processing. Systems built on a unified architecture can respond directly to real-time events.
 
 ## Edge Stream Processing
 
-On the edge side, the majority of data are born as continuous streams such as sensor events. With the wide application of IoT, more and more edge computing nodes need to access the cloud network and generate huge amount of data. In order to reduce the communication cost, reduce the data volume of data on the cloud, and at the same time improve the real-time data processing to achieve the purpose of local timely response and also local timely data processing in case of network disconnection, it is necessary to introduce real-time stream processing at the edge.
+Edge devices generate telemetry as continuous streams, such as industrial sensor readings.
+
+IoT deployments transmit large volumes of data to cloud infrastructure. Edge stream processing provides these benefits:
+
+- Decreases network bandwidth and cloud transmission costs.
+- Reduces raw telemetry volume through local filtering and aggregation.
+- Delivers low latency for local control loops.
+- Maintains autonomous operations during network disconnections.
 
 ## Stateful Stream Processing
 
-Stateful stream processing is a subset of stream processing in which the computation maintains contextual state. Some examples of stateful stream processing:
+Stateful stream processing maintains contextual state across multiple events.
 
-- When aggregating events to calculate sum, count or average values.
-- When detecting event changes.
-- When searching for a pattern across a series of events.
+Examples of stateful processing include:
 
-The state information can be found or managed by:
+- Calculating aggregates such as sum, count, or average across time.
+- Detecting changes between sequential events.
+- Recognizing patterns across event sequences.
 
-- [Windows](./windowing.md)
-- [State API](../../extension/native/overview.md#state-storage)
+Manage state through these mechanisms:
+
+- [Windowing](./windowing.md)
+- [State Storage API](../../extension/native/overview.md#state-storage)
+

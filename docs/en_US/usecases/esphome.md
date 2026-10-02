@@ -1,20 +1,16 @@
 # ESPHome Fleet Telemetry Processing
 
-[ESPHome](https://esphome.io/) is an open-source firmware system for ESP8266 and ESP32 microcontrollers. In smart buildings, industrial facilities, and distributed monitoring networks, thousands of ESPHome nodes continuously publish sensor readings over MQTT.
+[ESPHome](https://esphome.io/) is an open-source firmware system for ESP8266 and ESP32 microcontrollers. In smart building installations, industrial facilities, and distributed telemetry networks, thousands of ESPHome nodes publish sensor metrics over MQTT.
 
-When managing hundreds or thousands of devices, central brokers can become overwhelmed by high-frequency chatter. rekuiper acts as a high-speed local stream processor between ESPHome fleets and downstream time-series databases or home automation controllers.
-
----
+When managing large device fleets, central brokers encounter heavy transmission load. rekuiper operates as a local stream processor between ESPHome fleets and downstream time-series databases or automation controllers.
 
 ## Fleet Architecture
 
 ![ESPHome Fleet Telemetry Architecture](../public/diagrams/esphome_fleet.svg)
 
----
+## High-Throughput Topic Extraction with meta(topic)
 
-## High-Throughput Topic Extraction with `meta(topic)`
-
-ESPHome devices publish each sensor state to a distinct MQTT topic following the convention:
+ESPHome devices publish each sensor state to a distinct MQTT topic following this convention:
 
 ```text
 esphome/<device_name>/sensor/<sensor_name>/state
@@ -47,15 +43,13 @@ WHERE
   value IS NOT NULL
 ```
 
-In benchmark tests running on a single CPU core, rekuiper routes and transforms **150,000 msg/s** across 10,000 distinct ESPHome topics with zero packet loss and a 4.5 MiB memory footprint.
-
----
+In benchmark tests running on a single CPU core, rekuiper routes and transforms 150,000 msg/s across 10,000 distinct ESPHome topics with zero packet loss and a 4.5 MiB memory footprint.
 
 ## Practical Processing Rules
 
 ### 1. 1-Minute Sensor Downsampling
 
-High-frequency sensor reports (such as temperature measured every second) generate redundant database entries. The following rule aggregates readings into 1-minute tumbling averages per device:
+High-frequency sensor reports (such as temperature measurements published every second) create redundant database records. The following rule aggregates readings into 1-minute tumbling averages per device:
 
 ```sql
 SELECT
@@ -72,11 +66,11 @@ GROUP BY
   TUMBLINGWINDOW(ss, 60)
 ```
 
-The aggregated result is written directly to a relational database or time-series sink, cutting database disk growth by over 95%.
+The engine emits aggregated results to a relational database or time-series sink, reducing storage growth by over 95%.
 
 ### 2. High Power Draw Alarm
 
-Power-monitoring plugs (such as Sonoff POW or Shelly devices running ESPHome) report wattage continuously. This rule detects sudden power spikes exceeding a safe threshold:
+Power-monitoring smart plugs report wattage continuously. This rule detects power surges that exceed a configured safety threshold:
 
 ```sql
 SELECT
@@ -89,7 +83,7 @@ WHERE
   AND cast(value, "float") > 2500.0
 ```
 
-When power draw exceeds 2,500 Watts, an alert payload is dispatched immediately to a webhook:
+When power consumption exceeds 2,500 Watts, the rule dispatches an alert payload to a REST webhook:
 
 ```json
 {
@@ -107,14 +101,12 @@ When power draw exceeds 2,500 Watts, an alert payload is dispatched immediately 
 }
 ```
 
----
+## Performance Comparison
 
-## Performance Summary
-
-| Metric | Upstream eKuiper (Go) | rekuiper (Rust) |
+| Operational Metric | Upstream eKuiper (Go) | rekuiper (Rust) |
 | :--- | :--- | :--- |
-| **Max Loss-Free Throughput (10k topics)** | 20,000 msg/s | **150,000 msg/s** |
-| **Memory Footprint** | 15 – 45 MiB | **4.5 – 5.8 MiB** |
-| **Garbage Collection Jitter** | Yes (occasional channel drops) | **Zero GC (deterministic)** |
+| **Loss-Free Throughput (10k topics)** | 20,000 msg/s | **150,000 msg/s** |
+| **RAM Utilization Baseline** | 15 to 45 MiB | **4.5 to 5.8 MiB** |
+| **Garbage Collection Latency Jitter** | Present (periodic channel drops) | **Zero GC (deterministic)** |
 
-Using rekuiper as an edge aggregator allows single-board computers (like a Raspberry Pi 4 or an Odroid) to handle thousands of active ESPHome nodes without degradation.
+Deploying rekuiper as a local edge aggregator allows single-board computers (such as a Raspberry Pi 4) to process thousands of active ESPHome nodes without degradation.

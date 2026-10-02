@@ -1,34 +1,33 @@
-# REST action
+# REST Action
 
-The action is used for publish output message into a RESTful API.
+The REST action publishes output messages to a RESTful API endpoint.
 
-| Property name        | Optional | Description                                                                                                                                                                                                                                                                                                                                                                                       |
-|----------------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| method               | true     | The HTTP method for the RESTful API. It is a case insensitive string whose value is among "get", "post", "put", "patch", "delete" and "head". The default value is "get".                                                                                                                                                                                                                         |
-| url                  | false    | The RESTful API endpoint, such as `https://www.example.com/api/dummy`                                                                                                                                                                                                                                                                                                                             |
-| bodyType             | true     | The type of the body. Currently, these types are supported: "none", "json", "text", "html", "xml", "javascript", "form", "binary" and "formdata". For "get" and "head", no body is required so the default value is "none". For other http methods, the default value is "json" For "html", "xml" and "javascript", the dataTemplate must be carefully set up to make sure the format is correct. |
-| timeout              | true     | The timeout (milliseconds) for a HTTP request, defaults to 5000 ms                                                                                                                                                                                                                                                                                                                                |
-| headers              | true     | The additional headers to be set for the HTTP request.                                                                                                                                                                                                                                                                                                                                            |
-| formdata             | true     | If bodyType is formdata, this property specifies key-value pairs for form data. The encoded body (in bytes) will be transmitted as a file. Each key-value pair represents one part of the multipart form.                                                                                                                                                                                         |
-| fileFieldName        | true     | Specifies the form field name when uploading files via multipart/form-data                                                                                                                                                                                                                                                                                                                        |
-| debugResp            | true     | Control if print the response information into the console. If set it to `true`, then print response; If set to `false`, then skip print log. The default is `false`.                                                                                                                                                                                                                             |
-| certificationPath    | true     | The certification path. It can be an absolute path, or a relative path. If it is an relative path, then the base path is where you excuting the `kuiperd` command. For example, if you run `bin/kuiperd` from `/var/kuiper`, then the base path is `/var/kuiper`; If you run `./kuiperd` from `/var/kuiper/bin`, then the base path is `/var/kuiper/bin`.                                         |
-| privateKeyPath       | true     | The private key path. It can be either absolute path, or relative path, which is similar to use of certificationPath.                                                                                                                                                                                                                                                                             |
-| rootCaPath           | true     | The location of root ca path. It can be an absolute path, or a relative path, which is similar to use of certificationPath.                                                                                                                                                                                                                                                                       |
-| tlsMinVersion        | true     | Specifies the minimum version of the TLS protocol that will be negotiated with the client. Accept values are `tls1.0`, `tls1.1`, `tls1.2` and `tls1.3`. Default: `tls1.2`.                                                                                                                                                                                                                        |
-| renegotiationSupport | true     | Determines how and when the client handles server-initiated renegotiation requests. Support `never`, `once` or `freely` options. Default: `never`.                                                                                                                                                                                                                                                |
-| insecureSkipVerify   | true     | Control if to skip the certification verification. If it is set to `true`, then skip certification verification; Otherwise, verify the certification. The default value is `true`.                                                                                                                                                                                                                |
-| oAuth                | true     | Define the authentication flow to follow the OAuth style. Other authentication method like apikey can directly set the key to header only, not need to set this configuration. Refer to [OAuth configuration](../../sources/builtin/http_pull.md#OAuth) in httppull source for more information.                                                                                                  |
+## Properties
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+| Property name | Optional | Description |
+|---|---|---|
+| method | true | The HTTP method for the RESTful API. Case-insensitive string: `"get"`, `"post"`, `"put"`, `"patch"`, `"delete"`, or `"head"`. Default: `"get"`. |
+| url | false | The RESTful API endpoint URL, such as `https://www.example.com/api/dummy`. |
+| bodyType | true | The request body type: `"none"`, `"json"`, `"text"`, `"html"`, `"xml"`, `"javascript"`, `"form"`, `"binary"`, or `"formdata"`. For `"get"` and `"head"`, no body is required, so the default value is `"none"`. For other HTTP methods, the default value is `"json"`. For `"html"`, `"xml"`, and `"javascript"`, configure `dataTemplate` carefully to ensure correct formatting. |
+| timeout | true | The HTTP request timeout in milliseconds. Default: 5000 ms. |
+| headers | true | Additional HTTP headers sent with the request. |
+| formdata | true | Key-value pairs for form data when `bodyType` is `formdata`. The encoded body bytes are transmitted as a file. Each key-value pair represents one part of the multipart form. |
+| fileFieldName | true | The form field name used when uploading files with `multipart/form-data`. |
+| debugResp | true | Controls whether response information is printed to the console log. If `true`, rekuiper prints the response. If `false`, rekuiper skips logging. Default: `false`. |
+| certificationPath | true | The certificate file path. Can be an absolute path or a relative path. For a relative path, the base path is the execution directory of the `kuiperd` command. For example, if you run `bin/kuiperd` from `/var/kuiper`, the base path is `/var/kuiper`. If you run `./kuiperd` from `/var/kuiper/bin`, the base path is `/var/kuiper/bin`. |
+| privateKeyPath | true | The private key file path. Can be an absolute path or a relative path, same as `certificationPath`. |
+| rootCaPath | true | The root CA file path. Can be an absolute path or a relative path, same as `certificationPath`. |
+| tlsMinVersion | true | Specifies the minimum TLS protocol version negotiated with the client. Accepted values: `tls1.0`, `tls1.1`, `tls1.2`, and `tls1.3`. Default: `tls1.2`. |
+| renegotiationSupport | true | Controls how the client handles server-initiated renegotiation requests. Supported values: `never`, `once`, or `freely`. Default: `never`. |
+| insecureSkipVerify | true | Controls whether to skip certificate verification. If `true`, certificate verification is skipped. If `false`, certificates are verified. Default: `true`. |
+| oAuth | true | Defines the OAuth authentication flow. For simpler schemes like API keys, configure headers directly without this block. Refer to [OAuth configuration](../../sources/builtin/http_pull.md#OAuth) in the HTTP pull source documentation for more information. |
+
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
 ::: v-pre
-REST service usually requires a specific data format. That can be imposed by the common sink property `dataTemplate`.
-Please check the [data template](../data_template.md). Below is a sample configuration for connecting to Edgex Foundry
-core command. The dataTemplate <code v-pre>{{.key}}</code> means it will print out the value of key, that is
-result[key]. So the template here is to select only field `key` in the result and change the field name
-to `newKey`. `sendSingle` is another common property. Set to true means that if the result is an array, each element
-will be sent individually.
+REST services frequently require a specific data format. Use the common sink property `dataTemplate` to format the payload. Refer to the [data template documentation](../data_template.md).
+
+The following sample configuration connects to the EdgeX Foundry core command service. The data template <code v-pre>{{.key}}</code> outputs the value of `key`. The template selects only field `key` in the result and changes the field name to `newKey`. Set `sendSingle` to `true` to send each element individually when the result is an array.
 :::
 
 ```json
@@ -42,9 +41,11 @@ will be sent individually.
 }
 ```
 
-Example to use oAuth style authentication:
+Example of OAuth authentication:
 
-OAuth header templates support only the simple placeholders <code v-pre>{{.access_token}}</code>, <code v-pre>{{.refresh_token}}</code>, <code v-pre>{{.token_type}}</code>, <code v-pre>{{.id_token}}</code>, and <code v-pre>{{.expires_in}}</code>. The names must exactly match the JSON fields returned by the token endpoint. Other placeholders, such as <code v-pre>{{.message}}</code>, <code v-pre>{{.scope}}</code>, and <code v-pre>{{.custom_token}}</code>, are evaluated only against the rule output and cannot read fields from the token response. Token endpoints must therefore return the supported field names used by the configured headers. A single header cannot mix an OAuth placeholder with a rule-output template, but different headers may use OAuth and rule-output templates separately.
+::: v-pre
+OAuth header templates support only the following placeholders: <code v-pre>{{.access_token}}</code>, <code v-pre>{{.refresh_token}}</code>, <code v-pre>{{.token_type}}</code>, <code v-pre>{{.id_token}}</code>, and <code v-pre>{{.expires_in}}</code>. Names must match the JSON fields returned by the token endpoint. Other placeholders, such as <code v-pre>{{.message}}</code>, <code v-pre>{{.scope}}</code>, and <code v-pre>{{.custom_token}}</code>, evaluate only against the rule output and cannot read fields from the token response. Token endpoints must return the supported field names required by the configured headers. A single header cannot combine an OAuth placeholder with a rule-output template, but different headers can use OAuth and rule-output templates separately.
+:::
 
 ```json
 {
@@ -73,18 +74,19 @@ OAuth header templates support only the simple placeholders <code v-pre>{{.acces
 }
 ```
 
-## Visualization mode
+## Visualization Mode
 
-Use visualization create rules SQL and Actions
+Create rule SQL and actions by using the graphical user interface.
 
-## Text mode
+## Text Mode
 
-Use text json create rules SQL and Actions
+Create rule SQL and actions by using JSON definitions.
 
-Example for taosdb rest：
+The following example sends data to TDengine by using its REST API:
 
 ```json
-{"id": "rest1",
+{
+  "id": "rest1",
   "sql": "SELECT tele[0].Tag00001 AS temperature, tele[0].Tag00002 AS humidity FROM demoStream",
   "actions": [
     {
@@ -102,23 +104,26 @@ Example for taosdb rest：
 }
 ```
 
-## Configure dynamic properties
+## Configure Dynamic Properties
 
-There are many scenarios that we need to sink to dynamic url and configurations through REST sink. The properties `method`, `url`,`bodyType` and `headers` support dynamic property through jsonpath syntax. Let's look at an example to modify the previous sample to a dynamic version. Assume we receive data which have metadata like http method and url postfix. We can modify the SQL to fetch these metadata in the result. The rule result will be like:
+You can send data to dynamic URLs and configurations through the REST sink. The properties `method`, `url`, `bodyType`, and `headers` support dynamic values through template syntax.
+
+The following example shows how to configure dynamic request parameters. When incoming data contains HTTP metadata, modify the SQL query to include those fields in the output:
 
 ```json
 {
-  "method":"post",
-  "url":"http://xxx.xxx.xxx.xxx:6041/rest/sql",
+  "method": "post",
+  "url": "http://xxx.xxx.xxx.xxx:6041/rest/sql",
   "temperature": 20,
   "humidity": 80
 }
 ```
 
-Then in the action, we set the `method` and `url` to be the value of the result by using data template syntax as below:
+In the action configuration, use template syntax to assign `method` and `url` from the result fields:
 
 ```json
-{"id": "rest2",
+{
+  "id": "rest2",
   "sql": "SELECT tele[0]->Tag00001 AS temperature, tele[0]->Tag00002 AS humidity, method, concat(\"http://xxx.xxx.xxx.xxx:6041/rest/sql\", urlPostfix) as url FROM demoStream",
   "actions": [
     {
@@ -138,19 +143,19 @@ Then in the action, we set the `method` and `url` to be the value of the result 
 
 ## File Upload
 
-To upload data as files to an HTTP server, use `bodyType=formdata` configuration.
+To upload data as files to an HTTP server, set `bodyType` to `formdata`.
 
-**Key Characteristics**:
+### Key Characteristics
 
-- Uses "multipart/form-data" content type
-- Binary results will be uploaded as form file content
-- Additional form attributes can be configured via `formData`
+- Uses the `multipart/form-data` content type.
+- Uploads binary results as form file content.
+- Configures additional form attributes through `formData`.
 
-**Best Practices**:
+### Best Practices
 
-- For high-frequency data sources, configure batching or window aggregation to avoid frequent small file uploads.
+- For high-frequency data sources, configure batching or window aggregation to prevent frequent small file uploads.
 
-**Example Configuration**:
+### Example Configuration
 
 ```json
 {
@@ -175,4 +180,4 @@ To upload data as files to an HTTP server, use `bodyType=formdata` configuration
 }
 ```
 
-In this example, the format `delimited` will encode the content into csv which containing 10 records each and upload.
+In this example, the format `delimited` encodes content into CSV format with 10 records per upload.

@@ -1,41 +1,38 @@
-# Running ONNX Models with rekuiper Function Plugin
+# Execute ONNX Models with the Function Plugin
 
-[LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is a lightweight IoT data analysis/streaming software
-designed for various resource-constrained IoT devices.
+[Open Neural Network Exchange (ONNX)](https://onnx.ai/get-started.html) is an open format designed for machine learning models. It enables different machine learning frameworks to store model data and share inference formats.
 
-[ONNX](https://onnx.ai/get-started.html) is an open file format designed for machine learning to store trained models.
-It allows different AI frameworks to store model data and interact using the same format.
-
-By integrating eKuiper and ONNX, users can simply upload pre-built ONNX models and use them in rules to analyze streaming data. This tutorial demonstrates how to quickly invoke pre-trained ONNX models using rekuiper.
+By integrating rekuiper and ONNX, you can upload pre-trained ONNX models and invoke them in SQL rules to analyze streaming data. This tutorial demonstrates how to load and execute pre-trained ONNX models.
 
 ## Prerequisites
 
 ### Download Models
 
-To run the ONNX interpreter, a trained model is needed. This tutorial will not cover training or model specifics; you can learn how to do this by checking the [ONNX tutorials](https://github.com/onnx/tutorials#converting-to-onnx-format).
-We can either train a new model or choose an existing one.
-In this tutorial, we will use the [yalue/go onnxruntime](https://github.com/yalue/onnxruntime_go_examples)  [sum_and_difference](https://github.com/yalue/onnxruntime_go_examples/tree/master/sum_and_difference) model and [MNIST-12](https://github.com/onnx/models/tree/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist) for demonstration.
+To run the ONNX runtime interpreter, obtain a pre-trained model file. Refer to the [ONNX tutorials](https://github.com/onnx/tutorials#converting-to-onnx-format) for instructions on model export.
 
-### Running rekuiper
+This tutorial uses two demonstration models:
 
-This tutorial uses the eKuiper v2 and Rest API released by the team. If you want to use the eKuiper manager Docker, you can find installation and usage details [here](https://hub.docker.com/r/emqx/ekuiper-manager).
+- The [sum_and_difference](https://github.com/yalue/onnxruntime_go_examples/tree/master/sum_and_difference) model.
+- The [MNIST-12](https://github.com/onnx/models/tree/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist) handwritten digit recognition model.
 
-### ONNX Plugin Installation
+### Start rekuiper
 
-Before running model inference, the ONNX plugin needs to be installed.
-Installing the ONNX plugin does not require manual building of the C API like TensorFlow Lite; it can be built similarly to other plugins like Echo. For details, refer to [Function Extensions](../../extension/native/develop/function.md).
+You can execute rules by using the REST API or the management web interface. Refer to the [eKuiper manager repository](https://hub.docker.com/r/emqx/ekuiper-manager) for container deployment details.
 
-## Running the MNIST-12 Model
+### Install the ONNX Plugin
 
-Download the [MNIST-12 model](https://github.com/onnx/models/blob/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist/model/mnist-12.onnx) to predict digits in images.
-Users need to prepare an MQTT Broker and create an MQTT source to send data to the rekuiper rule for processing and return the inference results to the MQTT Broker.
+Install the ONNX native function plugin before running model inference. For plugin build and installation instructions, refer to [Function Extensions](../../extension/native/develop/function.md).
 
-### MQTT Source
+## Execute the MNIST-12 Model
 
-Note that the model input data format must be a float array, so the data type must be specified in the data source, which will preprocess it into a byte array.
+Download the [MNIST-12 model file](https://github.com/onnx/models/blob/ddbbd1274c8387e3745778705810c340dea3d8c7/validated/vision/classification/mnist/model/mnist-12.onnx) to recognize digits in images. Configure an MQTT broker and an MQTT stream source to transmit data to the rule and publish inference results.
 
-```shell
-POST /streams 
+### Configure the MQTT Source
+
+The model requires an input array of floating-point numbers. Define the stream schema accordingly:
+
+```http
+POST /streams
 Content-Type: application/json
 
 {
@@ -43,131 +40,136 @@ Content-Type: application/json
 }
 ```
 
-### Model Upload
+### Upload the Model
 
-Users can upload the model file to rekuiper via the eKuiper manager as shown in the image below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
-![model upload](../../resources/sin_upload.png)
+Upload the model file through the management web console, or copy the file directly to the `${build_output}/data/uploads` directory.
 
-### Calling the Model
+![Upload model file](../../resources/sin_upload.png)
 
-After installing the ONNX plugin, users can call the model in SQL like a normal built-in function. The first parameter is the model name, and the second is the data to be processed.
-The following image shows using the Rest API to call the model.
-![model call](../../resources/tflite_sin_rule.png)
+### Invoke the Model in SQL
 
-Rest API rule creation to call the model:
+After installing the ONNX plugin, invoke the `onnx` function in your SQL queries. Pass the model name as the first argument and the input field as the second argument:
 
-```shell
+![Configure model execution rule](../../resources/tflite_sin_rule.png)
+
+Rule definition:
+
+```json
 {
-    "id": "ruleOnnx",
-    "sql": "SELECT onnx(\"mnist\",data) FROM onnxPubImg",
-    "actions": [
-        {
-            "log": {},
-            "mqtt": {
-                "server": "tcp://127.0.0.1:1883",
-                "topic": "demoresult"
-            }
-        }
-    ]
+  "id": "ruleOnnx",
+  "sql": "SELECT onnx(\"mnist\", data) FROM onnxPubImg",
+  "actions": [
+    {
+      "log": {},
+      "mqtt": {
+        "server": "tcp://127.0.0.1:1883",
+        "topic": "demoresult"
+      }
+    }
+  ]
 }
 ```
 
-### Verifying Results
+### Verify Results
 
-The results are shown in the image below, indicating the predicted probabilities of different digits in the input image.
+The model outputs predicted probabilities for each digit:
 
-![result query](../../resources/mqttx_mnist.png)
+![Verify inference output](../../resources/mqttx_mnist.png)
 
-You can use a program like the one below to send images located in the ONNX directory.
+The following Go code sample sends preprocessed test images to the `onnxPubImg` topic:
 
 ```go
 func TestPic(t *testing.T) {
-const TOPIC = "onnxPubImg"
+    const TOPIC = "onnxPubImg"
 
-images := []string{
-"img.png",
-// Other images you need
-}
+    images := []string{
+        "img.png",
+    }
     opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
     client := mqtt.NewClient(opts)
     if token := client.Connect(); token.Wait() && token.Error() != nil {
         panic(token.Error())
     }
-for _, image := range images {
-fmt.Println("Publishing " + image)
-inputImage, err := NewProcessedImage(image, false)
-
-if err != nil {
-fmt.Println(err)
-continue
-}
-// payload, err := os.ReadFile(image)
-payloadF32 := inputImage.GetNetworkInput()
-
-data := make([]any, len(payloadF32))
-for i := 0; i < len(data); i++ {
-data[i] = payloadF32[i]
-}
-payloadUnMarshal := MqttPayLoadFloat32Slice{
-Data: payloadF32,
-}
-payload, err := json.Marshal(payloadUnMarshal)
-if err != nil {
-fmt.Println(err)
-continue
-} else {
-fmt.Println(string(payload))
-}
-if token := client.Publish(TOPIC, 2, true, payload); token.Wait() && token.Error() != nil {
-fmt.Println(token.Error())
-} else {
-fmt.Println("Published " + image)
-}
-time.Sleep(1 * time.Second)
-}
+    for _, image := range images {
+        fmt.Println("Publishing " + image)
+        inputImage, err := NewProcessedImage(image, false)
+        if err != nil {
+            fmt.Println(err)
+            continue
+        }
+        payloadF32 := inputImage.GetNetworkInput()
+        data := make([]any, len(payloadF32))
+        for i := 0; i < len(data); i++ {
+            data[i] = payloadF32[i]
+        }
+        payloadUnMarshal := MqttPayLoadFloat32Slice{
+            Data: payloadF32,
+        }
+        payload, err := json.Marshal(payloadUnMarshal)
+        if err != nil {
+            fmt.Println(err)
+            continue
+        }
+        if token := client.Publish(TOPIC, 2, true, payload); token.Wait() && token.Error() != nil {
+            fmt.Println(token.Error())
+        } else {
+            fmt.Println("Published " + image)
+        }
+        time.Sleep(1 * time.Second)
+    }
     client.Disconnect(0)
 }
 ```
 
-## Running the Sum_and_difference Model
+## Execute the Sum_and_difference Model
 
-Download the[sum_and_difference model](https://github.com/yalue/onnxruntime_go_examples/blob/master/sum_and_difference/sum_and_difference.onnx) , the model estimate the sum and maximum difference of input values.
-For example, if the input is [0.2, 0.3, 0.6, 0.9], the estimated sum is 2 and the maximum difference is 0.7. Users need to prepare an MQTT Broker and create an MQTT source for sending data to the rekuiper rule for processing and returning the inference results.
+Download the [sum_and_difference model file](https://github.com/yalue/onnxruntime_go_examples/blob/master/sum_and_difference/sum_and_difference.onnx). The model estimates the sum and the maximum difference of the input numbers. For example, for input `[0.2, 0.3, 0.6, 0.9]`, the estimated sum is `2.0` and the maximum difference is `0.7`.
 
-### Uploading the Sum_and_difference Model
+### Upload the Model
 
-Users can upload the model file to rekuiper via the eKuiper manager as shown below. Alternatively, place the model file in the `{$build_output}/data/uploads` directory.
+Upload the model file through the management console or copy it to `${build_output}/data/uploads`.
 
-![model upload](../../resources/mobilenet_upload.png)
+![Upload sum and difference model](../../resources/mobilenet_upload.png)
 
-### Calling the Sum_and_difference Model
+### Invoke the Model
 
-After installing the ONNX plugin, users can call the model in SQL like a normal built-in function. The first parameter is the model name, and the second is the data to be processed.
-The following image shows using the Rest API to call the model.
-![model call](../../resources/tflite_sin_rule.png)
+Invoke the `onnx` function in the SQL query:
 
-```shell
-POST /rules 
+```http
+POST /rules
 Content-Type: application/json
 
 {
-    "id": "ruleSum",
-    "sql": "SELECT onnx(\"sum_and_difference\",data) FROM sum_diff_stream",
-    "actions": [
-        {
-            "log": {},
-            "mqtt": {
-                "server": "tcp://127.0.0.1:1883",
-                "topic": "demoresult"
-            }
-        }
-    ]
+  "id": "ruleSum",
+  "sql": "SELECT onnx(\"sum_and_difference\", data) FROM sum_diff_stream",
+  "actions": [
+    {
+      "log": {},
+      "mqtt": {
+        "server": "tcp://127.0.0.1:1883",
+        "topic": "demoresult"
+      }
+    }
+  ]
 }
 ```
 
-### Verifying Sum_and_difference Model Inference Results
+### Verify Inference Output
 
-The results are shown in the image below, with the inference returning:
+Publish test data through your MQTT client:
+
+```json
+{
+  "data": [
+    0.2,
+    0.3,
+    0.6,
+    0.9
+  ]
+}
+```
+
+The rule returns the calculated sum and maximum difference:
 
 ```json
 [
@@ -182,22 +184,8 @@ The results are shown in the image below, with the inference returning:
 ]
 ```
 
-![result query](../../resources/mqttx_sum_and_difference.png)
+![Verify sum and difference result](../../resources/mqttx_sum_and_difference.png)
 
-Send test data like below through MQTT client.
+## Summary
 
-```json
-{
-  "data": [
-    0.2,
-    0.3,
-    0.6,
-    0.9
-  ]
-}
-```
-
-## Conclusion
-
-In this tutorial, we directly invoked pre-trained ONNX models in rekuiper using the precompiled ONNX plugin, simplifying the inference steps without writing code.
-By supporting ONNX, we can easily implement various model inferences in rekuiper, including Pytorch and TensorFlow models.
+The ONNX plugin allows you to execute machine learning models directly in SQL rules without writing custom code. This integration supports models trained in popular frameworks, including PyTorch and TensorFlow.

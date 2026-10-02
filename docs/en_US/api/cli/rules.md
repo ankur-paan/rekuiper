@@ -1,51 +1,46 @@
-# Rules management
+# Rules Management
 
-The rekuiper rule command line tools allows you to manage rules, such as create, show, drop, describe, start, stop and restart rules.
+The rekuiper rule command-line interface manages rules. You can create, display, describe, start, stop, restart, validate, drop rules, and inspect rule status and topology.
 
-## create a rule
+## Create a Rule
 
-The command is used for creating a rule.  The rule's definition is specified with JSON format, read [rule](../../guide/rules/overview.md) for more detailed information.
+Use this command to create a new rule. Rule definitions use JSON format. For syntax details, refer to [Rules Overview](../../guide/rules/overview.md).
 
 ```shell
 create rule $rule_name '$rule_json' | create rule $rule_name -f $rule_def_file
 ```
 
-The rule can be created with two ways.
+You can supply rule definitions through two methods:
 
-- Specify the rule definition in command line. Notice that, the json string must be quoted.
+### Specify the Rule Definition on the Command Line
 
-Sample:
+Enclose the JSON definition string in quotes:
 
 ```shell
 # bin/kuiper create rule rule1 '{"sql": "SELECT * from demo","actions": [{"log":  {}},{"mqtt":  {"server":"tcp://127.0.0.1:1883", "topic":"demoSink"}}]}'
 ```
 
-The command create a rule named `rule1`.
+This command creates a rule named `rule1`.
 
-Please note that when using single quotes for string literals in the command line, you may encounter the following issue:
+> [!NOTE]
+> When you use single quotes for string literals inside single-quoted shell commands, the shell interprets the literal as a variable name:
+>
+> ```text
+> $ echo '{"sql": "SELECT lower('abc') FROM demo"}'
+> {"sql": "SELECT lower(abc) FROM demo"}
+> ```
+>
+> Use double quotes for SQL string literals inside single-quoted JSON strings to prevent unexpected variable substitution.
 
-```text
-$ bin/kuiper create rule myrule '{"sql": "SELECT lower('abc') FROM demo"...}'
-```
+### Specify the Rule Definition in a File
 
-When creating a rule using the above command, the string literal 'abc' within the single quotes will be interpreted as the variable abc. This is due to the referencing mechanism in the Shell:
-
-```text
-$ echo '{"sql": "SELECT lower('abc') FROM demo"}'
-{"sql": "SELECT lower(abc) FROM demo"}
-```
-
-If you encounter this issue, it is recommended to use double quotes for string literals "abc" instead of single quotes 'abc' to prevent variable substitution from occurring.
-
-- Specify the rule definition in file. If the rule is complex, or the rule is already wrote in text files with well organized formats, you can just specify the rule definition through `-f` option.
-
-Sample:
+Use the `-f` flag to load complex rule definitions from a file:
 
 ```shell
 # bin/kuiper create rule rule1 -f /tmp/rule.txt
 ```
 
-Below is the contents of `rule.txt`.
+Example contents of `/tmp/rule.txt`:
 
 ```json
 {
@@ -64,15 +59,15 @@ Below is the contents of `rule.txt`.
 }
 ```
 
-## show rules
+## Show Rules
 
-The command is used for displaying all of rules defined in the server with a brief status.
+Use this command to list all rules defined on the server with their current execution status:
 
 ```shell
 show rules
 ```
 
-Sample:
+Example output:
 
 ```shell
 # bin/kuiper show rules
@@ -88,15 +83,15 @@ Sample:
 ]
 ```
 
-## describe a rule
+## Describe a Rule
 
-The command is used for print the detailed definition of rule.
+Use this command to display the JSON definition of a rule:
 
 ```shell
 describe rule $rule_name
 ```
 
-Sample:
+Example output:
 
 ```shell
 # bin/kuiper describe rule rule1
@@ -116,78 +111,77 @@ Sample:
 }
 ```
 
-## drop a rule
+## Drop a Rule
 
-The command is used for drop the rule.
+Use this command to delete a rule:
 
 ```shell
 drop rule $rule_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper drop rule rule1
 Rule rule1 is dropped.
 ```
 
-## start a rule
+## Start a Rule
 
-The command is used to start running the rule.
+Use this command to start running a rule:
 
 ```shell
 start rule $rule_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper start rule rule1
 Rule rule1 was started.
 ```
 
-## stop a rule
+## Stop a Rule
 
-The command is used to stop running the rule.
+Use this command to stop a running rule:
 
 ```shell
 stop rule $rule_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper stop rule rule1
 Rule rule1 was stopped.
 ```
 
-## restart a rule
+## Restart a Rule
 
-The command is used to restart the rule.
+Use this command to restart a rule:
 
 ```shell
 restart rule $rule_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper restart rule rule1
 Rule rule1 was restarted.
 ```
 
-## get the status of a rule
+## Get the Status of a Rule
 
-The command is used to get the status of the rule. If the rule is running, the metrics will be retrieved realtime. The status can be
-
-- $metrics
-- stopped: $reason
+Use this command to get the runtime metrics or error status of a rule:
 
 ```shell
 getstatus rule $rule_name
 ```
 
-Sample:
+When the rule is running, the command returns real-time metrics. When the rule is stopped, it returns `stopped: $reason`.
+
+Example output:
 
 ```shell
 # bin/kuiper getstatus rule rule1
@@ -198,29 +192,29 @@ Sample:
     "source_demo_0_process_latency_ms":0,
     "source_demo_0_buffer_length":0,
     "source_demo_0_last_invocation":"2020-01-02T11:28:33.054821",
-    ...
     "op_filter_0_records_in_total":5,
     "op_filter_0_records_out_total":2,
     "op_filter_0_exceptions_total":0,
     "op_filter_0_process_latency_ms":0,
     "op_filter_0_buffer_length":0,
-    "op_filter_0_last_invocation":"2020-01-02T11:28:33.054821",
-    ...
+    "op_filter_0_last_invocation":"2020-01-02T11:28:33.054821"
 }
 ```
 
-## get the topology structure of a rule
+## Get the Topology Structure of a Rule
 
-The command is used to get the status of the rule represented as a json string. In the json string, there are 2 fields:
-
-- sources: it is a string array of the names of all source nodes. They are the entry of the topology.
-- edges: it is a hash map of all edges categorized by nodes. The keys are the starting point of an edge. And the value is a collection of ending point.
+Use this command to display the directed graph topology of a rule:
 
 ```shell
 gettopo rule $rule_name
 ```
 
-Sample result:
+The returned JSON object contains two fields:
+
+- `sources`: A string array containing the names of all input source nodes.
+- `edges`: A map of directed graph edges grouped by originating operator node.
+
+Example output:
 
 ```json
 {
@@ -238,51 +232,24 @@ Sample result:
 }
 ```
 
-## validate a rule
+## Validate a Rule
 
-The command is used for validating a rule.  The rule's definition is specified with JSON format, read [rule](../../guide/rules/overview.md) for more detailed information.
+Use this command to validate the syntax and configuration of a rule without running it:
 
 ```shell
 validate rule $rule_name '$rule_json' | validate rule $rule_name -f $rule_def_file
 ```
 
-There are two ways to validate rules, which are the same as the two ways to create rules.
-
-- Specify the rule definition in command line.
-
-Sample:
+### Validate via Command Line
 
 ```shell
 # bin/kuiper validate rule rule1 '{"sql": "SELECT * from demo","actions": [{"log":  {}},{"mqtt":  {"server":"tcp://127.0.0.1:1883", "topic":"demoSink"}}]}'
 The rule has been successfully validated and is confirmed to be correct.
 ```
 
-The command validate a rule named `rule1`.
-
-- Specify the rule definition in file.
-
-Sample:
+### Validate via File
 
 ```shell
 # bin/kuiper validate rule rule1 -f /tmp/rule.txt
 The rule has been successfully validated and is confirmed to be correct.
-```
-
-Below is the contents of `rule.txt`.
-
-```json
-{
-  "sql": "SELECT * from demo",
-  "actions": [
-    {
-      "log": {}
-    },
-    {
-      "mqtt": {
-        "server": "tcp://127.0.0.1:1883",
-        "topic": "demoSink"
-      }
-    }
-  ]
-}
 ```

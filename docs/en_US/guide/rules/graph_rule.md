@@ -1,8 +1,10 @@
-# Graph Rule
+# Graph Rules
 
-Originally, rekuiper leveraged SQL to define the rule logic. Although it is handy for developers, it is still not easy to use for users with no development knowledge. During runtime, rules are a DAG of elements(source/operator/sink) even when defining by SQL. The graph can be easily mapping to a drag and drop UI to facilitate the users. Thus, an alternative `graph` property is provided in the rule API.
+rekuiper supports SQL queries and graph models to define rule logic. The graph API represents stream processing pipelines as Directed Acyclic Graphs (DAGs) in JSON format. This model maps directly to visual drag-and-drop user interfaces.
 
-The `graph` property is a JSON presentation of the DAG. It is consisted by `nodes` and `topo` which defines the nodes in the graph and their edges respectively. Below is a simplest rule defined by graph. It defines 3 nodes `demo`, `humidityFilter` and `mqttOut`. And the graph is linear as `demo` -> `humidityFilter` -> `mqttOut`. The rule will read from mqtt(`demo`), filter by humidity(`humidityFilter`) and sink to mqtt(`mqttOut`).
+The `graph` object contains `nodes` and `topo` properties. `nodes` defines pipeline elements. `topo` defines directed connections (edges) between nodes.
+
+Below is an example of a linear graph rule: `demo` -> `humidityFilter` -> `mqttout`. The rule reads from an MQTT source, filters by humidity, and transmits output to an MQTT sink:
 
 ```json
 {
@@ -44,17 +46,21 @@ The `graph` property is a JSON presentation of the DAG. It is consisted by `node
 }
 ```
 
-## Nodes
+## Node Specification
 
-Each node in the graph JSON has at least 3 fields:
+Each node in the graph JSON contains at least three fields:
 
-- type: the type of the node, could be `source`, `operator` and `sink`.
-- nodeType: the node type which defines the business logic of a node. There are various node types including built-in types and extended types defined by the plugins.
-- props: the properties for the node. It is different for each nodeType.
+- `type`: Node role. Allowed values: `source`, `operator`, and `sink`.
+- `nodeType`: Specific functional type. Includes built-in types and plugin extensions.
+- `props`: Map of configuration properties for the specified `nodeType`.
 
-### Node Type
+### Source Nodes
 
-For source node, the nodeType is the type of the source like `mqtt` and `edgex`. Please refer to [source](../sources/overview.md) for all supported types. Notice that, all source node shared the same properties which is the same as the properties when [defining a stream](../../sqls/streams.md). The specific configuration are referred by `CONF_KEY`. In the below example, the nodeType specifies the source node is a mqtt source. The datasource and format property has the same meaning as defining a stream.
+For source nodes, `nodeType` specifies the connector type, such as `mqtt` or `edgex`. Refer to [Sources](../sources/overview.md) for all supported types.
+
+Properties match standard stream definition parameters. Use `CONF_KEY` to reference preconfigured settings in configuration files.
+
+In the example below, the source node connects to an MQTT broker using JSON formatting:
 
 ```json
   {
@@ -62,18 +68,17 @@ For source node, the nodeType is the type of the source like `mqtt` and `edgex`.
     "nodeType": "mqtt",
     "props": {
       "datasource": "devices/+/messages",
-      "format":"json"
+      "format": "json"
     }
   }
 ```
 
-For sink node, the nodeType is the type of the sink like `mqtt` and `edgex`. Please refer to [sink](../sinks/overview.md) for all supported types. For all sink nodes, they share some common properties but each type will have some owned properties.
+You must create streams or tables before you reference them in a rule.
+- Set `sourceType` to `stream` or `table`.
+- Set `sourceName` to the existing stream or table name.
+- Verify that `nodeType` matches the connector type of the stream or table.
 
-For operator node, the nodeType are newly defined. Each nodeType will have different properties.
-
-### Source Node
-
-The source node is the data source of the rule. It can be a stream or table. **User needs to define the stream/table before using it in the rule**. The `sourceType` property defines the type of the source. It can be `stream` or `table`. The `sourceName` property defines the name of the stream/table. The below example defines a source node which reads from a stream named `demoStream`. Please make sure the nodeType is the same as the type of the stream/table.
+Example stream source node:
 
 ```json
   {
@@ -86,7 +91,9 @@ The source node is the data source of the rule. It can be a stream or table. **U
   }
 ```
 
-Currently, users can define the source node to refer to table as well. But only lookup table can be connected to Join node, scan table is not supported. The below example defines a source node which reads from a lookup table named `demoTable`. Please make sure the nodeType is the same as the type of the stream/table.
+You can also reference lookup tables in source nodes. Only lookup tables connect to Join nodes; scan tables are not supported in graph rules.
+
+Example lookup table source node:
 
 ```json
   {
@@ -99,15 +106,20 @@ Currently, users can define the source node to refer to table as well. But only 
   }
 ```
 
+### Sink Nodes
+
+For sink nodes, `nodeType` specifies the target connector type, such as `mqtt` or `edgex`. Refer to [Sinks](../sinks/overview.md) for supported types and configuration properties.
+
 ### Built-in Operator Node Types
 
-Currently, we supported the below node types for operator type.
+rekuiper includes these built-in operator node types:
 
 #### function
 
-This node defines a function call expression. The node return a new field with the name of the function or the alias name define in the expr property. It has only one property:
+Evaluates a scalar function expression. The node outputs a new field with the function name or defined alias.
 
-- expr: string, the function call expression.
+Properties:
+- `expr`: String function expression.
 
 Example:
 
@@ -123,9 +135,10 @@ Example:
 
 #### aggfunc
 
-This node defines an aggregate function call expression. The input for the node must be a collection of rows as the output of a window. The node will aggregate multiple rows into one aggregated row. For example, calculate the count of the window of 10 rows will produce only one row with field `count` = 10. Calculate the count of the grouped rows will produce one row for each group. It has only one property:
+Evaluates an aggregate function over a windowed collection of rows. The node aggregates multiple rows into a single summary row, or one row per group.
 
-- expr: string, the aggregate function call expression.
+Properties:
+- `expr`: String aggregate function expression.
 
 Example:
 
@@ -141,9 +154,10 @@ Example:
 
 #### filter
 
-This node filter the data stream with a condition expression. It has only one propety:
+Filters records based on a boolean condition.
 
-- expr: string, the condition bool expression
+Properties:
+- `expr`: Boolean condition expression.
 
 Example:
 
@@ -159,9 +173,10 @@ Example:
 
 #### pick
 
-This node selects the fields to be presented in the following workflow. It is usually used in the end of a workflow to define the data to be selected. It has only one property:
+Selects and projects output fields. Place this node at the end of a workflow to format output records.
 
-- fields: []string, the fields to be selected
+Properties:
+- `fields`: Array of field selection strings.
 
 Example:
 
@@ -177,12 +192,13 @@ Example:
 
 #### window
 
-This node defines a [window](../../sqls/windows.md) in the workflow. It can accept multiple inputs but each input must be a single row. It will produce a collection of rows.
+Defines a [Window](../../sqls/windows.md) in the workflow. The node accepts individual rows and outputs a collection of rows.
 
-- type: string, the window type, available values are "tumblingwindow", "hoppingwindow", "slidingwindow", "sessionwindow" and "countwindow".
-- unit: the time unit to be used. Check [time units](../../sqls/windows.md#time-units) for all available values.
-- size: int, the window length.
-- interval: int, the window trigger interval.
+Properties:
+- `type`: Window type (`tumblingwindow`, `hoppingwindow`, `slidingwindow`, `sessionwindow`, `countwindow`).
+- `unit`: Time unit. Refer to [Time Units](../../sqls/windows.md#time-units).
+- `size`: Window duration or record count.
+- `interval`: Window trigger interval.
 
 Example:
 
@@ -201,15 +217,16 @@ Example:
 
 #### join
 
-This node can merge data from different sources like a SQL join operation. The input must be a collection of row produced by a window. The output is another row collection whose rows are joined tuples. The properties are:
+Joins records from multiple sources. Inputs must be record collections produced by window nodes. The output is a collection of joined tuples.
 
-- from: string, the left source node to join.
-- joins: an array of join conditions. Each join has the properties:
-  - name: string, the right source node to join
-  - type: string, the join type, could be inner, left, right, full, cross etc.
-  - on: string, the bool expression to define the join condition
+Properties:
+- `from`: Left source node identifier.
+- `joins`: Array of join condition objects:
+  - `name`: Right source node identifier.
+  - `type`: Join type (`inner`, `left`, `right`, `full`, `cross`).
+  - `on`: Boolean expression that defines the join condition.
 
-Example:
+Example stream-to-stream join:
 
 ```json
    {
@@ -228,7 +245,11 @@ Example:
   }
 ```
 
-Join operator supports to connect stream/stream join and stream/lookup table join. Stream/scan table join is not supported. If using stream/stream join, the prior node must be a window node. If using stream/lookup table join, only one join condition is supported. Below is an example of stream/lookup table join.
+Join operators support stream-to-stream joins and stream-to-lookup-table joins. Stream-to-scan-table joins are not supported.
+
+Stream-to-stream joins require a preceding window node. Stream-to-lookup-table joins support a single join condition.
+
+Example stream-to-lookup-table join:
 
 ```json
    {
@@ -249,9 +270,10 @@ Join operator supports to connect stream/stream join and stream/lookup table joi
 
 #### groupby
 
-This node defines the dimension to group by. The input must be a collection of rows. The output is a collection of grouped tuples. The properties are:
+Groups record collections by specified dimension expressions. Inputs must be record collections.
 
-- dimensions: []string, the expressions of dimensions
+Properties:
+- `dimensions`: Array of dimension expressions.
 
 Example:
 
@@ -267,11 +289,12 @@ Example:
 
 #### orderby
 
-This node will sort the input collection. So the input must be a collection of rows and the output will be the same type. The properties are:
+Sorts records in a window collection. Inputs must be record collections.
 
-- sorts: an array of sort conditions. Each condition has the properties:
-  - field: string, the field to be sorted with.
-  - order: string, the sorted direction, could be asc or desc.
+Properties:
+- `sorts`: Array of sort condition objects:
+  - `field`: Field name to sort by.
+  - `order`: Sort direction (`asc` or `desc`).
 
 Example:
 
@@ -290,17 +313,15 @@ Example:
 
 #### switch
 
-This node allows message to be routed to different branches of flows which is similar to switch statement in programming languages. Currently, this is the only node which have multiple output paths.
+Routes messages to multiple pipeline branches based on conditional expressions.
 
-The switch node accepts multiple conditional expression as cases in order and evaluate events against the cases. The properties are:
+Properties:
+- `cases`: Ordered array of conditional expressions.
+- `stopAtFirstMatch`: Boolean flag. If `true`, stops evaluation after the first matching case.
 
-- cases: the condition expressions to be evaluated in order.
-- stopAtFirstMatch: whether to stop evaluate conditions when matching any condition, similarly to break in programming language.
+The `edges` definition maps the switch output paths using a two-dimensional array. Each index corresponds to the matching condition in `cases`.
 
-In the edges definition, the output of the node has multiple paths, which is represented as a two-dimensional array. In
-the following example, the switch node has two conditions defined in its `cases` property. Correspondingly, in edges ->
-switch, you need to define a two-dimensional array of length 2 to specify the paths after the corresponding conditions
-are met.
+Example switch rule definition:
 
 ```json
 {
@@ -370,14 +391,15 @@ are met.
 
 #### script
 
-This node allows JavaScript code to be run against the messages that are passed through it.
+Executes JavaScript logic on messages passing through the node.
 
-- script: The inline javascript code to be run.
-- isAgg: Whether the node is for aggregated data.
+Properties:
+- `script`: String containing JavaScript code with an `exec` function.
+- `isAgg`: Boolean flag.
 
-There must be a function named `exec` defined in the script. If isAgg is false, the script node can accept a single message and must return a processed message. If isAgg is true, it will receive a message array (connected to window etc.) and must return an array.
+When `isAgg` is `false`, the node accepts a single record and returns a single record. When `isAgg` is `true`, the node accepts an array of records and returns a processed array.
 
-1. Example to deal with single message.
+1. Single record processing example:
 
    ```json
    {
@@ -389,7 +411,7 @@ There must be a function named `exec` defined in the script. If isAgg is false, 
    }
    ```
 
-2. Example to deal with window aggregated messages.
+2. Window aggregated records processing example:
 
    ```json
    {
@@ -401,3 +423,4 @@ There must be a function named `exec` defined in the script. If isAgg is false, 
       }
    }
    ```
+

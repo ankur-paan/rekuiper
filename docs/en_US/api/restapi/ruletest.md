@@ -1,37 +1,28 @@
 # Rule Test Run
 
-When writing rules, users need to verify whether the rules are correct, and combine data to verify whether the rules can
-run normally to get the expected results. This section's series of APIs are used to support the trial run of rules, so
-that preliminary verification of the rules can be done without the need to tediously create rule input data.
+The rule testing REST API allows you to execute trial runs of rules with simulated data. You can verify SQL syntax, validate data transformations, and inspect sink output without modifying production streams.
 
-The test rule is a temporary rule, it will not be saved on the server, and is only used for the trial run of the rule.
-Test rules can only be managed using the APIs in this section. The rule running time is fixed (currently 10 minutes),
-and it will automatically stop and clear after the time is exceeded. The general steps for using rule trial run are as
-follows:
+A test rule is temporary and does not persist on the server. Test rules automatically stop and clear after a fixed 10-minute timeout.
 
-1. [Create a test rule](#create-a-test-rule), get the id and port of the test rule.
-2. Use the id and port of the test rule to connect and listen to the SSE service. Its service address
-   is `http://locahost:10081/test/myid` where `10081` is the port value returned in step 1, and myid is the id of the
-   test rule. Server-Sent Events (SSE) allows the server to push updates to the client. Connect via HTTP GET with header `Accept: text/event-stream`.
-3. [Start the test rule](#start-the-test-rule), wait for the test rule to run. The rule running result will be returned
-   through the SSE service.
-4. After the rule trial run ends, [delete the test rule](#delete-the-test-rule), and close the SSE service.
+## Rule Testing Workflow
 
-::: tip
+1. [Create a test rule](#create-a-test-rule) to obtain the test rule ID and SSE port.
+2. Connect an HTTP client to the Server-Sent Events (SSE) endpoint at `http://localhost:10081/test/{id}` using the header `Accept: text/event-stream`.
+3. [Start the test rule](#start-the-test-rule) to trigger data processing. Inspect output events emitted through the SSE connection.
+4. [Delete the test rule](#delete-the-test-rule) to terminate execution and close the SSE stream.
 
-The SSE service defaults to port 10081, which can be modified by the `httpServerPort` field in the `kuiper.yaml`
-configuration file. Before using the test rule, please make sure that this port is accessible.
-
-:::
+> [!NOTE]
+> The SSE service listens on HTTP port `10081` by default. You can configure this port using `httpServerPort` in `etc/kuiper.yaml`.
 
 ## Create a Test Rule
 
-```shell
-POST /ruletest
+Use this endpoint to define and compile a temporary test rule:
+
+```http
+POST http://localhost:9081/ruletest
 ```
 
-Create a trial run rule, wait for it to run. This API can check syntax, ensuring the creation of an executable trial run
-rule. The request body is required, the request body format is `application/json`, an example is as follows:
+Request payload:
 
 ```json
 {
@@ -73,18 +64,14 @@ rule. The request body is required, the request body format is `application/json
 }
 ```
 
-The request body parameters contain 4 parts:
+### Request Fields
 
-- id: The id of the test rule, required, used for subsequent test rule management. Ensure uniqueness, it cannot be
-  repeated with other test rules, otherwise the original test rule will be overwritten. This id has no association with
-  the id of ordinary rules.
-- sql: The sql statement of the test rule, required, used to define the syntax of the test rule.
-- mockSource: The mock rule definition of the data source of the test rule, optional, used to define the input data of
-  the test rule. If not defined, the real data source in SQL will be used.
-- sinkProps: The definition of the sink parameters of the test rule, optional. Most of the common parameters of the sink
-  can be used, such as `dataTemplate` and `fields`. If not defined, the default sink parameters will be used.
+- `id`: The unique identifier for the test rule. Uniqueness is required across active test rules.
+- `sql`: The SQL query statement to test.
+- `mockSource` (optional): Simulated input records, injection interval in milliseconds, and looping configuration. If omitted, the engine connects to live sources referenced in SQL.
+- `sinkProps` (optional): Common sink parameters, including `dataTemplate` and `fields`.
 
-If created successfully, the return example is as follows:
+Successful response (HTTP 200 OK):
 
 ```json
 {
@@ -93,11 +80,9 @@ If created successfully, the return example is as follows:
 }
 ```
 
-After the rule is created successfully, the SSE endpoint starts. Users can listen to the SSE
-address `http://locahost:10081/test/uuid` to get the result output. Among them, the port and id are the above return
-values.
+After creation, the SSE server starts listening on `http://localhost:10081/test/{id}`.
 
-If creation fails, the status code is 400, return error information, an example is as follows:
+Error response (HTTP 400 Bad Request):
 
 ```json
 {
@@ -107,16 +92,18 @@ If creation fails, the status code is 400, return error information, an example 
 
 ## Start the Test Rule
 
-```shell
-POST /ruletest/{id}/start
+Use this endpoint to start stream processing for the test rule:
+
+```http
+POST http://localhost:9081/ruletest/{id}/start
 ```
 
-Start the trial run rule, SSE will be able to receive the data output after the rule runs.
+The connected SSE client receives output events as they are produced.
 
 ## Delete the Test Rule
 
-```shell
-DELETE /ruletest/{id}
-```
+Use this endpoint to stop and delete the test rule and terminate the SSE connection:
 
-Delete the trial run rule, SSE will stop the service.
+```http
+DELETE http://localhost:9081/ruletest/{id}
+```

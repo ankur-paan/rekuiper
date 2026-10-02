@@ -1,27 +1,27 @@
-# RedisPub action
+# RedisPub Action
 
-The action is used for publishing output message into redis channel.
+The RedisPub action publishes output messages to a Redis pub/sub channel.
 
 ## Properties
 
-| Property name  | Optional | Description                                           |
-|----------------|----------|-------------------------------------------------------|
-| address        | false    | The address of Redis, e.g., 127.0.0.1:6379                        |
-| username       | true     | Redis login username (fill in if authentication is required)                         |
-| password       | true     | Redis login password (fill in if authentication is required)               |
-| db             | false    | The Redis database, e.g., 0        |
-| channel        | false    | Specifies the Redis channels to subscribe to.     |
-| compression    | true     | Compresses the Payload using the specified compression method. Currently supports zlib, gzip, flate, zstd algorithms.|
+| Property name | Optional | Description |
+|---|---|---|
+| address | false | The network address of Redis, such as `127.0.0.1:6379`. |
+| username | true | The Redis login username for authentication. |
+| password | true | The Redis login password for authentication. |
+| db | false | The Redis database number (0 to 15), such as `0`. |
+| channel | false | The Redis pub/sub channel name to which messages are published. |
+| compression | true | Compresses the payload with the specified algorithm: `zlib`, `gzip`, `flate`, or `zstd`. |
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-## Sample usage
+## Sample Usage
 
-The following is an example of publishing compressed data to a local Redis server.
+The following configuration publishes compressed messages to a local Redis pub/sub channel:
 
 ```json
 {
-  "redis":{
+  "redisPub": {
     "address": "127.0.0.1:6379",
     "username": "default",
     "password": "123456",
@@ -32,4 +32,4 @@ The following is an example of publishing compressed data to a local Redis serve
 }
 ```
 
-This example configuration is used to publish data to the "exampleChannel" channel in Redis and applies zlib compression.
+This configuration sends output messages to channel `exampleChannel` in Redis database `0` and compresses the payload with `zlib`.

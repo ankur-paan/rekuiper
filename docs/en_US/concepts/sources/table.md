@@ -1,28 +1,31 @@
-# Table
+# Tables
 
-A table is a snapshot of the source data. We support two kinds of table: scan table and lookup table.
+A table represents a dataset snapshot in rekuiper. rekuiper provides two table types: scan tables and lookup tables.
 
-- Scan table: Consume the stream data as changelog and update the table continuously. In contrast to common static tables that represent batch data, scan tables change over time. Stream sources like MQTT, Kafka, or HTTP can also be scan table sources. Scan table was supported since v1.2.0.
-- Lookup table: an external table whose content is usually never read entirely but queried for individual values when necessary. We support to bind physical table as table and generate lookup command(e.g. a SQL on db) on demand. Notice that, not all source type can be a lookup table source, only sources like SQL source which has an external storage can be a lookup source. Lookup table was supported since v1.7.0.
+- **Scan Table**: Consumes streaming data as a changelog and updates table content continuously. Unlike static batch tables, scan table contents update over time. Stream sources such as MQTT, Kafka, or HTTP can function as scan table sources.
+- **Lookup Table**: References an external data store. The engine queries specific values on demand instead of loading entire datasets into memory. Only sources with external query capability, such as SQL databases, can function as lookup tables.
 
-## Scan table
+## Scan Tables
 
-The source for table can be either bounded or unbounded. For bounded source table, the content of the table is static. For unbounded table, the content of the table is dynamic. The content of the table are stored in memory.
+The underlying source for a scan table can be bounded or unbounded. Bounded sources create static tables. Unbounded sources create dynamic tables whose records update in memory.
 
-Currently, the scan table update in rekuiper is append-only. Users can specify the properties to limit the table size to avoid too much memory consumption.
+In rekuiper, scan table updates are append-only. Configure size limit properties to control memory usage.
 
-Scan table cannot be used standalone in a rule. It is usually used to join with streams. It can be used to enrich stream data or as a switch for calculation.
+A scan table cannot execute standalone in a rule. Rules join scan tables with streams to enrich telemetry or control calculation logic.
 
-## Lookup Table
+## Lookup Tables
 
-Lookup table do not store the table content in memory but refer to the external table. Apparently, only a few of sources is suitable as lookup table which requires the source itself is queryable. The supported sources are:
+Lookup tables reference external storage systems and do not store complete table datasets in memory.
 
-- Memory source: if a memory source is used as table type, we need to accumulate the data as a table in memory. It can serve as a intermediate to convert any stream into a lookup table.
-- Redis source: Support to query by redis key.
-- SQL source: This is the most typical lookup source. We can use SQL directly to query.
+Supported lookup sources include:
 
-Unlike scan tables, lookup table will run separately from rules. Thus, all rules that refer to a lookup table can actually query the same table content.
+- **Memory Source**: Stores records as an in-memory table. This source converts streaming data into a lookup table.
+- **Redis Source**: Queries records by Redis key.
+- **SQL Source**: Queries external relational databases with SQL statements.
 
-## More Readings
+Lookup tables run independently from rules. All rules that reference a lookup table query the same underlying table data.
+
+## Further Reading
 
 - [Table Reference](../../sqls/tables.md)
+

@@ -7,30 +7,31 @@
 > - `PUT /metadata/sources/{name}/confKeys/{confKey}` (register/upsert configKey) - Verified (HTTP 200 OK)
 > - `DELETE /metadata/sources/{name}/confKeys/{confKey}` (delete configKey) - Verified (HTTP 200 OK)
 > 
-> Dynamic config keys registered here are immediately available for binding in stream `CONF_KEY` options under live telemetry flow.
+> Dynamic configuration keys registered here are immediately available for binding in stream `CONF_KEY` options under live telemetry flow.
 
-rekuiper REST API allows you to manage Config Keys, e.g. list, delete, register.
+The rekuiper REST API manages configuration keys for sources. You can list, register, update, and delete configuration profiles.
 
-## List all configKey
+## List All Configuration Keys for a Source
 
-This API is used to get all Config Keys under a specific source name
+Use this endpoint to retrieve all configuration keys defined for a specific source:
 
-```shell
+```http
 GET http://localhost:9081/metadata/sources/yaml/{name}
 ```
 
-### Parameter
+### Parameters
 
- name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
- Extended sources include random, sql, video, zmq and user-defined sources
+- `name`: The source connector name. Built-in sources include `mqtt`, `redis`, `memory`, `httppull`, `httppush`, `file`, and `edgex`. Extended sources include `random`, `sql`, `video`, `zmq`, and user-defined plugins.
 
 ### Example
 
-Example request to get all Config Keys from an MQTT source:
+Request all configuration keys for the `mqtt` source:
 
-```shell
- curl http://localhost:9081/metadata/sources/yaml/mqtt
+```bash
+curl http://localhost:9081/metadata/sources/yaml/mqtt
 ```
+
+Response sample:
 
 ```json
 {
@@ -53,52 +54,52 @@ Example request to get all Config Keys from an MQTT source:
 }
 ```
 
-Note: When retrieving Config Keys, if the properties contain a password/token field (case-insensitive, such as Password), the API will not return the actual password/token value, but instead replace it with "******" to conceal the password/token information.
+> [!NOTE]
+> The server masks sensitive fields (such as `password` and `token`) with `******` in response payloads.
 
-## Delete a configKey
+## Delete a Configuration Key
 
-This API is used to delete a Config Key configuration under a specific source name
+Use this endpoint to delete a configuration profile from a source:
 
-```shell
+```http
 DELETE http://localhost:9081/metadata/sources/{name}/confKeys/{confKey}
 ```
 
-### Parameter
+### Parameters
 
-1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
-   Extended sources include random, sql, video, zmq and user-defined sources
-2. confKey: Config Key Name。Taking the above as an example, the Config Keys are amd_broker, default, demo_conf in sequence.
+- `name`: The source connector name.
+- `confKey`: The configuration key to remove (for example: `demo_conf`).
 
 ### Example
 
-Delete the Config Key named demo_conf under the MQTT source
+Delete the `demo_conf` profile under the `mqtt` source:
 
-```shell
- curl -X DELETE http://localhost:9081/metadata/sources/mqtt/confKeys/demo_conf
+```bash
+curl -X DELETE http://localhost:9081/metadata/sources/mqtt/confKeys/demo_conf
 ```
 
-## Register a configKey
+## Register or Update a Configuration Key
 
-This API is used to register a Config Key under a specific source name
+Use this endpoint to register or update a configuration profile for a source:
 
-```shell
+```http
 PUT http://localhost:9081/metadata/sources/{name}/confKeys/{confKey}
 ```
 
-### Parameter
+### Parameters
 
-1. name：Source name, supports built-in sources and extended sources. The built-in sources include mqtt, redis, memory, httppull, httppush, file, edgex,
-   Extended sources include random, sql, video, zmq and user-defined sources
-2. confKey: Config Key name to register
+- `name`: The source connector name.
+- `confKey`: The configuration key to create or update.
 
 ### Example
 
-Register the Config Key named demo_conf under the MQTT source
+Register the `demo_conf` profile under the `mqtt` source:
 
-```shell
- curl -X PUT http://localhost:9081/metadata/sources/mqtt/confKeys/demo_conf \
-    -d '{
-        "qos": 0,
-        "server": "tcp://10.211.55.6:1883"
-    }'
+```bash
+curl -X PUT http://localhost:9081/metadata/sources/mqtt/confKeys/demo_conf \
+  -H "Content-Type: application/json" \
+  -d '{
+      "qos": 0,
+      "server": "tcp://10.211.55.6:1883"
+  }'
 ```

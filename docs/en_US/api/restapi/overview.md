@@ -1,38 +1,46 @@
-# API Reference
+# REST API Reference
 
-rekuiper provides a set of REST API for streams and rules management in addition to CLI.
+rekuiper provides a comprehensive REST API to manage streams, tables, rules, and system extensions.
 
-By default, the REST API are running in port 9081. You can change the port in `/etc/kuiper.yaml` for the `restPort` property.
+By default, the REST API listens on HTTP port `9081`. You can configure the port number using the `restPort` property in `etc/kuiper.yaml`.
 
-## Getting information
+## System Information
 
-This API is used to get the version number, system type, and program running time.
+Use this endpoint to retrieve the version string, host operating system, and process uptime.
 
-```shell
-GET http://localhost:9081
+```http
+GET http://localhost:9081/
 ```
+
+Example response:
 
 ```json
 {
-"version": "1.0.1-22-g119ee91",
-"os": "darwin",
-"upTimeSeconds": 14
+  "version": "1.0.1-22-g119ee91",
+  "os": "darwin",
+  "upTimeSeconds": 14
 }
 ```
 
-## ping
+## Ping Endpoint
 
-```shell
+Use this endpoint to verify that the REST server is responsive:
+
+```http
 GET http://localhost:9081/ping
 ```
 
-## Batch request
+## Batch Requests
 
-This API is used to merge multiple requests into one request and send it for execution
+Use this endpoint to execute multiple REST requests sequentially in a single HTTP call:
 
-```shell
+```http
 POST http://localhost:9081/batch/req
+```
 
+Request payload:
+
+```json
 [
     {
         "method": "POST",
@@ -44,9 +52,11 @@ POST http://localhost:9081/batch/req
         "path": "/streams/demobatch"
     }
 ]
+```
 
-Response
+Response payload:
 
+```json
 [
     {
         "code": 201,
@@ -59,6 +69,21 @@ Response
 ]
 ```
 
+## REST API Sections
+
+- [Authentication](authentication.md)
 - [Streams](streams.md)
+- [Tables](tables.md)
 - [Rules](rules.md)
+- [Rule Testing](ruletest.md)
+- [Rulesets](ruleset.md)
+- [Data Import and Export](data.md)
 - [Plugins](plugins.md)
+- [Schemas](schemas.md)
+- [Services](services.md)
+- [User-Defined Functions](udf.md)
+- [File Uploads](uploads.md)
+- [Configuration Management](configs.md)
+- [Configuration Keys](configKey.md)
+- [Connections](connection.md)
+- [Tracing](trace.md)

@@ -1,23 +1,24 @@
 # Extensions
 
-rekuiper provides built-in sources, sinks and functions as the building block for the rule. However, it is impossible to cover all external system for source/sink connection such as user's system with private protocol. Moreover, the built-in function cannot cover all the computation needed for all users. Thus, customized source, sink and functions are needed in many cases. eKuiper provide extension mechanism for users to customize all these three aspects.
+rekuiper includes built-in sources, sinks, and SQL functions. However, custom integrations frequently require proprietary protocols or domain-specific calculations. rekuiper provides an extension framework to customize sources, sinks, and functions.
 
 ## Extension Points
 
-We support 3 extension points:
+rekuiper provides three extension points:
 
-- Source: add new source type for rekuiper to consume data from. The new extended source can be used in the stream/table definition.
-- Sink: add new sink type for rekuiper to produce data to. The new extended sink can be used in the rule actions definition.
-- Function: add new function type for rekuiper to process data. The new extended function can be used in the rule SQL.
+- **Source**: Adds a custom source type to ingest data. You can reference the new source type in stream and table definitions.
+- **Sink**: Adds a custom sink type to emit data. You can reference the new sink type in rule actions.
+- **Function**: Adds a custom SQL function to transform data. You can use the new function in rule SQL queries.
 
 ## Extension Types
 
-We support 3 kinds of extension:
+rekuiper supports three extension mechanisms:
 
-- [Go native plugin](../extension/native/overview.md): extend as a Go plugin. It is the most performant, but has a lot of limitation in development and deployment.
-- [Portable plugin](../extension/portable/overview.md) with Go or Python language, and it will support more languages later. It simplifies the development and deployment and has less limitations.
-- [External service](../extension/external/external_func.md): wrap existing external REST or rpc services as a rekuiper SQL function by configurations. It is a speedy way to extend by existing services. But it only supports function extension.
+- **[Native plugin](../extension/native/overview.md)**: Extends functionality with native shared libraries. This mechanism provides maximum performance, but requires specific compilation environments.
+- **[Portable plugin](../extension/portable/overview.md)**: Implements extensions in languages such as Python or Go through independent processes. This mechanism simplifies development and deployment.
+- **[External service](../extension/external/external_func.md)**: Maps existing external REST or RPC services to SQL functions through configuration files. This mechanism supports function extensions only.
 
-## More Readings
+## Further Reading
 
 - [Extension Reference](../extension/overview.md)
+

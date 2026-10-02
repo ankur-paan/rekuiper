@@ -5,7 +5,7 @@
 > **Scorecard**: **15 Verified, 0 Unsupported, 0 Broken**:  
 > - **Verified (15)**: `isNull`, `coalesce`, `newuuid`, `tstamp`, `event_time`, `rule_id`, `rule_start`, `mqtt`, `meta`, `last_hit_count`, `last_hit_time`, `window_start`, `window_end`, `get_keyed_state`, `delay`.
 
-The following function are built-in functions that are not included in other document pages.
+The following built-in functions do not belong to other function categories.
 
 ## ISNULL
 
@@ -13,7 +13,7 @@ The following function are built-in functions that are not included in other doc
 isNull(col)
 ```
 
-Returns true if the argument is the null value.
+Returns true if the argument value is null.
 
 ## COALESCE
 
@@ -21,7 +21,7 @@ Returns true if the argument is the null value.
 coalesce(expr1, expr2, ...)
 ```
 
-Return the first non-null value. If all expressions are null,return null.
+Returns the first non-null value from the argument list. Returns null if all expressions evaluate to null.
 
 ## NEWUUID
 
@@ -29,7 +29,7 @@ Return the first non-null value. If all expressions are null,return null.
 newuuid()
 ```
 
-Returns a random 16-byte UUID.
+Returns a random 16-byte UUID string.
 
 ## TSTAMP
 
@@ -37,7 +37,7 @@ Returns a random 16-byte UUID.
 tstamp()
 ```
 
-Returns the current timestamp in milliseconds from 00:00:00 Coordinated Universal Time (UTC), Thursday, 1 January 1970.
+Returns the current timestamp in milliseconds since 00:00:00 UTC, Thursday, 1 January 1970.
 
 ## EVENT_TIME
 
@@ -45,11 +45,9 @@ Returns the current timestamp in milliseconds from 00:00:00 Coordinated Universa
 event_time()
 ```
 
-Returns the int64 timestamp of the current processing event.
-It may be earlier then the current time due to processing
-latency.
+Returns the int64 timestamp of the event that the rule processes currently. Processing latency can cause this timestamp to be earlier than the current system time.
 
-If it is used in a window rule as aggregate function, it returns the window end time.
+When you use this function as an aggregate function in a window rule, the function returns the window end time.
 
 ## RULE_ID
 
@@ -57,7 +55,7 @@ If it is used in a window rule as aggregate function, it returns the window end 
 rule_id()
 ```
 
-Returns the ID of the currently matched rule.
+Returns the identifier of the active rule.
 
 ## RULE_START
 
@@ -65,7 +63,7 @@ Returns the ID of the currently matched rule.
 rule_start()
 ```
 
-Returns the rule start timestamp in int64 format.
+Returns the start timestamp of the rule as an int64 integer.
 
 ## MQTT
 
@@ -73,8 +71,7 @@ Returns the rule start timestamp in int64 format.
 mqtt(topic)
 ```
 
-Returns the metadata of the MQTT message. The same as meta function but can only be used when the rule is triggered by
-MQTT message.
+Returns the metadata of the MQTT message. This function operates identically to `meta`, but you can only use it when an MQTT message triggers the rule.
 
 ## META
 
@@ -82,12 +79,11 @@ MQTT message.
 meta(topic)
 ```
 
-Returns the meta-data of a specified key. The key could be:
+Returns the metadata of a specified key. The key format supports:
 
-- A standalone key if there is only one source in the form clause, such as `meta(device)`
-- A qualified key to specify the stream, such as `meta(src1.device)`
-- A key to refer to nested field for multi level metadata, such as `meta(src1.reading.device.name)`. This assumes
-  reading is map structure metadata.
+- A standalone key when the `FROM` clause contains only one source, such as `meta(device)`
+- A qualified key that specifies the stream, such as `meta(src1.device)`
+- A nested key path for multi-level metadata, such as `meta(src1.reading.device.name)`. This format assumes that `reading` is a map data structure.
 
 ## LAST_HIT_COUNT
 
@@ -95,15 +91,11 @@ Returns the meta-data of a specified key. The key could be:
 last_hit_count()
 ```
 
-Returns the number of times the function had been called and passed.
-The function is usually used to get the accumulated trigger count of a continuous rule.
-If the function is used in `WHERE` clause, it will only update the count when the condition is true.
+Returns the number of times that the condition evaluated to true. Use this function to get the accumulated trigger count of a continuous rule. When you use this function in a `WHERE` clause, the function increments the count only when the condition is true.
 
-Notice that, this function is not supported in aggregate rule except using in `WHEN` clause of a sliding window.
-To get the hit count of an aggregate rule, use [last_agg_hit_count](./aggregate_functions.md#last_agg_hit_count) instead.
+Do not use this function in an aggregate rule, except in the `WHEN` clause of a sliding window. To get the hit count in an aggregate rule, use [last_agg_hit_count](./aggregate_functions.md#last_agg_hit_count).
 
-If used in a sliding window trigger condition,
-the status will be updated only when the trigger condition is met regardless of the rule trigger result.
+When used in a sliding window trigger condition, the function updates the count when the trigger condition evaluates to true, regardless of the rule outcome.
 
 ## LAST_HIT_TIME
 
@@ -111,15 +103,11 @@ the status will be updated only when the trigger condition is met regardless of 
 last_hit_time()
 ```
 
-Returns the int64 timestamp of the last **event** time the function had been called and passed.
-The function is usually used to get the last trigger time of a continuous rule.
-If the function is used in `WHERE` clause, it will only update the timestamp when the condition is true.
+Returns the int64 timestamp of the last event time that evaluated to true. Use this function to get the last trigger time of a continuous rule. When you use this function in a `WHERE` clause, the function updates the timestamp only when the condition is true.
 
-Notice that, this function is not supported in aggregate rule except using in `WHEN` clause of a sliding window.
-To get the hit time of an aggregate rule, use [last_agg_hit_time](./aggregate_functions.md#last_agg_hit_time) instead.
+Do not use this function in an aggregate rule, except in the `WHEN` clause of a sliding window. To get the hit time in an aggregate rule, use [last_agg_hit_time](./aggregate_functions.md#last_agg_hit_time).
 
-If used in a sliding window trigger condition,
-the status will be updated only when the trigger condition is met regardless of the rule trigger result.
+When used in a sliding window trigger condition, the function updates the timestamp when the trigger condition evaluates to true, regardless of the rule outcome.
 
 ## WINDOW_START
 
@@ -127,9 +115,7 @@ the status will be updated only when the trigger condition is met regardless of 
 window_start()
 ```
 
-Return the window start timestamp in int64 format. If there is no time window, it returns 0. The window time is aligned
-with the timestamp notion of the rule. If the rule is using processing time, then the window start timestamp is the
-processing timestamp. If the rule is using event time, then the window start timestamp is the event timestamp.
+Returns the window start timestamp as an int64 integer. Returns 0 if no time window exists. The timestamp aligns with the time configuration of the rule. If the rule uses processing time, the function returns the processing timestamp. If the rule uses event time, the function returns the event timestamp.
 
 ## WINDOW_END
 
@@ -137,9 +123,7 @@ processing timestamp. If the rule is using event time, then the window start tim
 window_end()
 ```
 
-Return the window end timestamp in int64 format. If there is no time window, it returns 0. The window time is aligned
-with the timestamp notion of the rule. If the rule is using processing time, then the window end timestamp is the
-processing timestamp. If the rule is using event time, then the window end timestamp is the event timestamp.
+Returns the window end timestamp as an int64 integer. Returns 0 if no time window exists. The timestamp aligns with the time configuration of the rule. If the rule uses processing time, the function returns the processing timestamp. If the rule uses event time, the function returns the event timestamp.
 
 ## GET_KEYED_STATE
 
@@ -147,10 +131,9 @@ processing timestamp. If the rule is using event time, then the window end times
 get_keyed_state(key, dataType, defaultValue)
 ```
 
-Return the keyed value in the database. The First parameter is the key, the second is the data type of the value,
-support bigint, float, string, boolean and datetime. Third is the default value if key does not exist. Default database
-is sqlite, users can change the database by
-this [configuration](../../configuration/global_configurations.md#external-state).
+Returns the value for the specified key from the state database. The first parameter specifies the key. The second parameter specifies the data type of the value (`bigint`, `float`, `string`, `boolean`, or `datetime`). The third parameter specifies the default value if the key does not exist.
+
+The default database is SQLite. Configure an alternative database in [external-state](../../configuration/global_configurations.md#external-state).
 
 ## DELAY
 
@@ -158,5 +141,4 @@ this [configuration](../../configuration/global_configurations.md#external-state
 delay(delayTime, returnVal)
 ```
 
-Delay the execution of the rule for a specified time and then return the returnVal. DelayTime is an integer in
-milliseconds.
+Delays rule execution for a specified duration and then returns the value in `returnVal`. Specify `delayTime` as an integer in milliseconds.

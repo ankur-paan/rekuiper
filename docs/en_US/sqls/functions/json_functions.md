@@ -1,13 +1,11 @@
 # JSON Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 16:37:51 UTC**.  
+> **Verification Status**: Tested and verified against the `rekuiper` runtime with streaming telemetry data on **2026-10-01 16:37:51 UTC**.  
 > **Scorecard**: **5 / 5 JSON Functions Fully Verified with Live Data (100% Parity)**:  
 > `to_json`, `parse_json`, `json_path_exists`, `json_path_query`, `json_path_query_first`.
 
-JSON functions manipulate JSON string or return information about JSON.
-There are several json path manipulation functions. **Please refer
-to [json path functions](../json_expr.md#json-path-functions) for how to compose a json path.**
+JSON functions parse, serialize, and evaluate JSON documents and attributes. Refer to [JSONPath Functions](../json_expr.md#jsonpath-functions) for path syntax details.
 
 ## TO_JSON
 
@@ -15,8 +13,7 @@ to [json path functions](../json_expr.md#json-path-functions) for how to compose
 to_json(col)
 ```
 
-Converts a value to a string containing the JSON representation of the value. If the input is NULL, the result is also
-NULL.
+Serializes an expression value into a JSON string. Returns `NULL` if the input is `NULL`.
 
 ## PARSE_JSON
 
@@ -24,7 +21,7 @@ NULL.
 parse_json(col)
 ```
 
-Converts a JSON string to a value. If the input is NULL, the result is also NULL.
+Parses a JSON-formatted string into a structured data object. Returns `NULL` if the input is `NULL`.
 
 ## JSON_PATH_EXISTS
 
@@ -32,7 +29,7 @@ Converts a JSON string to a value. If the input is NULL, the result is also NULL
 json_path_exists(col, json_path)
 ```
 
-Check whether JSON path returns any item for the specified JSON value. Return bool value.
+Returns `true` if the specified JSONPath matches at least one element in the JSON object or array; otherwise returns `false`.
 
 ## JSON_PATH_QUERY
 
@@ -40,7 +37,7 @@ Check whether JSON path returns any item for the specified JSON value. Return bo
 json_path_query(col, json_path)
 ```
 
-Get all items returned by JSON path for the specified JSON value.
+Evaluates a JSONPath query and returns an array of all matching values.
 
 ## JSON_PATH_QUERY_FIRST
 
@@ -48,4 +45,4 @@ Get all items returned by JSON path for the specified JSON value.
 json_path_query_first(col, json_path)
 ```
 
-Get the first item returned by JSON path for the specified JSON value.
+Evaluates a JSONPath query and returns the first matching value.

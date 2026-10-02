@@ -6,7 +6,7 @@
 > `md5`, `sha1`, `sha256`, `sha384`, `sha512`, `crc32`.  
 > All cryptographic and hashing functions produce identical standard digests on live payloads.
 
-Hashing functions are used to hash the input value.
+Hashing functions compute cryptographic digests and cyclic redundancy checksums from input values.
 
 ## MD5
 
@@ -14,7 +14,7 @@ Hashing functions are used to hash the input value.
 md5(col)
 ```
 
-Return md5 hashed value of the argument.
+Returns the MD5 hash digest of the argument as a hexadecimal string.
 
 ## SHA1
 
@@ -22,7 +22,7 @@ Return md5 hashed value of the argument.
 sha1(col)
 ```
 
-Return sha1 hashed value of the argument.
+Returns the SHA-1 hash digest of the argument as a hexadecimal string.
 
 ## SHA256
 
@@ -30,7 +30,7 @@ Return sha1 hashed value of the argument.
 sha256(col)
 ```
 
-Return sha256 hashed value of the argument.
+Returns the SHA-256 hash digest of the argument as a hexadecimal string.
 
 ## SHA384
 
@@ -38,7 +38,7 @@ Return sha256 hashed value of the argument.
 sha384(col)
 ```
 
-Return sha384 hashed value of the argument.
+Returns the SHA-384 hash digest of the argument as a hexadecimal string.
 
 ## SHA512
 
@@ -46,7 +46,7 @@ Return sha384 hashed value of the argument.
 sha512(col)
 ```
 
-Return sha512 hashed value of the argument.
+Returns the SHA-512 hash digest of the argument as a hexadecimal string.
 
 ## CRC32
 
@@ -54,4 +54,4 @@ Return sha512 hashed value of the argument.
 crc32(col)
 ```
 
-Return crc32 hashed value of the argument.
+Returns the CRC32 checksum of the argument as an integer.

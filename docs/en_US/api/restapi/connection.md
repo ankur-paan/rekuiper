@@ -1,32 +1,39 @@
-# Manage connection
+# Connection Management
 
 > [!NOTE]
 > **Verification Status**: Tested and Verified against `rekuiper` engine on **2026-09-30 22:15:00 UTC**.  
 > The `/connections` REST endpoints allow defining and managing independent connection objects (`mqtt`, `kafka`, `sql`, etc.). In stream, table, and rule definitions, connections can be referenced via `CONF_KEY` or `connectionSelector` (supported as a first-class alias), which resolves configuration properties directly or from `connections/{id}`.
 
-## Connection management
+The rekuiper REST API manages shared connection profiles for sources and sinks. You can create, list, inspect, update, delete connections, and run connectivity health checks.
 
-Source/Sink in rules can be created and managed independently in the form of connections.
+## Manage Connections
 
-### Create connection
+Supported connection types include `mqtt`, `nng`, `httppush`, `websocket`, `edgex`, `sql`, and `kafka`.
 
-To create a connection, provide the connection's id, type, and configuration parameters. Currently, `mqtt`/`nng`/`httppush`/`websocket`/`edgex`/`sql`/`kafka` type connections are supported. Here we take creating an mqtt connection as an example.
+### Create a Connection
 
-```shell
+Use this endpoint to define a reusable connection profile:
+
+```http
 POST http://localhost:9081/connections
+Content-Type: application/json
+```
+
+Example MQTT connection:
+
+```json
 {
-  "id": "connecton-1",
-  "typ":"mqtt",
+  "id": "connection-1",
+  "typ": "mqtt",
   "props": {
     "server": "tcp://127.0.0.1:1883"
   }
 }
 ```
 
-To create a Kafka connection, use `kafka` as the connection type and provide the Kafka connection properties in `props`.
+Example Kafka connection:
 
-```shell
-POST http://localhost:9081/connections
+```json
 {
   "id": "kafka-1",
   "typ": "kafka",
@@ -37,81 +44,89 @@ POST http://localhost:9081/connections
 }
 ```
 
-### Update connection
+### Update a Connection
 
-To update a connection, provide the connection's id, type, and configuration parameters. Currently, `mqtt`/`nng`/`httppush`/`websocket`/`edgex`/`sql`/`kafka` types of connections are supported. Here we take updating the mqtt connection as an example. If the connection is referenced by a rule, it cannot be updated.
+Use this endpoint to update an existing connection profile:
 
-```shell
-PUT http://localhost:9081/connections/connection-1
+```http
+PUT http://localhost:9081/connections/{id}
+Content-Type: application/json
+
 {
-  "id": "connecton-1",
-  "typ":"mqtt",
+  "id": "connection-1",
+  "typ": "mqtt",
   "props": {
     "server": "tcp://127.0.0.1:1883"
   }
 }
 ```
 
-### Get all connection information
+> [!NOTE]
+> You cannot modify a connection profile while active rules reference it.
 
-```shell
+### Get All Connections
+
+Use this endpoint to retrieve all connection profiles and their runtime statuses:
+
+```http
 GET http://localhost:9081/connections
 ```
 
-Return all connections' information and status.
+### Get a Single Connection Status
 
-### Get a single connection status
+Use this endpoint to inspect the status of a specific connection:
 
-```shell
+```http
 GET http://localhost:9081/connections/{id}
 ```
 
-### Delete a single connection
+### Delete a Connection
 
-When deleting a connection, it will check whether there are rules using the connection. If there are rules using the connection, the connection cannot be deleted.
+Use this endpoint to delete a connection profile:
 
-```shell
+```http
 DELETE http://localhost:9081/connections/{id}
 ```
 
-## Connectivity check
+> [!NOTE]
+> You cannot delete a connection profile while active rules reference it. Stop or update dependent rules before deleting the connection.
 
-Check rekuiper connection connectivity via API
+## Connectivity Health Checks
 
-### sink connection check
+Test external endpoint reachability using these diagnostic endpoints:
 
-```shell
+### Sink Connectivity Check
+
+Use this endpoint to verify reachability and credential validity for a sink destination:
+
+```http
 POST http://localhost:9081/metadata/sinks/connection/{sink}
-{
-  "configuration": "xxxx"
-}
+Content-Type: application/json
 ```
 
-The sink-side connection check will check the connectivity of the connection based on the incoming sinkType and configuration. Take mysql Sink as an example:
+Example MySQL SQL sink connectivity check:
 
-```shell
-POST http://localhost:9081/metadata/sinks/connection/sql
+```json
 {
   "url": "mysql://root@127.0.0.1:4000/test",
   "table": "test",
-  "fields": ["a","b","c"]
+  "fields": ["a", "b", "c"]
 }
 ```
 
-### Source side connection check
+### Source Connectivity Check
 
-```shell
+Use this endpoint to verify reachability and credential validity for an upstream source:
+
+```http
 POST http://localhost:9081/metadata/sources/connection/{source}
-{
-  "configuration": "xxxx"
-}
+Content-Type: application/json
 ```
 
-The source-side connection check will check the connectivity of the connection based on the incoming sourceType and configuration. Take mysql Source as an example:
+Example MySQL SQL source connectivity check:
 
-```shell
-POST http://localhost:9081/metadata/sources/connection/sql
+```json
 {
-  "url": "mysql://root@127.0.0.1:4000/test",
+  "url": "mysql://root@127.0.0.1:4000/test"
 }
 ```

@@ -1,375 +1,292 @@
-# Data Template
+# Data Templates
 
-After performing data analysis and processing through rekuiper, users can use various sink to send data analysis result to different systems. For the same analysis results, the format required by different sinks may not be the same. For example, in an Internet of Things scenario, when it is found that the temperature of a device is too high, a request needs to be sent to a rest service in the cloud. At the same time, a control command needs to be sent to the device through the MQTT protocol locally. The data format required by them may not be the same. Therefore, it is necessary to perform "secondary processing" on the results from the analysis before the data is sent to different targets. This article will introduce how to use the data template in the sink to achieve "secondary processing" of the analysis results.
+Sink data templates transform query results before delivering payloads to external systems.
 
-## Golang template introduction
+Different external targets require different payload formats. For example, an IoT rule can send a JSON webhook to a cloud REST API while simultaneously sending a binary control payload to a local device through MQTT. Data templates format results to match the requirements of each destination.
 
-The Golang template applies a piece of logic to the data, and then formats and outputs the data according to the logic specified by the user. The common usage scenario of the Golang template is in web development. For example, after converting and controlling a data structure in Golang, it is converted to HTML tags and output to the browser. rekuiper uses [Golang template](https://golang.org/pkg/text/template/) to implement "secondary processing" of the analysis results. Please refer to the following introduction from Golang.
+## Golang Template Overview
 
-> Templates are executed by applying them to a data structure. Annotations in the template refer to elements of the data structure (typically a field of a struct or a key in a map) to control execution and derive values to be displayed. Execution of the template walks the structure and sets the cursor, represented by a period '.' and called "dot", to the value at the current location in the structure as execution proceeds.
->
-> The input text for a template is UTF-8-encoded text in any format. "Actions"--data evaluations or control
-> structures--are delimited by <span v-pre>"{{" and "}}"</span>; all text outside actions is copied to the output
-> unchanged. Except for raw strings, actions may not span newlines, although comments can.
+rekuiper uses the [Go text/template](https://golang.org/pkg/text/template/) engine to format output records.
 
-## Simple Template
+A template executes against an input data structure. Actions inside double braces (<span v-pre>`{{`</span> and <span v-pre>`}}`</span>) evaluate fields, variables, or functions:
 
-If sendSingle is true, the data template will execute against a record; Otherwise, it will execute against the whole array of records. Typical data templates are:
+- The cursor dot (`.`) represents the current data element.
+- Text outside actions passes unchanged to the output string.
 
-For example, we have the sink input as
+## Input Data Granularity
 
-```go
-[]map[string]interface{}{{
-    "ab" : "hello1",
-},{
-    "ab" : "hello2",
-}}
-```
-
-In sendSingle=true mode:
-
-- Print out the whole record
-
-```text
-"dataTemplate": "{\"content\":{{json .}}}",
-```
-
-- Print out the ab field
-
-```text
-"dataTemplate": "{\"content\":{{.ab}}}",
-```
-
-if the ab field is a string, add the quotes
-
-```text
-"dataTemplate": "{\"content\":\"{{.ab}}\"}",
-```
-
-In sendSingle=false mode:
-
-- Print out the whole record array
-
-```text
-"dataTemplate": "{\"content\":{{json .}}}",
-```
-
-- Print out the first record
-
-```text
-"dataTemplate": "{\"content\":{{json (index . 0)}}}",
-```
-
-- Print out the field ab of the first record
-
-```text
-"dataTemplate": "{\"content\":{{index . 0 \"ab\"}}}",
-```
-
-- Print out field ab of each record in the array to html format
-
-```text
-"dataTemplate": "<div>results</div><ul>{{range .}}<li>{{.ab}}</li>{{end}}</ul>",
-```
-
-Actions could be customized to support different kinds of outputs, see [extension](../../extension/overview.md) for more detailed info.
-
-## Functions supported in template
-
-With the help of template functions, users can do a lot of transformation including formation, simple mathematics, encoding etc. The supported functions in rekuiper template includes:
-
-1. Go built-in [template functions](https://golang.org/pkg/text/template/#hdr-Functions).
-2. An abundant extended function set from [sprig library](http://masterminds.github.io/sprig/).
-3. eKuiper extended functions.
-
-eKuiper extends several functions that can be used in data template.
-
-- (deprecated)`json para1`: The `json` function is used for convert the map content to a JSON string. Use`toJson` from sprig instead.
-- (deprecated)`base64 para1`: The `base64` function is used for encoding parameter value to a base64 string. Convert the pramater to string type and use `b64enc` from sprig instead.
-
-## Actions
-
-The Golang  template provides some [built-in actions](https://golang.org/pkg/text/template/#hdr-Actions) which allows users to write various control statements to extract content. For example,
-
-- Output different contents according to judgment conditions
-
-```text
-{{if pipeline}} T1 {{else}} T0 {{end}}
-```
-
-- Iterate through  the data and process it
-
-```text
-{{range pipeline}} T1 {{else}} T0 {{end}}
-```
-
-Readers can see that actions are delimited by <code v-pre>{{}}</code>. During the use of eKuiper’s data templates, the
-output is generally in JSON format, and the JSON format is delimited by `{}`. Therefore, if the readers are not familiar
-with it, they will find it difficult to understand the functions of rekuiper's data templates. For example, in the
-following example,
-
-```text
-{{if pipeline}} {"field1": true} {{else}}  {"field1": false} {{end}}
-```
-
-The meaning of the above expression is as follows (please note the delimiter of action and the delimiter of JSON):
-
-- If the condition pipeline is met, the JSON string `{"field1": true}` is output
-- Otherwise, the JSON string `{"field1": false}` is output
-
-## rekuiper sink data format
-
-The Golang template can be applied to various data structures, such as maps, slices, channels, etc., and the data type obtained by the data template in rekuiper's sink is fixed, which is a data type that contains Golang `map` slices. It is shown as follows.
+The input data structure flowing into a sink is a slice of maps:
 
 ```go
 []map[string]interface{}
 ```
 
-## Send slice data by piece
+The `sendSingle` sink property controls template input granularity:
 
-The data flowing into the sink is an array of objects. However, when sending data to external sinks, each record often needs to be delivered individually. For example, a rule computing windowed aggregates may output multiple device records in a single batch:
+- **`sendSingle: true`**: The engine iterates through the record slice and applies the template to each map individually.
+- **`sendSingle: false`**: The engine passes the entire record array to the template.
+
+### Example Input
+
+```go
+[]map[string]interface{}{
+    {"ab": "hello1"},
+    {"ab": "hello2"}
+}
+```
+
+### Templates with `sendSingle: true`
+
+- Output the entire record as JSON:
+
+  ```json
+  "dataTemplate": "{\"content\": {{json .}}}"
+  ```
+
+- Output field `ab`:
+
+  ```json
+  "dataTemplate": "{\"content\": {{.ab}}}"
+  ```
+
+- Output field `ab` with string quotation marks:
+
+  ```json
+  "dataTemplate": "{\"content\": \"{{.ab}}\"}"
+  ```
+
+### Templates with `sendSingle: false`
+
+- Output the entire array as JSON:
+
+  ```json
+  "dataTemplate": "{\"content\": {{json .}}}"
+  ```
+
+- Output the first array element:
+
+  ```json
+  "dataTemplate": "{\"content\": {{json (index . 0)}}}"
+  ```
+
+- Output field `ab` of the first record:
+
+  ```json
+  "dataTemplate": "{\"content\": {{index . 0 \"ab\"}}}"
+  ```
+
+- Format all records as an HTML list:
+
+  ```json
+  "dataTemplate": "<div>results</div><ul>{{range .}}<li>{{.ab}}</li>{{end}}</ul>"
+  ```
+
+## Supported Template Functions
+
+Templates support three function sets:
+
+1. Standard [Go text/template functions](https://golang.org/pkg/text/template/#hdr-Functions).
+2. Extended functions from the [Sprig library](http://masterminds.github.io/sprig/).
+3. Built-in functions:
+   - `toJson`: Converts maps or structures into valid JSON strings.
+   - `b64enc`: Encodes string data as base64.
+
+> [!NOTE]
+> The legacy functions `json` and `base64` are deprecated. Use `toJson` and `b64enc` from the Sprig library.
+
+## Control Actions
+
+Templates support Go control actions:
+
+### Conditional Logic
+
+```text
+{{if pipeline}} T1 {{else}} T0 {{end}}
+```
+
+Example in JSON output:
+
+```text
+{{if .condition}} {"field1": true} {{else}} {"field1": false} {{end}}
+```
+
+### Iteration
+
+```text
+{{range pipeline}} T1 {{else}} T0 {{end}}
+```
+
+## Practical Conversion Examples
+
+### Example 1: Emitting Individual Records
+
+Consider a window aggregation that outputs multiple records:
 
 ```json
 [
-  {"device_id":"1","t_av":36.25,"t_count":4,"t_max":80,"t_min":10},
-  {"device_id":"2","t_av":27,"t_count":4,"t_max":45,"t_min":12}
+  {"device_id": "1", "t_av": 36.25, "t_count": 4, "t_max": 80, "t_min": 10},
+  {"device_id": "2", "t_av": 27.0, "t_count": 4, "t_max": 45, "t_min": 12}
 ]
 ```
 
-::: v-pre
-When sending to the sink, each piece of data is sent separately. First, you need to set the `sendSingle` of the sink to `true`, and then use the data template: `{{json .}}`. The complete configuration is as follows, and the user can copy it to the end of a sink configuration.
-:::
+To deliver records individually, configure `sendSingle: true` and `dataTemplate`:
 
 ```json
- ...
- "sendSingle": true,
- "dataTemplate": "{{toJson .}}"
+{
+  "sendSingle": true,
+  "dataTemplate": "{{toJson .}}"
+}
 ```
 
-- After setting `sendSingle` to `true`, eKuiper traverses the `[]map[string]interface{}` data type that has been passed to the sink. For each data in the traversal process, the user-specified data template will be applied.
-- `toJson` is a function provided by rekuiper (users can refer to [Template Functions in rekuiper](#functions-supported-in-template) for more information of eKuiper extensions), which can convert incoming parameters into JSON string output. For each piece of traversed data, the content in the map is converted to a JSON string
-
-Golang also provides some built-in functions. Users can refer to [More Golang Built-in Functions](https://golang.org/pkg/text/template/#hdr-Functions) for more function information.
-
-## Data content conversion
-
-Still for the above example, you need to do some conversion on the returned `t_av` (average temperature). The basic requirement of the conversion is to add different description text according to different average temperatures for processing in the target sink. The rules are as follows,
-
-- When the temperature is less than 30, the description field is "Current temperature is`$t_av`,  it's normal."
-- When the temperature is greater than 30, the description field is "Current temperature is`$t_av`, it's high."
-
-Assuming that the target sink still needs JSON data, the content of the data template is as follows:
+The sink delivers two discrete messages:
 
 ```json
-...
-"dataTemplate": "{\"device_id\": {{.device_id}}, \"description\": \"{{if lt .t_av 30.0}}Current temperature is {{.t_av}}, it's normal.\"{{else if ge .t_av 30.0}}Current temperature is {{.t_av}}, it's high.\"{{end}}}"
-"sendSingle": true,
+{"device_id": "1", "t_av": 36.25, "t_count": 4, "t_max": 80, "t_min": 10}
 ```
 
-::: v-pre
-In the above data template, the built-in actions of <code v-pre>{{if pipeline}} T1 {{else if pipeline}} T0
-{{end}}</code> are used, which looks more complicated. We can do a little adjustment, remove the escape and add
-abbreviation. The typesetting afterwards is as follows (note: when generating rekuiper rules, the following optimized
-typesetting rules cannot be passed in).
-:::
+```json
+{"device_id": "2", "t_av": 27.0, "t_count": 4, "t_max": 45, "t_min": 12}
+```
+
+### Example 2: Conditional Field Modification
+
+This example adds a textual description based on average temperature (`t_av`):
+
+- When `t_av < 30.0`, the description is `"Current temperature is $t_av, it's normal."`
+- When `t_av >= 30.0`, the description is `"Current temperature is $t_av, it's high."`
+
+Template configuration:
+
+```json
+{
+  "sendSingle": true,
+  "dataTemplate": "{\"device_id\": {{.device_id}}, \"description\": \"{{if lt .t_av 30.0}}Current temperature is {{.t_av}}, it's normal.{{else if ge .t_av 30.0}}Current temperature is {{.t_av}}, it's high.{{end}}\"}"
+}
+```
+
+Comparison functions:
+- `lt`: Less than.
+- `ge`: Greater than or equal to.
+
+> [!IMPORTANT]
+> The second parameter in `lt` and `ge` must match the field data type. Because `t_av` is a float, pass `30.0` instead of `30`.
+
+Resulting output:
+
+```json
+{"device_id": "1", "description": "Current temperature is 36.25, it's high."}
+{"device_id": "2", "description": "Current temperature is 27.0, it's normal."}
+```
+
+### Example 3: Nested Array Iteration
+
+Consider input records containing nested sensor arrays:
+
+```json
+{
+  "device_id": "1",
+  "values": [
+    {"temperature": 10.5},
+    {"temperature": 20.3},
+    {"temperature": 30.3}
+  ]
+}
+```
+
+The sink must output a list of status strings: `"fine"` when `temperature <= 25.0`, and `"high"` when `temperature > 25.0`.
+
+Template configuration:
+
+```json
+{
+  "sendSingle": true,
+  "dataTemplate": "{{$len := len .values}}{{$loopsize := add $len -1}}{\"device_id\": \"{{.device_id}}\", \"description\": [{{range $index, $ele := .values}}{{if le .temperature 25.0}}\"fine\"{{else if gt .temperature 25.0}}\"high\"{{end}}{{if eq $loopsize $index}}]{{else}},{{end}}{{end}}}"
+}
+```
+
+Expanded view of iteration logic:
 
 ```text
-{"device_id": {{.device_id}}, "description": "
-  {{if lt .t_av 30.0}}
-    Current temperature is {{.t_av}}, it's normal."
-  {{else if ge .t_av 30.0}}
-    Current temperature is {{.t_av}}, it's high."
+{{range $index, $ele := .values}}
+  {{if le .temperature 25.0}}
+    "fine"
+  {{else if gt .temperature 25.0}}
+    "high"
   {{end}}
-}
-```
-
-Use Golang's built-in binary comparison function:
-
-- `lt`：less than
-- `ge`：greater or equal to
-
-It is worth noting that in the `lt` and `ge` functions, the type of the second parameter value should be consistent with the actual data type of the data in the map, otherwise an error will occur. As in the above example, when the temperature is greater than `30`, because the type of actual average number in map is float, the value of the second parameter needs to be passed into `30.0`, not `30`.
-
-In addition, the template is still applied to each record in the slice, so you still need to set the `sendSingle` attribute to `true`. Finally, the content generated by the data template for the above data is as follows,
-
-```json
-{"device_id": 1, "description": "Current temperature is 36.25, it's high."}
-{"device_id": 2, "description": "Current temperature is 27, it's normal."}
-```
-
-## Data traversal
-
-By setting the `sendSingle` property of the sink to `true`, the slice data passed to the sink can be traversed. Here, we will introduce some more complex examples. For example, for the result of the sink which contains data of the nested array type, how can it realize the traversal by the traversal function provided in the data template.
-
-Assuming that the data content flowing into the sink is as follows:
-
-```json
-{"device_id":"1",
- "values": [
-  {"temperature": 10.5},
-  {"temperature": 20.3},
-  {"temperature": 30.3}
- ]
-}
-```
-
-The requirement is:
-
-- When a value of `temperature` in the "values" array is found to be less than or equal to `25`, add an attribute named `description` and set its value to `fine`.
-- When a value of `temperature` in the "values" array is found to be greater than `25`, add an attribute named `description` and set its value to `high`.
-
-```json
-"sendSingle": true,
-"dataTemplate": "{{$len := len .values}} {{$loopsize := add $len -1}} {\"device_id\": \"{{.device_id}}\", \"description\": [{{range $index, $ele := .values}} {{if le .temperature 25.0}}\"fine\"{{else if gt .temperature 25.0}}\"high\"{{end}} {{if eq $loopsize $index}}]{{else}},{{end}}{{end}}}"
-```
-
-The data template is relatively complicated, which is explained below:
-
-::: v-pre
-
-- `{{$len := len .values}} {{$loopsize := add $len -1}}`, this section executes two expressions. For the first one, `len` function gets the length of `values` in the data. For the second one, `add` decrements its value by 1 and assigns it to the variable `loopsize`. At present, since the operation of directly decrementing the value by 1 is not supported by  the Golang expression, `add` is a function extended by rekuiper to achieve this function.
-:::
-
-::: v-pre
-
-- `{\"device_id\": \"{{.device_id}}\", \"description\": }` This piece of template is applied to the sample data, and a JSON string `{"device_id": "1", "description": }` is generated.
-:::
-
-::: v-pre
-
-- `{{range $index, $ele := .values}} {{if le .temperature 25.0}}\"fine\"{{else if gt .temperature 25.0}}\"high\"{{end}} {{if eq $loopsize $index}}]{{else}},{{end}}{{end}}` ,this section of the template looks relatively complicated. However, if we adjust it, remove the escape and add indentation, the  typesetting is as follows which may be clearer (note: when generating the rekuiper rules, the following optimized typesetting rules cannot be passed in).
-:::
-
-  ```text
-  {{range $index, $ele := .values}}
-    {{if le .temperature 25.0}}
-      "fine"
-    {{else if gt .temperature 25.0}}
-      "high"
-    {{end}}
-    {{if eq $loopsize $index}}
-      ]
-    {{else}}
-      ,
-    {{end}}
+  {{if eq $loopsize $index}}
+    ]
+  {{else}}
+    ,
   {{end}}
-  ```
-
-  The first condition judges whether to generate `fine` or `high`; the second condition judges whether to generate `,` to separate the array or `]` at the end of the array.
-
-In addition, the template is still applied to each record in the slice. Therefore, we still need to set the `sendSingle` attribute to `true`. Finally, the content generated by the data template for the above data is as follows:
-
-```json
-  {"device_id": "1", "description": [ "fine" , "fine" , "high" ]}
+{{end}}
 ```
 
-## Relationship between `sendSingle`, batching, `dataTemplate`, and `format`
+Resulting output:
 
-These properties control different stages of sink processing:
+```json
+{"device_id": "1", "description": ["fine", "fine", "high"]}
+```
+
+## Interactions Between Configuration Properties
 
 | Property | Responsibility |
-|----------|----------------|
-| `sendSingle` | Controls the input granularity of `dataTemplate`. When `false`, the template receives the current array of maps. When `true`, eKuiper iterates the array and invokes the template once for each map. |
-| `dataTemplate` | Transforms each input selected by `sendSingle`. In batch mode, write the template for one batch element, not for the completed batch. Its output is considered already encoded and is not encoded again. The user is responsible for producing data that conforms to `format`. |
-| `format` | Controls normal data encoding and, when batching is enabled, how transformed results are framed into one batch. The JSON writer adds commas and an outer array, the delimited writer adds newlines, and the URL-encoded writer adds `&` between template results. |
-| `batchSize` / `lingerInterval` | Controls when transformed elements are flushed to the sink. Batching does not expose the accumulated batch to `dataTemplate` and does not change its input. |
+|---|---|
+| `sendSingle` | Controls input granularity to `dataTemplate`. When `false`, the template receives the entire array. When `true`, the engine invokes the template once per map. |
+| `dataTemplate` | Transforms inputs selected by `sendSingle`. In batch mode, write the template for one batch item, not the entire batch. Output is treated as pre-encoded. |
+| `format` | Defines serialization and batch framing. The JSON writer adds brackets and commas; delimited writers add newlines. |
+| `batchSize` / `lingerInterval` | Defines when the sink flushes accumulated records. Batching does not alter input to `dataTemplate`. |
 
-The effective processing order is:
+Pipeline order of execution:
 
-```text
-input array
-  -> sendSingle keeps the array or iterates its maps
-  -> dataTemplate transforms each selected input
-  -> format writer frames transformed results
-  -> batchSize or lingerInterval triggers a flush
+```txt
+Input Record Array
+  --> sendSingle selects array or iterates maps
+  --> dataTemplate transforms each element
+  --> Format Writer frames transformed records
+  --> batchSize / lingerInterval triggers payload emission
 ```
 
-> **When batching is enabled, `dataTemplate` must describe one batch element.** It must not generate the outer batch
-> array, separators between elements, or any batch boundary. For record-oriented templates, use `sendSingle=true` so
-> that the template receives one map at a time. The format writer combines the transformed elements when the batch is
-> flushed.
+> [!WARNING]
+> When batching is enabled, write `dataTemplate` to format a single element. Do not add outer array brackets or comma delimiters in the template. The batch writer adds framing automatically.
 
-### Example: transform each record and send one JSON batch
+### Example: Record Transformation in JSON Batches
 
-Given these two records:
+Given two records:
 
 ```json
-[{"id":1,"temperature":20},{"id":2,"temperature":30}]
+[
+  {"id": 1, "temperature": 20},
+  {"id": 2, "temperature": 30}
+]
 ```
 
-Use `sendSingle=true` to invoke the template once per record and `format=json` to frame the transformed JSON values as
-one array:
+Configure `sendSingle: true`, `format: "json"`, and `batchSize: 100`:
 
 ```json
 {
   "batchSize": 100,
   "sendSingle": true,
   "format": "json",
-  "dataTemplate": "{\"deviceId\":{{.id}},\"value\":{{.temperature}}}"
+  "dataTemplate": "{\"deviceId\": {{.id}}, \"value\": {{.temperature}}}"
 }
 ```
 
-The two template invocations produce:
+The template formats each record:
 
 ```json
-{"deviceId":1,"value":20}
-{"deviceId":2,"value":30}
+{"deviceId": 1, "value": 20}
+{"deviceId": 2, "value": 30}
 ```
 
-The JSON batch writer does not encode these values again. It adds the comma and outer array, producing one sink message
-when the batch is flushed:
+The JSON batch writer frames elements into an array when the batch flushes:
 
 ```json
-[{"deviceId":1,"value":20},{"deviceId":2,"value":30}]
+[
+  {"deviceId": 1, "value": 20},
+  {"deviceId": 2, "value": 30}
+]
 ```
 
-### Incorrect expectation: treating the template input as the completed batch
+### Omitted Data Templates
 
-With `sendSingle=false`, the template receives the current input array, not the records accumulated by `batchSize` or
-`lingerInterval`. For example:
-
-```json
-{
-  "batchSize": 100,
-  "sendSingle": false,
-  "format": "json",
-  "dataTemplate": "{{toJson .}}"
-}
-```
-
-If one invocation returns `[1,2]` and another returns `[3,4]`, the writer treats each result as one batch element. It
-does not merge them into `[1,2,3,4]`; the final result is a nested array:
-
-```json
-[[1,2],[3,4]]
-```
-
-The batch writer does not flatten template output. When `format=json`, every template invocation must produce one valid
-JSON value. eKuiper treats template output as belonging to the configured format; malformed or incompatible output is a
-template configuration error. To transform individual records for a batch, use `sendSingle=true` and write the template
-for one record.
-
-> **Important:** When batching is combined with `dataTemplate`, `format` only selects the writer and its batch framing.
-> It does not parse or validate the pre-encoded template output. Consequently, setting `format=json` cannot guarantee
-> that the final message is valid JSON. The template author must ensure that every output is valid for the configured
-> format and can be combined using that format's batch framing.
-
-### Example: no data template
-
-If `dataTemplate` is omitted, the selected structured data is not pre-encoded. The writer uses `format` to encode each
-item and to construct the batch. Thus, `format` controls both encoding and batch framing in this case.
-
-## AI-assisted generation
-
-rekuiper's template syntax is the same as the Go language, so it is easy to generate data templates with AI assistance. For example, in the data traversal example above, we can use the following hints to assist in generating data templates:
-
-```text
-Use Golang  text/template  and sprig  lib to convert [{"device_id": 1, "description": "Current temperature is 36.25, it's high."}
-{"device_id": 2, "description": "Current temperature is 27, it's normal."}]  into {"device_id":"1",  "values": [  {"temperature": 10.5}, {"temperature": 20.3}, {"temperature": 30.3}]}
-```
-
-## Summary
-
-The data template function provided by rekuiper can realize the secondary processing of the analysis results to meet the needs of different sink targets. However, readers can also see that due to the limitations of the Golang template, it is awkward to implement more complex data conversion. We hope that the Golang template function can be made more powerful and flexible in the future, which can support more complex requirements. At present, it is recommended that users can implement some simpler data conversion through data templates. If the user needs to perform more complicated processing on the data and extends the sink by himself, it can be directly processed in the sink implementation.
-
-In addition, the eKuiper team plans to support custom extended template functions in sinks in the future, so that some more complex logic can be implemented within the function. For the users, they only need a call of a simple template function.
+When you omit `dataTemplate`, the sink writer serializes records using `format` without pre-encoding transformations.

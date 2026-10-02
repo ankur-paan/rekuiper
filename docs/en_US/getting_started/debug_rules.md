@@ -1,15 +1,14 @@
-# How to Debug Rules
+# How to Troubleshoot Rules
 
-rekuiper is a lightweight and high-performance SQL engine for edge computing. It allows you to write SQL-like rules to
-process streaming data from various sources and send the results to different sinks. Sounds cool, right?
+rekuiper is a lightweight, high-performance SQL engine for edge computing. The engine processes streaming data from multiple sources and sends results to target sinks.
 
-But what if your rules don't work as expected? How do you find out what's wrong and fix it? Don't worry, I've got you
-covered. Here are some steps you can follow to debug rekuiper rules like a pro.
+This document describes how to troubleshoot rekuiper rules when they do not operate as expected.
 
 ## Create the Rule
 
-To debug a rule, the first step is to create it. You can do this by using the REST API or CLI. In this tutorial, we'll
-use the REST API for all rule management actions. Below is an example to create a rule using the REST API:
+You must create a rule before you can troubleshoot it. You can create rules with the REST API or the CLI. This document uses the REST API for all rule management actions.
+
+The example below creates a rule with the REST API:
 
 ```http request
 ###
@@ -36,15 +35,13 @@ Content-Type: application/json
 }
 ```
 
-### Debugging Tips
+### Troubleshooting Guidelines
 
-If there are problems when creating a rule, you will always get an error message. So debugging rule creation is pretty
-straightforward: just check if you got an error message and what it says.
+When rule creation fails, the server returns an error message. Check the error message to identify the cause.
 
-#### Check your http response
+#### Check the HTTP Response
 
-In the tool you are using to send the http request, you should see the response from the server. If rule creation is
-successful, you will get a response like this:
+Examine the HTTP response from the server. When rule creation succeeds, the server returns this response:
 
 ```json
 {
@@ -53,8 +50,7 @@ successful, you will get a response like this:
 }
 ```
 
-If there is an error, it will be displayed in the response body. For example, if you try to create a rule with an
-invalid SQL statement, you will get an error message like this:
+When an error occurs, the server displays details in the response body. For example, if the SQL statement is invalid, the server returns this error:
 
 ```json
 {
@@ -63,30 +59,25 @@ invalid SQL statement, you will get an error message like this:
 }
 ```
 
-#### Check the logs
+#### Check the Logs
 
-The error message in the response body is usually enough to tell you what's wrong. But if you want to know more details
-about the error, you can check the logs of the rekuiper server.
+The response body usually provides sufficient information. For more detail, check the rekuiper server logs.
 
-The logs are located in the `logs` directory under the eKuiper installation directory. You can use the `tail` command to
-view the logs in real time.
+The logs are located in the `logs` directory under the rekuiper installation directory. Use the `tail` command to view logs in real time.
 
-If you are using the Docker image, make sure to enable console log by environment
-variable `KUIPER__BASIC__CONSOLELOG=true` or edit `etc/kupier.yaml` and set `consoleLog` to true.
+When running in Docker, enable console logging. Set the environment variable `KUIPER__BASIC__CONSOLELOG=true` or set `consoleLog` to `true` in `etc/kuiper.yaml`.
 
-Then you can use the `docker logs` command to view the logs and keep an eye on the error log.
+Then use the `docker logs` command to inspect container logs.
 
 ### Common Errors
 
-When submitting a rule, rekuiper will validate the rule and run it. You may encounter some errors. Here are some common
-errors:
+When you submit a rule, rekuiper validates and starts the rule. Common submission errors include:
 
-#### Syntax error
+#### Syntax Errors
 
 **1. SQL syntax error**
 
-For example, to submit a rule with SQL `SELECT temperature humidity FROM sensor`, you will get an error message like
-this:
+If you submit a rule with SQL `SELECT temperature humidity FROM sensor`, the server returns this error message:
 
 ```text
 HTTP/1.1 400 Bad Request
@@ -94,14 +85,13 @@ HTTP/1.1 400 Bad Request
 invalid rule json: Parse SQL SELECT temperature humidity FROM sensorStream error: found "humidity", expected FROM..
 ```
 
-Missing comma between two fields, thus the SQL parser thinks `humidity` is a table name and expected from before it.
+A comma is missing between the two fields. The SQL parser interprets `humidity` as a table name and expects `FROM` before it.
 
-To fix errors like "Parse SQL xxx error", just review the SQL syntax and correct it.
+To resolve SQL parse errors, examine and correct the SQL syntax.
 
-**2. Stream isn't found**
+**2. Stream not found**
 
-In eKuiper, you need to create a stream before you can use it in a rule. If you try to use a stream that doesn't exist,
-you will get an error message like this:
+You must create a stream before you use it in a rule. If the referenced stream does not exist, the server returns this error:
 
 ```text
 HTTP/1.1 400 Bad Request
@@ -109,13 +99,11 @@ HTTP/1.1 400 Bad Request
 create rule topo error: fail to get stream myStream, please check if stream is created
 ```
 
-To fix this error, you need to create the stream first. You can use the REST API to check the current streams and create
-a new stream if necessary.
+To resolve this error, create the stream first. Use the REST API to view existing streams and create the required stream.
 
 **3. Rule ID exists**
 
-Rule ID is unique in rekuiper. If you try to create a rule with an ID that already exists, you will get an error message
-like this:
+Rule IDs must be unique in rekuiper. If you submit a rule with an existing ID, the server returns this error:
 
 ```text
 HTTP/1.1 400 Bad Request
@@ -123,33 +111,28 @@ HTTP/1.1 400 Bad Request
 store the rule error: Item rule1 already exists
 ```
 
-To fix this, you need to use a different ID for your rule or delete the existing rule first.
+To resolve this error, assign a different ID to the rule or delete the existing rule.
 
 ## Diagnose the Rule
 
-If your rule is created successfully, it will be run immediately by default. If your rule is expected to send the result
-to a MQTT topic, you may have subscribed that topic and wait to check the result. But if your rule doesn't work as
-expected, you may want to diagnose it to find out what's wrong.
+By default, rekuiper starts a rule immediately after creation. If the rule targets an MQTT topic, subscribe to that topic to receive output. If the rule does not produce expected results, use the diagnostic steps below.
 
-### Debugging Tips
+### Diagnostic Procedures
 
-You can follow these steps to diagnose your rule:
+Follow these procedures to diagnose rule execution:
 
 **1. Check rule status**
 
-In rule creation, we only do some static validation for the syntax. When coming to run the rule, there are more things
-to consider, such as the data source may not be available at runtime. So the first step is to check the rule status to
-see if it is running or is stopped due to some runtime errors.
+Rule creation only validates static syntax. At runtime, external dependencies such as data sources can fail. Check the rule status to verify whether the rule is running or stopped.
 
-You can use the REST API to check the rule status. For example, to check the status of rule `rule1`, you can send a
-request like this:
+Send a GET request through the REST API to check the status of rule `rule1`:
 
 ```http request
 ###
 GET http://{{host}}/rules/rule1/status
 ```
 
-If the rule is not running well, you will get a response like this:
+If the rule fails to run, the server returns a response such as:
 
 ```json
 {
@@ -158,58 +141,54 @@ If the rule is not running well, you will get a response like this:
 }
 ```
 
-The message tells you the reason why the rule is stopped.
+The `message` field states why the rule stopped.
 
 **2. Check the metrics**
 
-If the rule is running well, but you still not get the result you expected, you can check the metrics to see if there is
-any problem.
+If the rule status is `running` but produces no output, inspect the runtime metrics.
 
-Use the status API in the previous section to get the rule metrics. The metrics include all nodes from source,
-processors to sinks, in the rule. Each node has the status like message read in, writes out, latency, etc.
+The status API returns metrics for all pipeline nodes, including sources, operators, and sinks. Each node reports values for input records, output records, and processing latency.
 
-Firstly, take a look at the source metrics like below. If your source `records_in_total` is 0, it means that the source
-is not receiving any data. You need to check the source side: if the data source has emitted data; if your source
-configuration is correct. For example, if your MQTT source topic is configured to `topic1`, but you send data
-to `topic2`, then the source will not receive any data which can be observed by the source metric.
+First, inspect the source metrics:
 
 ```text
 "source_demo_0_records_in_total": 0,
 "source_demo_0_records_out_total": 0,
 ```
 
-If the source metrics are good, then you can check the metrics of the processors and then the sinks. For example, if you
-have `WHERE` clause, the rule pipeline will have a `filter` processor. Filter processor will filter out data before
-sending it out to sink, thus you will find nothing received in the sink. You can check the `filter_xxx_records_in_total`
-and `filter_xxx_records_out_total` metric. If `records_out` and `records_in` is not the same, it means some data are
-filtered. It the  `records_out` is 0, it means that all data are filtered out. If that's not expected, you need to check
-the real data. This needs to open the debug log and check OR create debug rules with the data printed out. We will cover
-this in the next section.
+If `records_in_total` is 0, the source receives no data. Verify the data source:
+- Verify that the upstream publisher transmits data.
+- Verify that the source configuration is correct. For example, if the MQTT source configuration specifies `topic1` but data is published to `topic2`, the source receives no data.
+
+If source metrics show incoming records, inspect the metrics for operators and sinks.
+
+When a rule includes a `WHERE` clause, the pipeline contains a `filter` operator. The filter drops records that do not match the condition. Check `filter_xxx_records_in_total` and `filter_xxx_records_out_total`.
+
+If `records_out_total` is less than `records_in_total`, the operator filtered some records. If `records_out_total` is 0, the operator filtered all records.
+
+If this filtering is unexpected, verify the raw data by enabling debug logs or creating debug rules.
 
 **3. Check the debug logs**
 
-If the status is stopped, you can check the logs to check the detail. If the status is running and the metrics are not
-as expected, you can check the logs to see if there is any error or even open debug to track the data flow.
+If a rule stops, examine the server logs for failure details. If a rule runs but metrics are unexpected, enable debug logging to track data flow.
 
-Here is [the instruction to check the logs](#check-the-logs). To open debug log, you can set the log level to `debug` in
-the `etc/kuiper.yaml` file or setting environment variable: `KUIPER__BASIC__DEBUG=true`. Then you can check the debug
-log to see the data flow. For example, the below is one line of debug log regarding filter.
+Refer to [Check the Logs](#check-the-logs) for log locations. To enable debug logs, set the log level to `debug` in `etc/kuiper.yaml`, or set the environment variable `KUIPER__BASIC__DEBUG=true`.
+
+Below is an example debug log entry for a filter operator:
 
 ```text
 time="2023-05-31 14:58:43" level=debug msg="filter plan receive &{mockStream map[temperature:%!s(float64=-11.77) ts:%!s(float64=1.684738889251e+12)] %!s(int64=1685516298342) map[fi
 le:C:\\repos\\go\\src\\github.com\\lfedge\\ekuiper\\data\\mock.lines] {{{%!s(int32=0) %!s(uint32=0)} %!s(uint32=0) %!s(uint32=0) {{} %!s(int32=0)} {{} %!s(int32=0)}} map[] map[]} {%!s(int32=0) %!s(uint32=0)} map[]}" file="operator/filter_operator.go:36" rule=rule1
 ```
 
-The last of the line has `rule=rule1` which means this line of log is printed by rule1. Among the log, you can find the
-data received by filter plan is
-like `mockStream map[temperature:%!s(float64=-11.77) ts:%!s(float64=1.684738889251e+12)]`. This means the stream name is
-mockStream, the payload is a map with `temperature=-11.77 and ts=1.684738889251e+12`. Then check your `WHERE` condition
-against the data to see if it runs well.
+The field `rule=rule1` at the end of the log line indicates rule origin. The log shows data received by the filter operator:
+`mockStream map[temperature:%!s(float64=-11.77) ts:%!s(float64=1.684738889251e+12)]`
+
+This entry indicates stream name `mockStream` and payload attributes `temperature=-11.77` and `ts=1.684738889251e+12`. Compare your `WHERE` condition with this payload to evaluate why records do not pass.
 
 **4. Create debug rules**
 
-Reading the debug log may be overwhelming. Alternatively, you can create a debug rule to print out the data. For
-example, if your rule in production sends data to MQTT, you can add a `log` sink to also print the result in the log.
+To avoid searching through extensive debug logs, create a debug rule. For example, add a `log` sink alongside an `mqtt` sink to write output records directly to the log:
 
 ```json
 {
@@ -228,8 +207,7 @@ example, if your rule in production sends data to MQTT, you can add a `log` sink
 }
 ```
 
-Another example is diagnosing the filter. You can create another rule to print out all the data received to see if the
-filter works as expected.
+To diagnose filter behavior, create a secondary rule without filtering to print all received records:
 
 ```json
 {
@@ -244,16 +222,13 @@ filter works as expected.
 }
 ```
 
-If your filer uses calculated data as the condition, try to create another rule to print out all related data. For
-example, `SELECT * FROM mockStream WHERE temperature - lag(temperture) > 1`. The lag(temperature) is derived data. You
-can create a debug rule to print out the lag(temperature) to see if it is as expected.
+If a filter condition uses calculated values, create a rule to output the calculation. For example, if the query contains `WHERE temperature - lag(temperature) > 1`, output `lag(temperature)` in the `SELECT` list to inspect intermediate values.
 
-## End-to-end Debugging
+## End-to-End Troubleshooting Walkthrough
 
-We are going to write a simple rule that reads data from a stream and sends it to a sink if the temperature is increased
-more then 1 degree. We'll use all the debugging techniques to make sure the rule is working as expected.
+This section demonstrates how to troubleshoot a complete rule scenario. The rule reads data from a stream and transmits an alert when temperature increases by more than 1 degree.
 
-Firstly, we need to create a stream that will be used as the data source.
+First, create the input stream:
 
 ```http request
 ###
@@ -263,13 +238,11 @@ Content-Type: application/json
 {"sql":"CREATE STREAM mockStream() WITH (DATASOURCE=\"data/mock\", FORMAT=\"json\", TYPE=\"mqtt\");"}
 ```
 
-We should receive a response with status code 200 and successfully create the stream. The stream is **schemaless** and
-will subscribe to MQTT topic `data/mock` to receive data. In the experiment, we assume the data is
-like: `{"temperature": 10, "humidity": 20}`.
+The server returns HTTP status 200 upon creation. The stream is schemaless and subscribes to the MQTT topic `data/mock`. Test payloads use this JSON structure: `{"temperature": 10, "humidity": 20}`.
 
-### V1: Rule with syntax error
+### Scenario 1: Rule with Syntax Error
 
-Our first version is written out and submit by REST API.
+Submit the initial rule definition through the REST API:
 
 ```http request
 ###
@@ -290,7 +263,7 @@ Content-Type: application/json
 }
 ```
 
-We should receive a response with status code 400 and the error message should be like:
+The server returns HTTP status 400 with this error message:
 
 ```text
 HTTP/1.1 400 Bad Request
@@ -298,11 +271,11 @@ HTTP/1.1 400 Bad Request
 Create rule error: Invalid rule json: Parse SQL SELECT temperature, humidity FROM mockStream WHERE temprature - laig(temperature) > 1 error: function laig not found.
 ```
 
-The error message is clear that we use an inexisted function named `laig`. We can fix the typo in the rule.
+The error indicates that function `laig` does not exist. Correct the typo to resolve the error.
 
-### V2: Rule is not running
+### Scenario 2: Rule Fails to Run
 
-After fixing the typo, we submit the rule again.
+Submit the corrected rule definition:
 
 ```http request
 ###
@@ -323,16 +296,16 @@ Content-Type: application/json
 }
 ```
 
-This time, the rule is created successfully. However, we do not receive any data on the result topic. Let's diagnose!
+The server creates the rule successfully, but the result topic receives no messages.
 
-Firstly, we should check the rule status:
+Check the rule status:
 
 ```http request
 ###
 GET http://{{host}}/rules/rule1/status
 ```
 
-If your MQTT broker is not started yet, we may receive a response like:
+If the MQTT broker is not reachable, the server returns this response:
 
 ```json
 {
@@ -341,16 +314,14 @@ If your MQTT broker is not started yet, we may receive a response like:
 }
 ```
 
-The message is clear that the MQTT broker address is not accessible. We should change the broker address in the sink
-setting, make sure the broker has started and check the rule status again. After the broker is running, restart the rule
-by REST API:
+The message indicates that the broker address is unreachable. Correct the sink broker address, verify broker availability, and restart the rule:
 
 ```http request
 ###
 POST http://{{host}}/rules/rule1/start
 ```
 
-Then check the rule status again. If the rule is running, we should receive a response like:
+Check the rule status again. When the rule runs, the server returns metrics:
 
 ```json
 {
@@ -398,7 +369,7 @@ Then check the rule status again. If the rule is running, we should receive a re
 }
 ```
 
-This time the rule is running, just not receiving data yet. Let's send some data to the `mockStream` topic:
+The metrics indicate that the rule runs but has received no data. Publish test data to `mockStream`:
 
 ```json
 {
@@ -407,12 +378,11 @@ This time the rule is running, just not receiving data yet. Let's send some data
 }
 ```
 
-Then check the rule status again. The metrics have no change, the `source_mockStream_0_records_in_total` is still 0
-which means the rule is not receiving data. This is likely a problem in source side. Let's check our source
-configuration, in this example, check the MQTT broker and topic configuration. Ah, we configure the topic to `data/mock`
-in the stream definition, but we were sending to `mockStream` topic thus the rule didn't receive data.
+Check the rule status. Metric `source_mockStream_0_records_in_total` remains 0.
 
-Let's send the data to `data/mock`. This time, we should have received data on the metric.
+Examine the stream definition. The stream specifies topic `data/mock`, but the client published to `mockStream`.
+
+Publish the test payload to `data/mock`. The source metric increments:
 
 ```json
 {
@@ -460,9 +430,9 @@ Let's send the data to `data/mock`. This time, we should have received data on t
 }
 ```
 
-### V3: Diagnose the filter
+### Scenario 3: Diagnose Filter Behavior
 
-Let's send the second data to the `data/mock` topic:
+Publish a second payload to `data/mock`:
 
 ```json
 {
@@ -471,8 +441,9 @@ Let's send the second data to the `data/mock` topic:
 }
 ```
 
-The temperature increases 5 which meets the where condition. But we are still not receiving data on the result topic.
-How to diagnose this? First take a look at the metrics:
+Temperature increased by 5, which satisfies the filter condition. However, the result topic receives no message.
+
+Examine the rule metrics:
 
 ```json
 {
@@ -520,12 +491,9 @@ How to diagnose this? First take a look at the metrics:
 }
 ```
 
-From the metrics, we know the data are successfully ingested and flow to filter operator, but all are filtered out. This
-is not expected, how to diagnose next? We can either enable debug log to see the data flow in the massive log, please
-read "3. Check the debug logs" in the debugging tips section; or create a debug rule to learn the calculated data in the
-filter operator.
+The metrics show that the source received 2 records, but `op_3_filter_0_records_out_total` is 0. All records were filtered.
 
-In this example, we can create a debug rule like below:
+To investigate, create a debug rule that moves the filter calculation into the `SELECT` clause:
 
 ```http request
 ###
@@ -546,12 +514,11 @@ Content-Type: application/json
 }
 ```
 
-In the debug rule, we remove the `WHERE` clause, and copy its condition `temprature - lag(temperature)` to the `SELECT`
-clause, which will print out for every input. We can check the printed value and see why it does not meet the condition.
+In the debug rule, remove the `WHERE` clause and move `temprature - lag(temperature)` to the `SELECT` clause. The query outputs calculation results for every input.
 
-Let's restart both rules, and send the two data to `data/mock` topic over again.
+Restart both rules and publish the test payloads to `data/mock` again.
 
-Check the result of `ruleDebug`, we'll find:
+Inspect the output of `ruleDebug`:
 
 ```json lines
 {
@@ -564,15 +531,15 @@ Check the result of `ruleDebug`, we'll find:
 }
 ```
 
-We expect a `diff`, but it is not printed which means it is `nil`. This indicates we need to check the
-condition `temprature - lag(temperature)`. Look into it closely; we'll find we have a typo `temprature` which should
-be `temperature`. This is a common mistake when the stream is schemaless! It is not easy to find this typo by SQL parser
-as in schemaless mode, the SQL parser cannot know which field is invalid. So, we need to be careful when writing SQL in
-schemaless mode.
+The output omits the `diff` field, which indicates a `null` value.
 
-### V4: Finally correct
+Examine the expression `temprature - lag(temperature)`. Notice the spelling error `temprature` instead of `temperature`.
 
-Let's correct the typo by updating the rule.
+In schemaless mode, the SQL parser cannot validate field names. Verify field spelling when you use schemaless streams.
+
+### Scenario 4: Corrected Rule Execution
+
+Update the rule with the corrected field name:
 
 ```http request
 ###
@@ -593,8 +560,7 @@ Content-Type: application/json
 }
 ```
 
-The rule will be restarted and the metrics will be reset. Let's send the data to the `data/mock` topic from the
-beginning:
+The server restarts the rule and resets metrics. Publish the test payloads to `data/mock` in sequence:
 
 ```json lines
 {
@@ -607,7 +573,7 @@ beginning:
 }
 ```
 
-Finally, we'll receive the data on the `result` topic when condition met:
+The rule condition is satisfied, and the sink receives output on the `result` topic:
 
 ```json
 {
@@ -618,5 +584,5 @@ Finally, we'll receive the data on the `result` topic when condition met:
 
 ## Summary
 
-In this tutorial, we learned how to diagnose a rule from the metrics, logs and debug rules. We also have a step-by-step
-guide to create a rule and debug it. Hope this tutorial can help you to diagnose your rules.
+This document described how to troubleshoot rules using metrics, server logs, and diagnostic rules. Use these verification steps to identify syntax errors, connection failures, routing mismatches, and query defects.
+

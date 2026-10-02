@@ -1,15 +1,24 @@
-# Memory action
+# Memory Sink Connector
 
 <span style="background:green;color:white;padding:1px;margin:2px">updatable</span>
 
-The action is used to flush the result into an in-memory topic so that it can be consumed by the [memory source](../../sources/builtin/memory.md). The topic is like pubsub topic such as mqtt, so that there could be multiple memory sinks which publish to the same topic and multiple memory sources which subscribe to the same topic. The typical usage for memory action is to form [rule pipelines](../../rules/rule_pipeline.md).
+The Memory sink connector publishes query results to internal in-memory topics consumed by the [Memory source](../../sources/builtin/memory.md).
 
-| Property name | Optional | Description                                                                                                        |
-|---------------|----------|--------------------------------------------------------------------------------------------------------------------|
-| topic         | false    | The in-memory topic, such as `analysis/result`                                                                     |
-| rowkindField  | true     | Specify which field represents the action like insert or update. If not specified, all rows are default to insert. |
+Multiple sinks can publish to the same topic, and multiple sources can subscribe to the same topic. Use memory sinks and sources to construct [Rule Pipelines](../../rules/rule_pipeline.md).
 
-Below is a sample memory action configuration:
+## Configuration Properties
+
+| Property Name | Optional | Description |
+|---|---|---|
+| `topic` | False | Target in-memory topic path (for example, `analysis/result`). Supports dynamic templates (such as <code v-pre>{{.topic}}</code>). |
+| `rowkindField` | True | Field name specifying the action command (`insert`, `update`, `upsert`, or `delete`). Default is `insert`. |
+| `keyField` | True | Primary key field used for table index updates in updatable sink configurations. |
+
+The Memory sink supports all [common sink properties](../overview.md#common-properties).
+
+### Example Configurations
+
+Static topic destination:
 
 ```json
 {
@@ -19,7 +28,7 @@ Below is a sample memory action configuration:
 }
 ```
 
-Below is another sample for dynamic topic action:
+Dynamic topic destination:
 
 ```json
 {
@@ -29,25 +38,23 @@ Below is another sample for dynamic topic action:
 }
 ```
 
-## Data Templates
+## Data Templates in Memory Sinks
 
-::: v-pre
-The data transfer between the memory action and the memory source is in internal format and is not coded or decoded for
-efficiency. Therefore, the format-related configuration items of the memory action are ignored, except for the data
-template. The memory action can support data templates to vary the result format, but the result of the data template
-must be in the object form of a JSON string, e.g. <code v-pre>"{\"key\":\"{{.key}}\"}"</code>. JSON strings in the form
-of arrays or non-JSON strings are not supported.
-:::
+Memory sinks transfer data objects directly in memory without serialization or deserialization. The sink ignores general format properties.
 
-## Updatable Sink
+If you specify `dataTemplate`, the template must produce a valid JSON object string (for example, <code v-pre>{"key": "{{.key}}"}</code>). Array strings or raw non-JSON text are not supported.
 
-The memory sink support [updatable](../overview.md#updatable-sink). It is used to update the lookup table which subscribes to the same topic as the sink. A typical usage is to create a rule that use the updatable sink to accumulate the memory table. In below example, the data from stream alertStream will update the memory topic `alertVal`. The action verb is specified by the `action` field in the ingested data.
+## Updatable Memory Sinks
+
+The Memory sink functions as an [Updatable Sink](../overview.md#updatable-sinks). Updatable memory sinks modify the state of in-memory lookup tables subscribed to the same topic.
+
+In this example, the rule writes state updates to the in-memory topic `alertVal`. The `action` field specifies the operation verb (`upsert`, `delete`), and `id` serves as the primary key:
 
 ```json
 {
   "id": "ruleUpdateAlert",
-  "sql":"SELECT * FROM alertStream",
-  "actions":[
+  "sql": "SELECT * FROM alertStream",
+  "actions": [
     {
       "memory": {
         "keyField": "id",

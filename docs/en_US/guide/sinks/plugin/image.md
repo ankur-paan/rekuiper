@@ -1,31 +1,33 @@
 # Image Sink
 
-Sink is used to save the picture to the specified folder.
+The image sink saves binary image data to a specified directory.
 
-## Compile and deploy the plugin
+## Compile and Deploy the Plugin
+
+Run the following commands to compile and install the plugin:
 
 ```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sinks/Image.so extensions/sinks/image/image.go
-# cp plugins/sinks/Image.so $rekuiper_install/plugins/sinks
+cd $rekuiper_src
+go build -trimpath --buildmode=plugin -o plugins/sinks/Image.so extensions/sinks/image/image.go
+cp plugins/sinks/Image.so $rekuiper_install/plugins/sinks
 ```
 
 Restart the rekuiper server to activate the plugin.
 
-## Attribute
+## Properties
 
-| Attribute name | Optional | Description                                                                                                                                                                     |
-|----------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| path           | False    | The name of the folder where the pictures are saved, such as `./tmp`. Note: For multiple rules, their paths cannot be repeated, otherwise they will be deleted from each other. |
-| format         | False    | File format, support jpeg and png.                                                                                                                                              |
-| maxAge         | True     | Maximum file storage time (hours). The default value is 72, which means that the picture can be stored for up to 3 days.                                                        |
-| maxCount       | True     | The maximum number of stored pictures. The default value is 1000. The earlier pictures will be deleted. The relationship with `maxAge` is OR.                                   |
+| Property name | Optional | Description |
+|---|---|---|
+| path | false | Target directory path for saved images, such as `./tmp`. Do not use the same directory across different rules to prevent file deletion conflicts. |
+| format | false | Image file format: `jpeg` or `png`. |
+| maxAge | true | Maximum retention time in hours. Default: `72` (3 days). |
+| maxCount | true | Maximum number of stored image files. Default: `1000`. rekuiper deletes older images when this threshold is exceeded. Evaluated with `maxAge` by using logical OR. |
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-## Usage example
+## Usage Example
 
-The following example demonstrates how to receive pictures and save them to the folder `/tmp`. When the number of pictures exceeds 1000, the earlier pictures will be deleted. When the pictures are saved for more than 72 hours, the timeout pictures will be deleted.
+The following rule receives images and saves them to the `/tmp` directory. If the image count exceeds 1000, rekuiper deletes the oldest images. If images remain for more than 72 hours, rekuiper deletes expired files:
 
 ```json
 {
@@ -35,20 +37,20 @@ The following example demonstrates how to receive pictures and save them to the 
       "image": {
         "path": "/tmp",
         "format": "png",
-        "maxCount":1000,
-        "maxage":72
+        "maxCount": 1000,
+        "maxAge": 72
       }
     }
   ]
 }
 ```
 
-## Demo
+## Demonstration
 
-In the following example, we take the `zmq` plugin as `source` and the `image` plugin as `sink`, and save the pictures received by `zmq` in the folder specified by `image`.
+The following example uses the `zmq` source to receive image data and the `image` sink to store images in the specified directory:
 
 ```shell
-curl http://127.0.0.1:9081/streams -X POST -d '{"sql":"create stream s(image bytea)WITH(DATASOURCE = \"\",FORMAT=\"binary\", TYPE=\"zmq\");"}'
+curl http://127.0.0.1:9081/streams -X POST -d '{"sql":"create stream s(image bytea) WITH (DATASOURCE = \"\", FORMAT = \"binary\", TYPE = \"zmq\");"}'
 
 curl http://127.0.0.1:9081/rules -X POST -d '{"id":"r","sql":"SELECT * FROM s","actions":[{"image":{"path":"./tmp","format":"png"}}]}'
 ```

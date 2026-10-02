@@ -1,66 +1,63 @@
-# GO SDK for Portable Plugin
+# Go SDK for Portable Plugins
 
-By using GO SDK for portable plugins, user can develop portable plugins with go language. The GO SDK provides similar APIs for the source, sink and function extensions. Additionally, it provides a sdk start function as the execution entry point to define the plugin and its symbols.
+The Go SDK allows developers to build portable plugins in the Go programming language. It provides interfaces for source, sink, and function extensions, as well as runtime startup routines to manage the plugin lifecycle.
 
 ## Development
 
-### Symbols
+### Dependency Configuration
 
-As the GO SDK provides almost identical API interfaces, the user's source, sink and function plugin can almost reuse by only some small modifications.
+Import the Go SDK module:
 
-To develop the portable plugin, users need to depend on `github.com/lf-edge/ekuiper/sdk/go` instead of eKuiper main project. Then to implement source, just implement the interfaces in package `github.com/lf-edge/ekuiper/sdk/go/api`.
-
-For source, implement the source interface as below as the same as described in [native plugin source](../native/develop/source.md).
-
-```go
-type Source interface {
-    // Open Should be sync function for normal case. The container will run it in go func
-    Open(ctx StreamContext, consumer chan<- SourceTuple, errCh chan<- error)
-    // Configure Called during initialization. Configure the source with the data source(e.g. topic for mqtt) and the properties read from the yaml
-    Configure(datasource string, props map[string]interface{}) error
-    Closable
-}
+```text
+require github.com/lf-edge/ekuiper/sdk/go v0.0.0
 ```
 
-For sink, implement the sink interface as below as the same as described in [native plugin sink](../native/develop/sink.md).
+Implement the extension interfaces defined in `github.com/lf-edge/ekuiper/sdk/go/api`.
 
-```go
-type Sink interface {
-    //Should be sync function for normal case. The container will run it in go func
-    Open(ctx StreamContext) error
-    //Called during initialization. Configure the sink with the properties from rule action definition
-    Configure(props map[string]interface{}) error
-    //Called when each row of data has transferred to this sink
-    Collect(ctx StreamContext, data interface{}) error
-    Closable
-}
-```
+### Implement Extension Interfaces
 
-For function, implement the function interface as below as the same as described in [native plugin function](../native/develop/function.md).
+- **Source Interface**:
 
-```go
-type Function interface {
-    //The argument is a list of xsql.Expr
-    Validate(args []interface{}) error
-    //Execute the function, return the result and if execution is successful.
-    //If execution fails, return the error and false.
-    Exec(args []interface{}, ctx FunctionContext) (interface{}, bool)
-    //If this function is an aggregate function. Each parameter of an aggregate function will be a slice
-    IsAggregate() bool
-}
-```
+  ```go
+  type Source interface {
+      Open(ctx StreamContext, consumer chan<- SourceTuple, errCh chan<- error)
+      Configure(datasource string, props map[string]interface{}) error
+      Closable
+  }
+  ```
 
-### Plugin Main Program
+- **Sink Interface**:
 
-As the portable plugin is a standalone program, it needs a main program to be able to built into an executable. In go SDK, a start function is provided to define the meta data of the plugin and let it start. A typical main program is as below:
+  ```go
+  type Sink interface {
+      Open(ctx StreamContext) error
+      Configure(props map[string]interface{}) error
+      Collect(ctx StreamContext, data interface{}) error
+      Closable
+  }
+  ```
+
+- **Function Interface**:
+
+  ```go
+  type Function interface {
+      Validate(args []interface{}) error
+      Exec(args []interface{}, ctx FunctionContext) (interface{}, bool)
+      IsAggregate() bool
+  }
+  ```
+
+### Main Entry Program
+
+Implement an executable entry point that calls `sdk.Start`:
 
 ```go
 package main
 
 import (
+    "os"
     "github.com/lf-edge/ekuiper/sdk/go/api"
     sdk "github.com/lf-edge/ekuiper/sdk/go/runtime"
-    "os"
 )
 
 func main() {
@@ -85,10 +82,16 @@ func main() {
 }
 ```
 
-Here, in the main function, it calls sdk.Start to start the plugin process. In the argument, a PluginConfig struct is specified to define the plugin name, the sources, functions and sinks name and their initialization functions. This information must match the json file when packaging the plugin.
+The names declared in `PluginConfig` must match the names defined in the plugin JSON metadata.
 
-For the full examples, please check the sdk [example](https://github.com/lf-edge/ekuiper/tree/master/sdk/go/example/mirror).
+Refer to the [Go SDK Mirror Example](https://github.com/lf-edge/ekuiper/tree/master/sdk/go/example/mirror) for complete sample code.
 
-## Package
+## Packaging
 
-We need to prepare the executable file and the json file and then package them. For GO SDK, we need to build the main program into an executable by merely using `go build` like a normal program (it is actually a normal program). Due to go binary file may have different binary name in different os, make sure the file name is correct in the json file. For detail, please check [packaing](./overview.md#package).
+Compile the main program with `go build`:
+
+```shell
+go build -o mirror main.go
+```
+
+Package the executable and the JSON metadata file into a `.zip` archive. Refer to [Packaging Portable Plugins](./overview.md#packaging) for details.

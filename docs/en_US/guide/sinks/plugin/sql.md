@@ -1,58 +1,59 @@
-# Sql Sink
+# SQL Sink
 
-The sink will write the result to the database.
+The SQL sink writes query results to a relational database.
 
-## Compile & deploy plugin
+## Compile and Deploy the Plugin
 
-This plugin must be used in conjunction with at least a database driver. We are using build tag to determine which driver will be included.
-This [repository](https://github.com/lf-edge/ekuiper/tree/master/extensions/sqldatabase/driver) lists all the supported drivers.
+This plugin must be compiled with the required database driver. Build tags specify which drivers to include.
 
-This plugin supports `sqlserver\postgres\mysql\sqlite3\oracle` drivers by default. User can compile plugin that only support one driver by himself,
-for example, if he only wants mysql, then he can build with build tag `mysql`.
+The plugin supports `sqlserver`, `postgres`, `mysql`, `sqlite3`, and `oracle` drivers by default. You can compile the plugin with a single driver by using build tags.
 
-When using `sqlserver` as the target, you need to confirm that the `sqlserver` exposes port 1434.
+When using Microsoft SQL Server as the target, make sure that SQL Server exposes its TCP port.
 
-### Default build command
+### Default Build Command
 
 ```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
-# cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
+cd $rekuiper_src
+go build -trimpath --buildmode=plugin -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
+cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
 ```
 
-### MySql build command
+### MySQL Build Command
 
 ```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -tags mysql -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
-# cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
+cd $rekuiper_src
+go build -trimpath --buildmode=plugin -tags mysql -o plugins/sinks/Sql.so extensions/sinks/sql/sql.go
+cp plugins/sinks/Sql.so $rekuiper_install/plugins/sinks
 ```
+
+Restart the rekuiper server to activate the plugin.
 
 ## Properties
 
-| Property name  | Optional | Description                                                                                                                                                   |
-|----------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| url            | false    | The url of the target database                                                                                                                                |
-| table          | false    | The table name of the result                                                                                                                                  |
-| fields         | true     | The fields to be inserted to. The result map and the database should both have these fields. If not specified, all fields in the result map will be inserted. |
-| tableDataField | true     | Write the nested values of the tableDataField into database.                                                                                                  |
-| rowkindField   | true     | Specify which field represents the action like insert or update. If not specified, all rows are default to insert.                                            |
+| Property name | Optional | Description |
+|---|---|---|
+| url | false | The connection URL for the target database. |
+| table | false | The target table name for the result records. |
+| fields | true | The column names to insert. Both the result record and the database table must contain these fields. If omitted, rekuiper inserts all fields from the result record. |
+| tableDataField | true | Writes nested array records from this field into the database. |
+| rowkindField | true | Specifies the field that indicates the row operation (such as `insert` or `update`). If omitted, all rows default to `insert`. |
+| keyField | true | Specifies the primary key column for update and delete operations. |
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
+You can verify the connectivity of the sink endpoint before rule execution by using the REST API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check).
 
-### Dynamic field names
+### Dynamic Field Names
 
-When `fields` is not configured, the SQL sink derives column names from the result map keys (from the first row for a batch). Each derived name must match `[A-Za-z_][A-Za-z0-9_]*`: it must start with an ASCII letter or underscore and may then contain only ASCII letters, digits, or underscores. This restriction also applies to keys named by `rowkindField` when they are included in the generated columns.
+When `fields` is not configured, the SQL sink derives column names from keys in the result record (using the first row in a batch). Each derived name must match `[A-Za-z_][A-Za-z0-9_]*`: it must start with an ASCII letter or underscore and contain only ASCII letters, numbers, or underscores. This rule also applies to the field specified by `rowkindField`.
 
-If a derived name does not match this format, the affected write is rejected before SQL is executed. The sink does not silently drop or automatically quote the invalid key.
+If a derived name does not match this format, rekuiper rejects the write operation before executing the SQL statement. The sink does not silently drop or quote invalid column names.
 
-Explicitly configured `table`, `fields`, and `keyField` values are passed to the generated SQL unchanged so that database-specific identifier syntax remains supported. Each configured `fields` entry is also used to look up the value in the result map, so the map key must exactly match the configured entry and the entry must use syntax accepted by the target database.
+Explicitly configured values for `table`, `fields`, and `keyField` are passed directly to generated SQL statements. Each configured entry in `fields` must match the map key exactly.
 
-## Sample usage
+## Sample Usage
 
-Below is a sample for using sql to get the target data and set to mysql database
+The following sample queries data from a stream and inserts records into a MySQL database:
 
 ```json
 {
@@ -60,49 +61,54 @@ Below is a sample for using sql to get the target data and set to mysql database
   "sql": "SELECT stuno as id, stuName as name, format_time(entry_data,\"YYYY-MM-dd HH:mm:ss\") as registerTime FROM SqlServerStream",
   "actions": [
     {
-      "log": {
-      },
+      "log": {},
       "sql": {
         "url": "mysql://user:test@140.210.204.147/user?parseTime=true",
         "table": "test",
-        "fields": ["id","name","registerTime"]
+        "fields": ["id", "name", "registerTime"]
       }
     }
   ]
 }
 ```
 
-Write values of tableDataField into database:
+### Write Nested Array Fields
 
-The following configuration will write telemetry field's values into database
+To write nested records from an array field into the database, configure `tableDataField`:
+
+Incoming payload:
 
 ```json
 {
-  "telemetry": [{
-    "temperature": 32.32,
-    "humidity": 80.8,
-    "ts": 1388082430
-  },{
-    "temperature": 34.32,
-    "humidity": 81.8,
-    "ts": 1388082440
-  }]
+  "telemetry": [
+    {
+      "temperature": 32.32,
+      "humidity": 80.8,
+      "ts": 1388082430
+    },
+    {
+      "temperature": 34.32,
+      "humidity": 81.8,
+      "ts": 1388082440
+    }
+  ]
 }
 ```
 
-```json lines
+Rule definition:
+
+```json
 {
   "id": "rule",
   "sql": "SELECT telemetry FROM dataStream",
   "actions": [
     {
-      "log": {
-      },
+      "log": {},
       "sql": {
         "url": "mysql://user:test@140.210.204.147/user?parseTime=true",
         "table": "test",
-        "fields": ["temperature","humidity"],
-        "tableDataField":  "telemetry",
+        "fields": ["temperature", "humidity"],
+        "tableDataField": "telemetry"
       }
     }
   ]
@@ -111,13 +117,13 @@ The following configuration will write telemetry field's values into database
 
 ### Update Sample
 
-By specifying the `rowkindField` and `keyField`, the sink can generate insert, update or delete statement against the primary key.
+Configure `rowkindField` and `keyField` to execute insert, update, or delete operations based on primary key values:
 
 ```json
 {
   "id": "ruleUpdateAlert",
-  "sql":"SELECT * FROM alertStream",
-  "actions":[
+  "sql": "SELECT * FROM alertStream",
+  "actions": [
     {
       "sql": {
         "url": "sqlite://test.db",

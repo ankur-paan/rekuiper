@@ -1,11 +1,12 @@
 # SQL
 
-The SQL language support in rekuiper includes Data Definition Language (DDL), Data Manipulation Language (DML) and Query Language. The SQL support in rekuiper is a subset of ANSI SQL and has some customized extensions.
+The SQL implementation in rekuiper includes Data Definition Language (DDL), Data Manipulation Language (DML), and Query Language statements. The rekuiper SQL dialect is a subset of ANSI SQL with custom extensions for streaming workloads.
 
-## SQL in source definition
+## SQL in Source Definitions
 
-When create and manage stream or table source, SQL DDL and DML are used as the command payload. Check [streams](../sqls/streams.md) and [tables](../sqls/tables.md) for detail.
+When you create and manage stream or table sources, use SQL DDL and DML commands. Refer to [Streams](../sqls/streams.md) and [Tables](../sqls/tables.md) for syntax specifications.
 
-## SQL queries in rules
+## SQL Queries in Rules
 
-In rules, SQL queries are used to define the business logic. Please check [sql reference](../sqls/overview.md) for detail.
+In rules, SQL queries define data processing logic. Refer to the [SQL Reference](../sqls/overview.md) for complete query syntax and functions.
+

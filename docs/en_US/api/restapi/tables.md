@@ -1,4 +1,4 @@
-# Tables management
+# Tables Management
 
 > [!NOTE]
 > **Verification Status**: Tested and Verified against `rekuiper` engine on **2026-09-30 22:12:20 UTC**.  
@@ -12,59 +12,59 @@
 > - `DELETE /tables/{id}` (drop table) - Verified (HTTP 200 OK, HTTP 400 on subsequent query)
 > - `GET /rules/{rule}/scantables` (query scan table) - Verified (HTTP 200 OK)
 
-The rekuiper REST API for tables allows you to manage the tables, such as create, describe, show and drop table definitions.
+The rekuiper REST API manages table definitions. You can create, list, describe, update, drop tables, and inspect table schemas and scan table contents.
 
-## create a table
+## Create a Table
 
-The API is used for creating a table. For more detailed information of table definition, please refer to [tables](../../sqls/tables.md).
+Use this endpoint to create a table. For syntax details, refer to [Tables](../../sqls/tables.md).
 
-```shell
+```http
 POST http://localhost:9081/tables
 ```
 
-Request sample, the request is a json string with `sql` field.
+Request payload with the `sql` statement:
 
 ```json
 {"sql":"create table my_table (id bigint, name string, score float) WITH ( datasource = \"lookup.json\", FORMAT = \"json\", KEY = \"id\")"}
 ```
 
-This API can run any table sql statements, not only table creation.
+This endpoint can run any table SQL statement.
 
-Response Sample (HTTP 201 Created):
+Response sample (HTTP 201 Created):
 
 ```text
 Table my_table is created.
 ```
 
-## show tables
+## Show Tables
 
-The API is used for displaying all of tables defined in the server.
+Use this endpoint to list table names defined on the server:
 
-```shell
+```http
 GET http://localhost:9081/tables
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 ["mytable"]
 ```
 
-This API accepts one parameter kind, the value could be `scan` or `lookup` to query each kind of tables. Other values are invalid, it will return all kinds of tables. In below example, we can query all the lookup tables.
+Filter by table kind using the `kind` query parameter (`scan` or `lookup`):
 
-```shell
+```http
 GET http://localhost:9081/tables?kind=lookup
 ```
 
-## show tables detail
+## Show Tables Detail
 
-The API is used for displaying all detailed definition of tables defined in the server.
+Use this endpoint to display configuration summaries for all defined tables:
 
-```shell
+```http
 GET http://localhost:9081/tabledetails
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 [
@@ -76,23 +76,23 @@ Response Sample (HTTP 200 OK):
 ]
 ```
 
-This API accepts one parameter kind, the value could be `scan` or `lookup` to query each kind of tables. Other values are invalid, it will return all kinds of tables. In below example, we can query all the lookup tables.
+Filter by table kind using the `kind` query parameter (`scan` or `lookup`):
 
-```shell
+```http
 GET http://localhost:9081/tabledetails?kind=lookup
 ```
 
-## describe a table
+## Describe a Table
 
-The API is used for print the detailed definition of table.
+Use this endpoint to display the complete definition and configuration of a table:
 
-```shell
+```http
 GET http://localhost:9081/tables/{id}
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
-```shell
+```json
 {
   "Name": "demo",
   "StreamFields": [
@@ -116,15 +116,15 @@ Response Sample (HTTP 200 OK):
 }
 ```
 
-## Get table schema
+## Get Table Schema
 
-The API is used to get the table schema. The schema is inferred from the physical and logical schema definitions.
+Use this endpoint to retrieve the table schema inferred from physical and logical definitions:
 
-```shell
+```http
 GET http://localhost:9081/tables/{id}/schema
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 {
@@ -143,37 +143,37 @@ Response Sample (HTTP 200 OK):
 }
 ```
 
-## update a table
+## Update a Table
 
-The API is used for update the table definition.
+Use this endpoint to update an existing table definition:
 
-```shell
+```http
 PUT http://localhost:9081/tables/{id}
 ```
 
-Path parameter `id` is the id or name of the old table.
+The path parameter `id` specifies the name of the table to update.
 
-Request sample, the request is a json string with `sql` field.
+Request payload:
 
 ```json
 {"sql":"create table my_table (id bigint, name string, score float) WITH ( datasource = \"topic/temperature\", FORMAT = \"json\", KEY = \"id\")"}
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```text
 Table my_table is updated.
 ```
 
-## drop a table
+## Drop a Table
 
-The API is used for drop the table definition.
+Use this endpoint to delete a table definition:
 
-```shell
+```http
 DELETE http://localhost:9081/tables/{id}
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```text
 Table my_table is dropped.
@@ -188,17 +188,15 @@ Subsequent requests to `GET /tables/{id}` return `HTTP 400 Bad Request`:
 }
 ```
 
-## query a scan table
+## Query a Scan Table
 
-This API allows users to directly query the content of scan tables related to a specific rule.
+Use this endpoint to inspect the current contents of scan tables bound to a running rule:
 
-```shell
+```http
 GET http://localhost:9081/rules/{rule}/scantables
 ```
 
-This GET call returns the actual content of each scan table associated with the given rule.
-
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 [
@@ -212,4 +210,3 @@ Response Sample (HTTP 200 OK):
   }
 ]
 ```
-

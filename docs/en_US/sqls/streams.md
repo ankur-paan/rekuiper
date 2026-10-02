@@ -1,47 +1,49 @@
 # Stream Statements
 
-SQL statements are defined to create and manage streams.
+SQL Data Definition Language (DDL) statements create and manage data streams.
 
-## Create Stream
+## CREATE STREAM
 
-`CREATE STREAM` defines a stream that connects to an external system to load data stream.
+The `CREATE STREAM` statement registers a new stream connected to an external source:
 
 ```sql
-CREATE STREAM 
-    stream_name 
+CREATE STREAM stream_name
     ( column_name <data_type> [ ,...n ] )
     WITH ( property_name = expression [, ...] );
 ```
 
-For the detail stream spec, please check [stream](../guide/streams/overview.md).
+For detailed property definitions and stream options, refer to the [Stream Overview Guide](../guide/streams/overview.md).
 
-Example:
+### Example
 
-```SQL
+```sql
 CREATE STREAM my_stream ()
-WITH ( datasource = "topic/temperature", FORMAT = "json", KEY = "id")
+WITH ( DATASOURCE = "topic/temperature", FORMAT = "json", KEY = "id" );
 ```
 
-## Describe Stream
+## DESCRIBE STREAM
 
-A statement to get the stream definition.
+The `DESCRIBE STREAM` statement returns the schema and configuration of a registered stream:
 
-```SQL
-DESCRIBE STREAM stream_name
+```sql
+DESCRIBE STREAM stream_name;
 ```
 
-## Drop Stream
+## DROP STREAM
 
-Delete a stream. Please make sure all the rules which refer to the stream are deleted.
+The `DROP STREAM` statement removes a registered stream definition:
 
-```SQL
-DROP STREAM stream_name
+```sql
+DROP STREAM stream_name;
 ```
 
-## Show Streams
+> [!CAUTION]
+> Delete all rules that reference the stream before running `DROP STREAM`.
 
-Display all the streams defined.
+## SHOW STREAMS
 
-```SQL
-SHOW STREAMS
+The `SHOW STREAMS` statement lists all streams currently registered in the database:
+
+```sql
+SHOW STREAMS;
 ```

@@ -1,20 +1,27 @@
-The rekuiper REST API for configuration file uploads allows you to upload configuration files and list all uploaded files.
+# File Uploads Management
 
-## Upload a configuration file
+The rekuiper REST API manages auxiliary and configuration file uploads. Uploaded files are stored in the `${dataPath}/uploads` directory and overwrite existing files with identical names. The API returns the absolute filesystem path for use in stream, sink, or rule configurations.
 
-The API supports to upload a local file, provide the text content of file or upload a http file link. The upload request will save the file into your `${dataPath}/uploads`. It will override the existed file of the same name. The response is the absolute path of the uploaded file which you can refer in other configurations.
+## Upload a Configuration File
 
-### Upload by a file
+You can upload files using three methods:
 
-The API accepts a multipart file upload requests. Below is an example html file to upload file to `http://127.0.0.1:9081/config/uploads`. In the form data, the file input name must be `uploadFile`.
+### Upload via Multipart Form Data
+
+Send an HTTP POST request using `multipart/form-data`. The file input field must be named `uploadFile`:
+
+```http
+POST http://localhost:9081/config/uploads
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
+```
+
+Example HTML upload form:
 
 ```html
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <title>Upload File</title>
   </head>
   <body>
@@ -30,12 +37,13 @@ The API accepts a multipart file upload requests. Below is an example html file 
 </html>
 ```
 
-### Upload by content
+### Upload via Inline Text Content
 
-Provide the text content and file name to create a configuration file.
+Supply the target filename and file text content directly in JSON:
 
-```shell
+```http
 POST http://localhost:9081/config/uploads
+Content-Type: application/json
 
 {
   "name": "my.json",
@@ -43,12 +51,13 @@ POST http://localhost:9081/config/uploads
 }
 ```
 
-### Upload by HTTP file link
+### Upload via Remote HTTP URL
 
-Should put the file in HTTP Server in advance
+Provide a target filename and an HTTP download URL:
 
-```shell
+```http
 POST http://localhost:9081/config/uploads
+Content-Type: application/json
 
 {
   "name": "my.json",
@@ -56,15 +65,15 @@ POST http://localhost:9081/config/uploads
 }
 ```
 
-## Show uploaded file list
+## Show Uploaded Files
 
-The API is used for displaying all files in the `${dataPath}/uploads` path.
+Use this endpoint to list all files stored in the `${dataPath}/uploads` directory:
 
-```shell
+```http
 GET http://localhost:9081/config/uploads
 ```
 
-Response Sample:
+Response sample:
 
 ```json
 [
@@ -73,10 +82,10 @@ Response Sample:
 ]
 ```
 
-## Delete an uploaded file
+## Delete an Uploaded File
 
-The API is used for deleting a file in the `${dataPath}/uploads` path.
+Use this endpoint to delete a file from the `${dataPath}/uploads` directory:
 
-```shell
+```http
 DELETE http://localhost:9081/config/uploads/{fileName}
 ```

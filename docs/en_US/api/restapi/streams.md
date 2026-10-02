@@ -1,4 +1,4 @@
-# Streams management
+# Streams Management
 
 > [!NOTE]
 > **Verification Status**: Tested and Verified against `rekuiper` engine with live stream load on **2026-09-30 19:05:46 UTC**.  
@@ -11,53 +11,53 @@
 > - `PUT /streams/{id}` (update a stream) - Verified (HTTP 200 OK)
 > - `DELETE /streams/{id}` (drop a stream) - Verified (HTTP 200 OK, HTTP 400 on subsequent query)
 
-The rekuiper REST API for streams allows you to manage the streams, such as create, describe, show and drop stream definitions.
+The rekuiper REST API manages stream definitions. You can create, list, describe, update, drop streams, and inspect stream schemas.
 
-## create a stream
+## Create a Stream
 
-The API is used for creating a stream. For more detailed information of stream definition, please refer to [streams](../../sqls/streams.md).
+Use this endpoint to create a new stream. For syntax details, refer to [Streams](../../sqls/streams.md).
 
-```shell
+```http
 POST http://localhost:9081/streams
 ```
 
-Request sample, the request is a json string with `sql` field.
+Request payload with the `sql` statement:
 
 ```json
 {"sql":"create stream my_stream (id bigint, name string, score float) WITH ( datasource = \"topic/temperature\", FORMAT = \"json\", KEY = \"id\")"}
 ```
 
-This API can run any stream sql statements, not only stream creation.
+This endpoint can run any stream SQL statement.
 
-Response Sample (HTTP 201 Created):
+Response sample (HTTP 201 Created):
 
 ```text
 Stream my_stream is created.
 ```
 
-## show streams
+## Show Streams
 
-The API is used for displaying all of streams defined in the server.
+Use this endpoint to list all stream names defined on the server:
 
-```shell
+```http
 GET http://localhost:9081/streams
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 ["mystream"]
 ```
 
-## show streams detail
+## Show Streams Detail
 
-The API is used for displaying all detailed definition of streams defined in the server.
+Use this endpoint to retrieve detailed configuration summaries for all defined streams:
 
-```shell
+```http
 GET http://localhost:9081/streamdetails
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```json
 [
@@ -69,17 +69,17 @@ Response Sample (HTTP 200 OK):
 ]
 ```
 
-## describe a stream
+## Describe a Stream
 
-The API is used for print the detailed definition of stream.
+Use this endpoint to display the complete schema and configuration of a stream:
 
-```shell
+```http
 GET http://localhost:9081/streams/{id}
 ```
 
-Response Sample:
+Response sample (HTTP 200 OK):
 
-```shell
+```json
 {
   "Name": "demo",
   "StreamFields": [
@@ -103,27 +103,27 @@ Response Sample:
 }
 ```
 
-## get stream schema
+## Get Stream Schema
 
-The API is used to get the stream schema. The schema is inferred from the physical and logical schema definitions.
+Use this endpoint to retrieve the inferred schema combining physical and logical definitions:
 
-```shell
+```http
 GET http://localhost:9081/streams/{id}/schema
 ```
 
-The format is like Json schema:
+The response follows JSON schema format:
 
 ```json
 {
     "id": {
         "type": "bigint"
-  },
+    },
     "name": {
         "type": "string"
-  },
+    },
     "age": {
         "type": "bigint"
-  },
+    },
     "hobbies": {
         "type": "struct",
         "properties": {
@@ -144,46 +144,45 @@ The format is like Json schema:
 }
 ```
 
-For a shared stream, the schema adjusts dynamically during runtime according to the active processing rules. To reduce
-computational overhead, the system maintains only the minimal schema needed to support those rules.
+For shared streams, the engine dynamically adjusts the runtime schema based on active rules to minimize memory and CPU overhead.
 
-## update a stream
+## Update a Stream
 
-The API is used for update the stream definition.
+Use this endpoint to update an existing stream definition:
 
-```shell
+```http
 PUT http://localhost:9081/streams/{id}
 ```
 
-Path parameter `id` is the id or name of the old stream.
+The path parameter `id` specifies the name of the stream to update.
 
-Request sample, the request is a json string with `sql` field.
+Request payload:
 
 ```json
 {"sql":"create stream my_stream (id bigint, name string, score float) WITH ( datasource = \"topic/temperature\", FORMAT = \"json\", KEY = \"id\")"}
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```text
 Stream my_stream is updated.
 ```
 
-## drop a stream
+## Drop a Stream
 
-The API is used for drop the stream definition.
+Use this endpoint to delete a stream definition:
 
-```shell
+```http
 DELETE http://localhost:9081/streams/{id}
 ```
 
-Response Sample (HTTP 200 OK):
+Response sample (HTTP 200 OK):
 
 ```text
 Stream my_stream is dropped.
 ```
 
-Subsequent requests to `GET /streams/{id}` will return `HTTP 400 Bad Request`:
+Subsequent requests to `GET /streams/{id}` return `HTTP 400 Bad Request`:
 
 ```json
 {
@@ -191,4 +190,3 @@ Subsequent requests to `GET /streams/{id}` will return `HTTP 400 Bad Request`:
   "message": "describe stream error: Describe stream fails, my_stream is not found."
 }
 ```
-

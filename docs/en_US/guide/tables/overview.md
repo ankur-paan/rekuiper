@@ -1,15 +1,17 @@
-# Table
+# Table Management
 
-rekuiper streams is unbounded and immutable, any new data are appended in the current stream for processing.  **Table** is provided to represent the current state of the stream. It can be considered as a snapshot of the stream. Users can use table to retain a batch of data for processing.
+rekuiper streams are unbounded and immutable. The engine appends new records to the stream for real-time processing.
 
-There are two kinds of table:
+A **Table** represents the current state of a data stream or an external data store. A table functions as a data snapshot. Users query tables to access batch data or enrich real-time streaming records.
 
-- Scan table: accumulates the data in memory. It is suitable for smaller dataset and the table content do NOT need to share between rules.
-- Lookup table: refer to external table content. It is suitable for bigger dataset and share table content across rules.
+rekuiper supports two table types:
+
+- **Scan table**: Buffers data in memory. Use scan tables for smaller datasets that do not require state sharing across rules.
+- **Lookup table**: Binds to an external data store. Use lookup tables for larger datasets and to share state across multiple rules.
 
 ## Syntax
 
-Table supports almost the same syntax as streams. To create a table, run the below SQL:
+Table creation uses SQL syntax similar to stream definitions:
 
 ```sql
 CREATE TABLE 
@@ -18,37 +20,44 @@ CREATE TABLE
     WITH ( property_name = expression [, ...] );
 ```
 
-Table supports the same [data types](../streams/overview.md#schema-in-stream-definition) as stream.
+Tables support the same [data types](../streams/overview.md#schema-in-stream-definition) as streams.
 
-Table also supports all [the properties of the stream](../streams/overview.md#stream-properties). Thus, all the source type are also supported in table. Many sources are not batched which have one event at any given time point, which means the table will always have only one event. An additional property `RETAIN_SIZE` to specify the size of the table snapshot so that the table can hold an arbitrary amount of history data.
+Tables support all [stream properties](../streams/overview.md#stream-properties). Therefore, tables support all source connector types.
+
+Many streaming sources produce one event at a time. By default, a table from such a source retains only the latest event. To retain historical events in a scan table, configure the `RETAIN_SIZE` property.
 
 ### Lookup Table Syntax
 
-The syntax is the same as creating a normal scan table, just need to specify kind property to be `lookup`. Below is an example to create a lookup data, which binds to redis database 0.
+To create a lookup table, set the `KIND` property to `"lookup"`.
+
+The following statement creates a lookup table connected to Redis database `0`:
 
 ```sql
-CREATE TABLE alertTable() WITH (DATASOURCE="0", TYPE="redis", KIND="lookup")
+CREATE TABLE alertTable() WITH (DATASOURCE="0", TYPE="redis", KIND="lookup");
 ```
 
-Currently, only `memory`, `redis` and `sql` source can be lookup table.
+Currently, only `memory`, `redis`, and `sql` sources support the `lookup` table kind.
 
-### Table properties
+### Table Properties
 
-| Property name | Optional | Description                                                                                                                                                                      |
-|---------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| DATASOURCE    | false    | The value is determined by source type. The topic names list if it's a MQTT data source. Please refer to related document for other sources.                                     |
-| FORMAT        | true     | The data format, currently the value can be "JSON", "PROTOBUF" and "BINARY". The default is "JSON". Check [Binary Stream](../streams/overview.md#binary-stream) for more detail. |
-| SCHEMAID      | true     | The schema to be used when decoding the events. Currently, only use when format is PROTOBUF.                                                                                     |
-| KEY           | true     | The primary key of the table. For example, for SQL source key specifies the primary key in the SQL table. It is not obeyed by all source types.                                  |
-| TYPE          | true     | The source type. Each source type may support one kind or both kind of tables. Please refer to related documents.                                                                |
-| CONF_KEY      | true     | If additional configuration items are requied to be configured, then specify the config key here. See [MQTT stream](../sources/builtin/mqtt.md) for more info.                   |
-| KIND          | true     | The table kind, could be `scan` or `lookup`. If not specified, the default value is `scan`.                                                                                      |
+Configure table properties in the `WITH` clause:
 
-## Usage scenarios
+| Property Name | Optional | Description |
+|---|---|---|
+| `DATASOURCE` | False | Target topic, table name, or database index. For MQTT, specify the topic name. |
+| `FORMAT` | True | Serialization format: `"JSON"`, `"PROTOBUF"`, or `"BINARY"`. Default is `"JSON"`. Refer to [Binary Stream](../streams/overview.md#binary-streams). |
+| `SCHEMAID` | True | Schema identifier used to decode payloads. Required when `FORMAT` is `"PROTOBUF"`. |
+| `KEY` | True | Primary key of the table. In SQL sources, this property defines the primary key column. |
+| `TYPE` | True | Source connector type (such as `redis`, `sql`, `memory`, or `mqtt`). Default is `"mqtt"`. |
+| `CONF_KEY` | True | Configuration section in the source YAML file. Refer to [MQTT Source Connector](../sources/builtin/mqtt.md). |
+| `KIND` | True | Table kind: `"scan"` or `"lookup"`. Default is `"scan"`. |
+| `RETAIN_SIZE` | True | Number of historical records to retain in a scan table snapshot. |
 
-Table is a way to keep a large bunch of state for both scan and lookup type. Scan table keeps state in memory while lookup table keeps them externally and possibly persisted. Scan table is easier to set up while lookup table can easily connect to existed persisted states. Both types are suitable for stream batch integrated calculation.
+## Usage Scenarios
 
-Please check below links for some typical scenarios.
+Tables maintain state for stream-batch hybrid computations. Scan tables store state in memory, whereas lookup tables access external persistent storage.
 
-- [Scan table scenarios](scan.md)
-- [Lookup table scenarios](lookup.md)
+Refer to the scenario guides for practical implementations:
+
+- [Scan Table Scenarios](scan.md)
+- [Lookup Table Scenarios](lookup.md)

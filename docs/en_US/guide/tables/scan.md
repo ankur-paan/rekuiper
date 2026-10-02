@@ -1,23 +1,25 @@
 # Scan Table Scenarios
 
-Typically, table will be joined with stream with or without a window. When joining with stream, table data won't affect the downstream data, it is treated like a static referenced data, although it may be updated internally.
+Rules join scan tables with data streams, with or without time windows. When a rule joins a stream with a table, the table acts as reference data. Changes to table records do not trigger rule evaluation.
 
-## Enrich data
+## Data Enrichment
 
-A typical usage for table is as a lookup table. Sample SQL will be like:
+Use a scan table to enrich real-time events with static reference data.
+
+The following example defines a table that reads data from a local JSON file:
 
 ```sql
 CREATE TABLE table1 (
     id BIGINT,
     name STRING
-  ) WITH (DATASOURCE="lookup.json", FORMAT="JSON", TYPE="file");
+) WITH (DATASOURCE="lookup.json", FORMAT="JSON", TYPE="file");
 
-SELECT * FROM demo INNER JOIN table1 on demo.id = table1.id
+SELECT * FROM demo INNER JOIN table1 ON demo.id = table1.id;
 ```
 
-In this example, a table `table1` is created to read json data from file *lookup.json*. Then in the rule, `table1` is joined with the stream `demo` so that the stream can lookup the name from the id.
+In this query, rekuiper joins the `demo` stream with `table1`. The query matches `demo.id` with `table1.id` to retrieve the `name` field.
 
-The content of *lookup.json* file should be an array of objects. Below is an example:
+The `lookup.json` file must contain an array of JSON objects:
 
 ```json
 [
@@ -36,17 +38,17 @@ The content of *lookup.json* file should be an array of objects. Below is an exa
 ]
 ```
 
-## Filter by history state
+## Filter by Historical State
 
-In some scenario, we may have an event stream for data and another event stream as the control information.
+You can use a scan table to filter a data stream based on control signals from a separate topic:
 
 ```sql
 CREATE TABLE stateTable (
     id BIGINT,
     triggered bool
-  ) WITH (DATASOURCE="myTopic", FORMAT="JSON", TYPE="mqtt");
+) WITH (DATASOURCE="myTopic", FORMAT="JSON", TYPE="mqtt");
 
-SELECT * FROM demo LEFT JOIN stateTable on demo.id = stateTable.id  WHERE triggered=true
+SELECT * FROM demo LEFT JOIN stateTable ON demo.id = stateTable.id WHERE triggered = true;
 ```
 
-In this example, a table `stateTable` is created to record the trigger state from mqtt topic *myTopic*. In the rule, the data of `demo` stream is filtered with the current trigger state.
+In this example, `stateTable` stores the latest trigger status received from the MQTT topic `myTopic`. The rule filters records from the `demo` stream and processes only events where `triggered` equals `true`.

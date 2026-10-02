@@ -1,11 +1,11 @@
 # Analytic Engine for KubeEdge
 
-[KubeEdge](https://kubeedge.io/) is an open-source system for extending native containerized application orchestration capabilities to hosts at Edge.
+[KubeEdge](https://kubeedge.io/) is an open-source system that extends native containerized application orchestration to edge hosts.
 
 ![arch](./arch.png)
 
-As a kubernetes compliance system, KubeEdge enables the containerized deployment of the rekuiper instance. Please check [installation](../../installation.md#install-via-helm--k8sk3s-) for how to install rekuiper in k8s system.
+As a Kubernetes-compliant platform, KubeEdge supports containerized deployment of rekuiper instances. Refer to the [installation guide](../../installation.md#install-via-helm--k8sk3s-) for instructions to install rekuiper in Kubernetes environments.
 
-The Edge part of KubeEdge uses MQTT for communication between deviceTwin and devices. To use KubeEdge in double mqtt or external mode, users can configure the MQTT broker to be NanoMQ in the edge node.
+The edge layer of KubeEdge uses MQTT for communication between device twins and physical devices. To operate KubeEdge in dual MQTT mode or external broker mode, configure NanoMQ as the edge MQTT broker.
 
-Follow up, rekuiper can ingest device data from MQTT and provides versatile analytic capabilities for the KubeEdge components to achieve low latency calculation on edge.
+rekuiper ingests device telemetry directly from the MQTT broker. It provides stream processing and analytics capabilities for KubeEdge components to deliver low-latency computation at the edge.

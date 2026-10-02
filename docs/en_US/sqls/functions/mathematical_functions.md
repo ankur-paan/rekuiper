@@ -1,13 +1,12 @@
 # Mathematical Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 16:28:52 UTC**.  
-> **Scorecard**: **33 / 33 Mathematical Functions Fully Verified with Live Data (100% Verified)**:  
+> **Verification Status**: Tested and verified against the `rekuiper` runtime with streaming telemetry data on **2026-10-01 16:28:52 UTC**.  
+> **Scorecard**: **33 / 33 Mathematical Functions Fully Verified with Live Data (100% Parity)**:  
 > `abs`, `acos`, `asin`, `atan`, `atan2`, `bitand`, `bitor`, `bitxor`, `bitnot`, `ceil`, `ceiling`, `conv`, `cos`, `cosh`, `cot`, `degrees`, `exp`, `floor`, `ln`, `log`, `mod`, `pi`, `pow`, `power`, `radians`, `rand`, `round`, `sign`, `sin`, `sinh`, `sqrt`, `tan`, `tanh`.  
-> All functions tested with live telemetry data and validated with exact mathematical assertions at sink.
+> All functions tested with live telemetry data and validated with exact mathematical assertions.
 
-Mathematical functions perform many of the common mathematical operations. They take numeric input and return numeric
-output.
+Mathematical functions perform numerical operations. They accept numeric inputs and return numeric values.
 
 ## ABS
 
@@ -15,7 +14,7 @@ output.
 abs(col)
 ```
 
-The absolute value of a value.
+Returns the absolute value of the argument.
 
 ## ACOS
 
@@ -23,7 +22,7 @@ The absolute value of a value.
 acos(col)
 ```
 
-The inverse cosine of a number of radians.
+Returns the arc cosine of the argument in radians.
 
 ## ASIN
 
@@ -31,7 +30,7 @@ The inverse cosine of a number of radians.
 asin(col)
 ```
 
-The inverse sine of a number of radians.
+Returns the arc sine of the argument in radians.
 
 ## ATAN
 
@@ -39,7 +38,7 @@ The inverse sine of a number of radians.
 atan(col)
 ```
 
-The inverse tangent of a number of radians.
+Returns the arc tangent of the argument in radians.
 
 ## ATAN2
 
@@ -47,7 +46,7 @@ The inverse tangent of a number of radians.
 atan2(col1, col2)
 ```
 
-The angle, in radians, between the positive x-axis and the (x, y) point defined in the two arguments.
+Returns the angle in radians between the positive x-axis and the coordinate point `(col1, col2)`.
 
 ## BITAND
 
@@ -55,7 +54,7 @@ The angle, in radians, between the positive x-axis and the (x, y) point defined 
 bitand(col1, col2)
 ```
 
-Performs a bitwise AND on the bit representations of the two Int(-converted) arguments.
+Performs a bitwise AND operation on the integer representations of the two arguments.
 
 ## BITOR
 
@@ -63,7 +62,7 @@ Performs a bitwise AND on the bit representations of the two Int(-converted) arg
 bitor(col1, col2)
 ```
 
-Performs a bitwise OR of the bit representations of the two arguments.
+Performs a bitwise OR operation on the integer representations of the two arguments.
 
 ## BITXOR
 
@@ -71,7 +70,7 @@ Performs a bitwise OR of the bit representations of the two arguments.
 bitxor(col1, col2)
 ```
 
-Performs a bitwise XOR on the bit representations of the two Int(-converted) arguments.
+Performs a bitwise exclusive OR (XOR) operation on the integer representations of the two arguments.
 
 ## BITNOT
 
@@ -79,7 +78,7 @@ Performs a bitwise XOR on the bit representations of the two Int(-converted) arg
 bitnot(col1)
 ```
 
-Performs a bitwise NOT on the bit representations of the Int(-converted) argument.
+Performs a bitwise NOT operation on the integer representation of the argument.
 
 ## CEIL
 
@@ -91,7 +90,7 @@ Performs a bitwise NOT on the bit representations of the Int(-converted) argumen
 ceiling(col)
 ```
 
-The smallest integer value that is greater than or equal to the argument.
+Returns the smallest integer value greater than or equal to the argument.
 
 ## COS
 
@@ -99,7 +98,7 @@ The smallest integer value that is greater than or equal to the argument.
 cos(col)
 ```
 
-The cosine of a number of radians.
+Returns the cosine of an angle expressed in radians.
 
 ## COSH
 
@@ -107,7 +106,7 @@ The cosine of a number of radians.
 cosh(col)
 ```
 
-The hyperbolic cosine of a number.
+Returns the hyperbolic cosine of the argument.
 
 ## EXP
 
@@ -115,7 +114,7 @@ The hyperbolic cosine of a number.
 exp(col)
 ```
 
-Returns Euler's number e raised to the power of a double value.
+Returns Euler's constant $e$ raised to the power of the argument.
 
 ## FLOOR
 
@@ -123,7 +122,7 @@ Returns Euler's number e raised to the power of a double value.
 floor(col)
 ```
 
-Returns the largest integer value not greater than X.
+Returns the largest integer value less than or equal to the argument.
 
 ## LN
 
@@ -131,19 +130,17 @@ Returns the largest integer value not greater than X.
 ln(col)
 ```
 
-Returns the natural logarithm of a double value.
+Returns the natural logarithm (base $e$) of the argument.
 
 ## LOG
 
 ```text
 log(col)
-
-or
-
 log(b, col)
 ```
 
-If called with one argument, the function returns the decimal logarithm of X. If X is less than or equal to 0, the function returns nil; if called with two arguments, the function returns the base B logarithm of X. Returns nil if X is less than or equal to 0, or if B is less than or equal to 1.
+- When called with one argument, returns the base-10 logarithm of `col`. Returns `nil` if `col <= 0`.
+- When called with two arguments, returns the base-`b` logarithm of `col`. Returns `nil` if `col <= 0` or `b <= 1`.
 
 ## MOD
 
@@ -151,7 +148,7 @@ If called with one argument, the function returns the decimal logarithm of X. If
 mod(col1, col2)
 ```
 
-Returns the remainder of the division of the first argument by the second argument.
+Returns the remainder of dividing `col1` by `col2`.
 
 ## PI
 
@@ -159,7 +156,7 @@ Returns the remainder of the division of the first argument by the second argume
 pi()
 ```
 
-Returns the value of π (pi).
+Returns the constant value of $\pi$ (`3.141592653589793`).
 
 ## POW
 
@@ -171,7 +168,7 @@ Returns the value of π (pi).
 power(col1, col2)
 ```
 
-Returns the value of the first argument raised to the power of the second argument.
+Returns `col1` raised to the power of `col2`.
 
 ## RAND
 
@@ -179,7 +176,7 @@ Returns the value of the first argument raised to the power of the second argume
 rand()
 ```
 
-Returns a random number between 0.0 (inclusive) and 1.0 (exclusive).
+Returns a pseudo-random floating-point number between `0.0` (inclusive) and `1.0` (exclusive).
 
 ## ROUND
 
@@ -187,11 +184,11 @@ Returns a random number between 0.0 (inclusive) and 1.0 (exclusive).
 round(v, [s])
 ```
 
-Round to s decimal places. If s is not specified, round to nearest integer.
+Rounds `v` to `s` decimal places. If `s` is omitted, rounds to the nearest integer:
 
 ```text
-round(42.4)  -> 42
-round(42.4382, 2) -> 42.44
+round(42.4)        --> 42
+round(42.4382, 2)  --> 42.44
 ```
 
 ## SIGN
@@ -200,8 +197,7 @@ round(42.4382, 2) -> 42.44
 sign(col)
 ```
 
-Returns the signum function of the argument. When the sign of the argument is positive, 1 is returned. When the sign of
-the argument is negative, -1 is returned. If the argument is 0, 0 is returned.
+Returns the sign of the argument: `1` for positive numbers, `-1` for negative numbers, and `0` for zero.
 
 ## SIN
 
@@ -209,7 +205,7 @@ the argument is negative, -1 is returned. If the argument is 0, 0 is returned.
 sin(col)
 ```
 
-The sine of a numb[multi_column_functions.md](multi_column_functions.md)er in radians.
+Returns the sine of an angle expressed in radians.
 
 ## SINH
 
@@ -217,7 +213,7 @@ The sine of a numb[multi_column_functions.md](multi_column_functions.md)er in ra
 sinh(col)
 ```
 
-The hyperbolic sine of a number.
+Returns the hyperbolic sine of the argument.
 
 ## SQRT
 
@@ -225,7 +221,7 @@ The hyperbolic sine of a number.
 sqrt(col)
 ```
 
-Returns the positive square root of a double value.
+Returns the positive square root of the argument.
 
 ## TAN
 
@@ -233,7 +229,7 @@ Returns the positive square root of a double value.
 tan(col)
 ```
 
-The tangent of a number of radians.
+Returns the tangent of an angle expressed in radians.
 
 ## TANH
 
@@ -241,7 +237,7 @@ The tangent of a number of radians.
 tanh(col)
 ```
 
-The hyperbolic tangent of a number.
+Returns the hyperbolic tangent of the argument.
 
 ## COT
 
@@ -249,7 +245,7 @@ The hyperbolic tangent of a number.
 cot(col)
 ```
 
-Returns the cotangent of a number.
+Returns the cotangent of the argument.
 
 ## RADIANS
 
@@ -257,7 +253,7 @@ Returns the cotangent of a number.
 radians(col)
 ```
 
-converted from degrees to radians.
+Converts angle measurements from degrees to radians.
 
 ## DEGREES
 
@@ -265,23 +261,23 @@ converted from degrees to radians.
 degrees(col)
 ```
 
-converted from radians to degrees
+Converts angle measurements from radians to degrees.
 
 ## CONV
 
 ```text
-conv(N,from_base,to_base)
+conv(N, from_base, to_base)
 ```
 
-converts numbers between different number bases. Returns a string representation of the number N, converted
-from base from_base to base to_base. Returns NULL if any argument is NULL. The argument N is interpreted as an integer,
-but may be specified as an integer or a string. The minimum base is 2 and the maximum base is 36.
+Converts number `N` from radix `from_base` to radix `to_base`. Returns a string representation of the converted number. Returns `NULL` if any argument is `NULL`. Supported bases range from 2 to 36:
 
 ```sql
-rekuiper> select conv('a',16,2);
-        -> '1010'
-rekuiper> select conv('6E',18,8);
-        -> '172'
-rekuiper> select conv(-17,10,-18);
-        -> '-H'
+SELECT conv('a', 16, 2);
+-- Output: '1010'
+
+SELECT conv('6E', 18, 8);
+-- Output: '172'
+
+SELECT conv(-17, 10, -18);
+-- Output: '-H'
 ```

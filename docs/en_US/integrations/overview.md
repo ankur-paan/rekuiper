@@ -1,8 +1,10 @@
-# Integrations
+# Integrations Overview
 
-rekuiper's strength lies not just in its core functionalities but also in how effortlessly it integrates with various platforms. This chapter offers a clear guide on how eKuiper collaborates with diverse ecosystems, ensuring users can maximize the potential of real-time data processing in multiple environments.
+rekuiper integrates seamlessly with edge orchestration systems, edge-cloud collaborative frameworks, and industrial IoT platforms.
 
-- **[Edge Cloud Collaboration](./edge_cloud/overview.md)**: Dive into how eKuiper works in edge cloud scenarios, allowing you to process data efficiently, right where it's generated.
-- **[Edgex Foundry](../edgex/edgex_rule_engine_tutorial.md)**: Edgex Foundry, an open-source project, serves as a platform for IoT edge computing. Learn how eKuiper integrates with Edgex Foundry, enhancing its modular design with real-time stream processing.
-- **[KubeEdge](./kubeedge/overview.md)**: As Kubernetes impacts cloud computing, KubeEdge brings those benefits to edge computing. This section details how eKuiper works within the KubeEdge environment to facilitate real-time processing at the edge.
-- **[Integration with OpenYurt](deploy/openyurt_tutorial.md)**: OpenYurt simplifies the deployment and management of eKuiper. Explore how this integration ensures a more streamlined edge computing setup and management process.
+## Integration Guides
+
+- **[Edge-Cloud Collaboration](./edge_cloud/overview.md):** Architectural patterns for distributed edge-cloud stream computing, centralized telemetry aggregation, and remote rule deployment.
+- **[EdgeX Foundry](../edgex/edgex_rule_engine_tutorial.md):** Integration guide for processing message bus events and actuating virtual or physical devices in EdgeX Foundry.
+- **[KubeEdge Integration](./kubeedge/overview.md):** Edge deployment patterns using KubeEdge and MQTT broker bridges.
+- **[OpenYurt Deployment Tutorial](deploy/openyurt_tutorial.md):** Deploy, scale, and manage rekuiper instances on edge clusters using OpenYurt and UnitedDeployment manifests.

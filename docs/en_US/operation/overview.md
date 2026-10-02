@@ -1,8 +1,13 @@
-# Admin Guide
+# Administrator Guide
 
-This chapter is tailored to provide administrators with a comprehensive understanding of rekuiper's essential aspects, including how to optimize, monitor, and manage rekuiper.
+This guide describes operational administration, monitoring, maintenance, and visual management for rekuiper.
 
-- **[Configuration](../configuration/configuration):** Configuring rekuiper is pivotal to tailoring it to specific needs. This segment delves into the nuts and bolts of both global and specific configurations, ensuring you can set up rekuiper to resonate with your operational preferences and requirements.
-- **[Monitoring with Prometheus](./usage/monitor_with_prometheus.md):** rekuiper supports seamless integration with Prometheus, a leading open-source monitoring solution. This section introduces how to set up, configure, and harness the power of metrics to monitor rekuiper's operations.
-- **[Management Console](./manager-ui/overview.md):** This part introduces rekuiper's intuitive management console, detailing plugin management and other functionalities.
-- **[Reliability & Stable Scope](../reliability/qualification_and_scope.md):** Reliability qualification, MQTT delivery semantics, broker outage caching, engine crash behavior, backup, upgrade, and rollback procedures.
+## Operations Sections
+
+- **[Configuration](../configuration/configuration.md):** Details global configuration parameters, environment variable syntax, and configuration file precedence.
+- **[Version Migration](./migration.md):** Details database schema and configuration migration procedures across releases.
+- **[Monitoring with Prometheus](./usage/monitor_with_prometheus.md):** Guides setup and visualization of runtime metrics using Prometheus and Grafana.
+- **[Error Codes](./usage/error_code.md):** References system error codes and troubleshooting actions.
+- **[Data Tracing](./usage/trace_data.md):** Guides OpenTelemetry tracing configuration and span inspection.
+- **[Management Console](./manager-ui/overview.md):** Introduces web-based visual management for streams, rules, and plugins.
+- **[Reliability & Stable Scope](../reliability/qualification_and_scope.md):** References MQTT delivery guarantees, broker outage caching, engine recovery, backup, and rollback procedures.

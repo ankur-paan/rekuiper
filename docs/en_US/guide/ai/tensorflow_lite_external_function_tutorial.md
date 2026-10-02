@@ -1,33 +1,23 @@
-# Run TensorFlow Lite model with rekuiper external function
+# Execute TensorFlow Lite Models with External Functions
 
-[LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is an edge lightweight IoT data analytics / streaming
-software which can be run at all kinds of resource constrained IoT devices.
+By integrating rekuiper and TensorFlow Lite, you can analyze stream records using pre-trained machine learning models. This tutorial explains how to build an external gRPC function service to label images captured by edge devices.
 
-[TensorFlow Lite](https://www.tensorflow.org/lite/guide) is a set of tools to help developers run TensorFlow models on
-mobile, embedded, and IoT devices. It enables on-device machine learning inference with low latency and a small binary
-size.
+External functions run in independent processes or on separate hosts. This architecture decouples the lifecycle of inference services from rekuiper and allows external services to serve multiple clients simultaneously.
 
-By integrating eKuiper and TensorFlow Lite, users can analyze the data in stream by AI with prebuilt TensorFlow models.
-In this tutorial, we will walk you through building a eKuiper external function plugin to label pictures produced by an edge
-device in stream by pre-trained image recognition TensorFlow model. By using the external functions, eKuiper and external functions
-can run in totally different processes or host machines, which means eKuiper and external functions can have different lifecycles, what's more, external functions
-can provide services to others except eKuiper.
+## Prerequisites
 
-## Prerequisite
+Prepare the following components before you begin:
 
-The external functions plugins will be a gRPC Server, so users should have knowledge of gRPC. This tutorial will give the example code to set up the GRPC server.
-Users can download the example code [here](https://github.com/lf-edge/ekuiper/blob/master/docs/resources/pythonGRPC.zip).
+- Basic knowledge of gRPC services. Download the [sample code package](https://github.com/lf-edge/ekuiper/blob/master/docs/resources/pythonGRPC.zip).
+- A working Docker installation.
 
-Users also need have basic knowledge of Docker.
+## Develop the External Function
 
-## Develop the external function
+The gRPC server exposes a `label` remote procedure call (RPC) method. The method executes image classification using `tflite_runtime`. Refer to `label.py` in the sample code repository for implementation details.
 
-In the example code, the gRPC Server provide ``label`` method, and users just need write an interface description file and register them into rekuiper. Then rekuiper can call the RPC method
-just as built-in functions. The ``label`` method is powered by ``tflite_runtime`` image classification, for more detail, please check the `label.py` file in the example code.
+The following Protocol Buffers definition describes the service interface. The `label` method accepts a Base64-encoded image:
 
-This is the proto file for the external functions plugins that provide services. The parameter of ``label`` method should be base64 encoded image.
-
-```proto
+```protobuf
 syntax = "proto3";
 
 package sample;
@@ -47,91 +37,101 @@ message LabelResult {
   string label = 2;
 }
 
-// The response message containing the greetings
+// The response message containing classification results.
 message LabelReply {
   repeated LabelResult results = 1;
 }
 ```
 
-## Build and run the gRPC Server
+## Build and Start the gRPC Server
 
-We provide Dockerfile to build the gRPC server, go to the root path of [example code](https://github.com/lf-edge/ekuiper/blob/master/docs/resources/pythonGRPC.zip) pythonGRPC.zip, run the following command to build the gRPC Server docker image
-
-```shell
- docker build  -t test:1.1.1 -f deploy/Dockerfile-slim-python .
-```
-
-And then set up the service by following command
+Use the provided Dockerfile to build and start the gRPC service container. In the root directory of the extracted sample code, run:
 
 ```shell
- docker run -d  -p 50051:50051 --name rpc-test test:1.1.1
+docker build -t test:1.1.1 -f deploy/Dockerfile-slim-python .
 ```
 
-Now, the gRPC server are providing services on 50051 port.
-
-## Package and register the external function
-
-### Package
-
-Package a json description file and a proto file for the services in gRPC server by zip. The file structure inside the zip file should be like:
-For more detail about the file format and content, please refer to [this](../../extension/external/external_func.md).
-
-- schemas
-  - sample.proto
-- sample.json
-
-You can get the example zip file in [example code](https://github.com/lf-edge/ekuiper/blob/master/docs/resources/pythonGRPC.zip) in ``ekuiper_package`` folder
-
-### Register the external function
-
-put the sample.zip file in /tmp directory in the same machine with rekuiper and register by cli
+Start the service container:
 
 ```shell
-# bin/kuiper create service sample '{"name": "sample","file": "file:///tmp/sample.zip"}'
+docker run -d -p 50051:50051 --name rpc-test test:1.1.1
 ```
 
-## Run the external function
+The gRPC server listens on TCP port `50051`.
 
-Once the external function registered, we can use it in our rule. We will create a rule to receive base64 encoded image data from a mqtt topic and label the image by tflite model.
+## Package and Register the External Function
 
-### Create the stream
+### Package the Service Archive
 
-Define the stream by rekuiper Cli. We create a mqtt stream named demo, it subscribe to topic ``tfdemo``.
+Create a ZIP archive containing the service description JSON file and the `.proto` schema file:
+
+- `schemas/`
+  - `sample.proto`
+- `sample.json`
+
+Refer to the [External Function documentation](../../extension/external/external_func.md) for descriptor schema details. You can find pre-packaged files in the `ekuiper_package` folder of the sample repository.
+
+### Register the External Service
+
+Copy the `sample.zip` archive to `/tmp` on the host where rekuiper runs, and register the service by using the command-line interface:
 
 ```shell
-#/bin/kuiper create stream demo '() with (DATASOURCE="tfdemo")'
+bin/kuiper create service sample '{"name": "sample", "file": "file:///tmp/sample.zip"}'
 ```
 
-### Create the rule
+## Run the External Function in Rules
 
-Define the rule by rekuiper cli.  We will create a select query. We just read the base64 encoded images from demo stream and run the custom function ``label`` against it. The result will be the label of the image recognized by the AI.
+Once registered, you can invoke the function directly in streaming SQL rules.
+
+### Create the Stream
+
+Define a stream that subscribes to MQTT topic `tfdemo`:
 
 ```shell
-#/bin/kuiper query
-
-Connecting to 127.0.0.1:20498...
-kuiper >  select label(image) from demo
-
+bin/kuiper create stream demo '() WITH (DATASOURCE = "tfdemo")'
 ```
 
-### Feed the data
+### Create the Rule
 
-User need send the data in json format like this
+Execute a test query using the command-line tool:
+
+```shell
+bin/kuiper query
+kuiper > SELECT label(image) FROM demo
+```
+
+### Publish Test Data
+
+Send JSON records containing Base64-encoded image payloads to the `tfdemo` topic:
 
 ```json
-{"image": "base64 encoded data"}
+{
+  "image": "base64_encoded_image_bytes"
+}
 ```
 
-User can get the real data from the example code in ``images/example.json`` file, just send it to the MQTT broker by a MQTT client
+You can use sample payloads from `images/example.json` in the example code repository.
 
-### Check the result
+### Verify the Result
 
-You can get the result after you publish the base64 encoded image.
+When you publish an image, the rule outputs classification labels and confidence values:
 
-```shell
-kuiper > [{"label":{"results":[{"confidence":0.5789139866828918,"label":"tailed frog"},{"confidence":0.3095814287662506,"label":"bullfrog"},{"confidence":0.040725912898778915,"label":"whiptail"},{"confidence":0.03226377069950104,"label":"frilled lizard"},{"confidence":0.01566782221198082,"label":"agama"}]}}]
+```json
+[
+  {
+    "label": {
+      "results": [
+        {"confidence": 0.5789139866828918, "label": "tailed frog"},
+        {"confidence": 0.3095814287662506, "label": "bullfrog"},
+        {"confidence": 0.040725912898778915, "label": "whiptail"},
+        {"confidence": 0.03226377069950104, "label": "frilled lizard"},
+        {"confidence": 0.01566782221198082, "label": "agama"}
+      ]
+    }
+  }
+]
 ```
 
 ## Conclusion
 
-In this tutorial, we walk you through building external function to leverage a pre-trained TensorFlowLite model. If you need to use other gRPC services, just follow the steps to create customized function. Enjoy the AI in edge device.
+External function services enable pre-trained TensorFlow Lite inference in separate processes. You can adapt this pattern to connect any gRPC algorithm service to rekuiper streaming rules.

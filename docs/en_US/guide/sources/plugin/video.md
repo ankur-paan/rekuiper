@@ -1,66 +1,37 @@
-# Video Source
+# Video Source Connector
 
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-The source will query video streams such as RTSP encoded stream by `ffmpeg` command to get images.
+The Video source connector extracts image frames from video streams (such as RTSP streams) using the `ffmpeg` utility.
 
-## Compile & deploy plugin
+## Configuration Overview
 
-```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sources/Video.so extensions/sources/video/video.go
-# cp plugins/sources/Video.so $rekuiper_install/plugins/sources
-# cp plugins/sources/video.json $rekuiper_install/etc/sources
-# cp plugins/sources/video.yaml $rekuiper_install/etc/sources
-```
-
-Restart the rekuiper server to activate the plugin.
-
-## Configuration
-
-The configuration for this source is `$rekuiper/etc/sources/video.yaml`. The format is as below:
+Configure the video connector in `$rekuiper/etc/sources/video.yaml`:
 
 ```yaml
 default:
   url: http://localhost:8080
   interval: 1000
+  codec: mjpeg
+  debugResp: false
 
 ext:
   interval: 10000
-
-dedup:
-  interval: 100
-
 ```
 
-### Global configurations
-
-Use can specify the global video source settings here. The configuration items specified in `default` section will be taken as default settings for the source when running this source.
-
 > [!NOTE]
-> Breaking change: since 2.4.0, the `vformat` configuration is removed. The source will now automatically use `image2pipe` format to support streaming. Any existing `vformat` configuration will be ignored.
+> Since version 2.4.0, the connector removes the `vformat` property and automatically uses `image2pipe` streaming mode. Existing `vformat` settings are ignored.
 
-### url
+### Configuration Parameters
 
-The url address for the video streaming.
+- `url`: Target streaming video URL (for example, `rtsp://localhost:8554/stream`).
+- `interval`: Frame extraction interval in milliseconds.
+- `codec`: Target video frame codec. Default is `'mjpeg'`.
+- `debugResp`: Boolean. Set to `true` to log FFmpeg process output for diagnostic debugging. Default is `false`.
+- `inputArgs`: Mapping of custom command arguments passed to FFmpeg input options (such as `-rtsp_transport` or `-fflags`).
 
-### interval
-
-The interval (ms) to issue a message.
-
-### codec
-
-The video codec. Check https://www.ffmpeg.org/general.html#Video-Codecs for all supported codec, default to 'mjpeg'
-
-### debugResp
-
-Whether to output the ffmpeg response to the log for debugging. Default to `false`.
-
-### inputArgs
-
-A map of input arguments to pass to ffmpeg input. This allows customizing ffmpeg input options like `-rtsp_transport`,
-`-fflags`, etc. For example:
+Example with custom FFmpeg input arguments:
 
 ```yaml
 default:
@@ -70,16 +41,23 @@ default:
     fflags: nobuffer
 ```
 
-## Override the default settings
+## Custom Configurations
 
-If you have a specific connection that need to overwrite the default settings, you can create a customized section. In the previous sample, we create a specific setting named with `ext`.  Then you can specify the configuration with option `CONF_KEY` when creating the stream definition (see [stream specs](../../../sqls/streams.md) for more info).
+Define custom configuration blocks in `video.yaml`:
 
-## Sample usage
-
-```text
-demo (
-    ...
-  ) WITH (FORMAT="JSON", CONF_KEY="ext", TYPE="video");
+```yaml
+ext:
+  interval: 10000
 ```
 
-The configuration keys "ext" will be used.
+Reference the configuration using `CONF_KEY="ext"`:
+
+```sql
+CREATE STREAM demo () WITH (
+  FORMAT = "JSON",
+  CONF_KEY = "ext",
+  TYPE = "video"
+);
+```
+
+For stream syntax and management details, refer to [Streams Management](../../streams/overview.md).

@@ -1,57 +1,55 @@
-# How to contribute
+# How to Contribute
 
-We're really glad you're reading this, because we need volunteer developers to help this project come to fruition.
+This document describes how to contribute code and documentation to the rekuiper project.
 
-## Reporting security vulnerabilities
+## Report Security Vulnerabilities
 
-Do **not** open a public GitHub issue for a security vulnerability. Report it privately as described in [SECURITY.md](../../SECURITY.md). For actively exploited vulnerabilities or other severe security incidents, use the emergency contact in that file.
+Do not open a public GitHub issue for a security vulnerability. Report security vulnerabilities privately as described in [SECURITY.md](../../SECURITY.md). For severe security incidents, use the emergency contact in that file.
 
-## Did you find a bug?
+## Report a Defect
 
-- If the bug is a **security vulnerability**, stop here and follow [SECURITY.md](../../SECURITY.md) instead of filing a public issue.
-- **Ensure the bug was not already reported** by searching on GitHub
-  under [Issues](https://github.com/ankur-paan/rekuiper/issues).
-- If you're unable to find an open issue addressing the
-  problem, [open a new one](https://github.com/ankur-paan/rekuiper/issues/new). Be sure to include a **title and clear
-  description**, as much relevant information as possible, and a **code sample** or an **executable test case**
-  demonstrating the expected behavior that is not occurring.
+- If the defect is a security vulnerability, refer to [SECURITY.md](../../SECURITY.md). Do not submit a public issue.
+- Search existing issues on GitHub under [Issues](https://github.com/ankur-paan/rekuiper/issues) to verify that the defect is not already reported.
+- If no open issue exists, [open a new issue](https://github.com/ankur-paan/rekuiper/issues/new). Include a clear title, a detailed description, and a reproducible test case.
 
-## Code and doc contribution
+## Code and Documentation Contributions
 
-Welcome to contribute code to provide features or fix bugs.
+You can contribute code for new features or defect fixes.
 
-### One time setup
+### One-Time Setup
 
-We use GitHub pull request to review proposed code changes. So you'll need to obtain a GitHub account before making code
-contribution.
+Project maintainers review proposed code changes through GitHub pull requests. Complete this setup before you contribute code:
 
-1. **Fork** rekuiper to your private repository. Click the `Fork` button in the top right corner of eKuiper repository.
-2. **Clone** the repository locally from your personal fork. `git clone https://github.com/<Github_user>/ekuiper.git`.
-3. Add rekuiper repo as additional Git remote so that you can sync between local repo and eKuiper.
+1. **Fork** the repository to your personal GitHub account.
+2. **Clone** your fork locally:
+   ```shell
+   git clone https://github.com/<Github_user>/ekuiper.git
+   ```
+3. Add the upstream repository as an additional Git remote:
+   ```shell
+   git remote add upstream https://github.com/ankur-paan/rekuiper.git
+   ```
 
-  ```shell
-  git remote add upstream https://github.com/ankur-paan/rekuiper.git
-  ```
+You can use any IDE or text editor. For Go development, refer to [Editors and IDEs for GO](https://github.com/golang/go/wiki/IDEsAndTextEditorPlugins).
 
-You can use your favorite IDE or editor to develop. You can find information in editor support for Go tools
-in [Editors and IDEs for GO](https://github.com/golang/go/wiki/IDEsAndTextEditorPlugins).
+### Create a Branch in Your Fork
 
-### Create a branch in your fork
-
-You’ll work on your contribution in a branch in your own (forked) repository. Create a local branch, initialized with
-the state of the branch you expect your changes to be merged into. The `master` branch is active development branch, so
-it's recommended to set `master` as base branch.
+Work on your contribution in a branch in your forked repository. Create a local branch based on the `master` branch:
 
 ```shell
-$ git fetch upstream
-$ git checkout -b <my-branch> upstream/master
+git fetch upstream
+git checkout -b <my-branch> upstream/master
 ```
 
 ### Package Import Specification
 
-Reasonable package import order can enhance the cleanliness and standardization of the code.
-This project uses gci to automatically check the order of package imports, with priority given
-to `standard packages` > `third-party external packages` > `local project packages`, as follows:
+Consistent package import order maintains code quality. This project uses `gci` to verify package import order. Group imports in this order:
+
+1. Standard library packages
+2. Third-party external packages
+3. Local project packages
+
+Example:
 
 ```go
 import (
@@ -63,47 +61,36 @@ import (
 )
 ```
 
-In the project root directory, you can run the
-command `gci write --skip-generated -s standard -s default -s "prefix(github.com/lf-edge/ekuiper)" .` to
-automatically reorder package imports.
+In the project root directory, run this command to reorder imports:
 
-Alternatively, if you use GoLand, you can check `Group` and `Group stdlib imports` as well as their sub-options under
-`Settings > Editor > Code Style > Go > Imports` to enable automatic import sorting.
+```shell
+gci write --skip-generated -s standard -s default -s "prefix(github.com/lf-edge/ekuiper)" .
+```
 
-### Code conventions
+In GoLand, enable automatic import sorting under `Settings > Editor > Code Style > Go > Imports`.
 
-- Use `go fmt` to format your code before commit code change. rekuiper GitHub Actions CI pipeline reports error if it's
-  not format by `go fmt`.
-- Run static code analysis with `make lint` to make sure there are no stylistic errors and common programming issues.
-  - If you encounter lint errors related to `gofumpt`, run `gofumpt -w .` in the project root directory to solve it.
-  - Check [golangci-lint](https://golangci-lint.run/) for more information on the corresponding lint errors.
-- Configuration key in config files uses camel case format.
+### Code Conventions
 
-### Debug your code
+- Format your code with `go fmt` before you commit. The GitHub Actions CI pipeline rejects code that is not formatted with `go fmt`.
+- Run static analysis with `make lint` to verify code quality.
+  - If `gofumpt` errors occur, run `gofumpt -w .` in the project root directory.
+  - Refer to [golangci-lint](https://golangci-lint.run/) for lint rule documentation.
+- Use camelCase for configuration keys in configuration files.
 
-Take GoLand as an example, developers can debug the code:
+### Debug the Code
 
-1. Debug the whole program. Make sure all directories mentioned
-   in [Makefile](https://github.com/lf-edge/ekuiper/blob/master/Makefile) build_prepare sections are created in your
-   rekuiper root path. Add your breakpoints. Open `cmd/kuiperd/main.go`. In the main function, you'll find a green
-   triangle in the ruler, click it and select debug. Then create your stream/rule that would run through your
-   breakpoint, the debugger will pause there.
-2. To debug a small portion of code, we recommend writing a unit test and debug it. You can go to any test file and find
-   the same green triangle to run in debug mode. For example, `pkg/cast/cast_test.go` TestMapConvert_Funcs can run as
-   debug.
+To debug code in GoLand:
 
-#### Debug edgex code
+1. Full application debugging: Verify all directories in the `build_prepare` section of the [Makefile](https://github.com/lf-edge/ekuiper/blob/master/Makefile) exist in the project root. Add breakpoints. Open `cmd/kuiperd/main.go` and start the debugger. Create a stream or rule that executes the target code path.
+2. Unit test debugging: Write and debug a unit test. For example, debug `TestMapConvert_Funcs` in `pkg/cast/cast_test.go`.
 
-Users can modify edgex source/sink code to meet their requirement. In this case, the best practice is letting the other
-services running in docker mode but rekuiper running locally.
-Users can follow these steps to set up the environment.
+#### Debug EdgeX Integration
 
-#### expose message bus
+To debug EdgeX source or sink code, run external services in Docker containers and run rekuiper locally.
 
-rekuiper subscribes to messages by topic and by default edgex is using redis as message bus. This guide will use redis as
-example to show how to expose message bus.
-In the docker-compose file, find the redis service and in ports part change 127.0.0.1:6379
-to 0.0.0.0:6379, then restart all the services.
+##### Expose the Message Bus
+
+EdgeX uses Redis as the default message bus. To expose the message bus, edit the `docker-compose.yml` file. Change the port mapping of the `database` service from `127.0.0.1:6379` to `0.0.0.0:6379`, then restart services:
 
 ```yaml
  database:
@@ -130,21 +117,19 @@ to 0.0.0.0:6379, then restart all the services.
    user: root:root
    volumes:
      - db-data:/data:z
-
 ```
 
-#### change edgex local config
+##### Configure EdgeX Locally
 
-Change edgex source config according to message bus type, the following table is message bus configuration
-the file locates in `etc/sources/edgex.yaml`.
+Configure `etc/sources/edgex.yaml` based on the message bus type:
 
-| message bus   | type  | protocol | server       | port |
-|---------------|-------|----------|--------------|------|
-| redis  server | redis | redis    | 10.65.38.224 | 6379 |
-| mqtt  broker  | mqtt  | tcp      | 10.65.38.224 | 1883 |
-| zemo mq       | zero  | tcp      | 10.65.38.224 | 5566 |
+| Message Bus | Type | Protocol | Server | Port |
+| :--- | :--- | :--- | :--- | :--- |
+| Redis Server | redis | redis | 10.65.38.224 | 6379 |
+| MQTT Broker | mqtt | tcp | 10.65.38.224 | 1883 |
+| ZeroMQ | zero | tcp | 10.65.38.224 | 5566 |
 
-Take the redis as example, the following config will let eKuiper connect to the broker's 6379 port.
+Example Redis configuration:
 
 ```yaml
 default:
@@ -159,112 +144,76 @@ default:
   messageType: event
 ```
 
-After changing this, redis will listen on the host 6379 port, developers can connect to the machine that edgex runs
-remotely by the server address.
-For example, the host ip address is 10.65.38.224 , users can connect to this machine by the ip address.
+##### Enable Console Logging and Set the REST API Port
 
-#### enable rekuiper console log and set rest api port
-
-Change the config file in `etc/kuiper.yaml`, set the console log true and set rekuiper REST API port to 59720
+In `etc/kuiper.yaml`, set `consoleLog` to `true` and set `restPort` to `59720`:
 
 ```yaml
 basic:
-  # true|false, with debug level, it prints more debug info
   debug: false
-  # true|false, if it's set to true, then the log will be print to console
   consoleLog: true
-  # true|false, if it's set to true, then the log will be print to log file
   fileLog: true
-  # How many hours to split the file
   rotateTime: 24
-  # Maximum file storage hours
   maxAge: 72
-  # CLI ip
   ip: 0.0.0.0
-  # CLI port
   port: 20498
-  # REST service ip
   restIp: 0.0.0.0
-  # REST service port
   restPort: 59720
-  # true|false, when true, will check the RSA jwt token for rest api
   authentication: false
-  #  restTls:
-  #    certfile: /var/https-server.crt
-  #    keyfile: /var/https-server.key
-  # Prometheus settings
   prometheus: false
   prometheusPort: 20499
-  # Whether to ignore case in SQL processing. Note that, the name of customized function by plugins are case-sensitive.
   ignoreCase: true
 ```
 
-#### run locally
+##### Run rekuiper Locally
 
-Use the [former method](./CONTRIBUTING.md#debug-your-code) to run rekuiper
+Start rekuiper using the debug procedure described above.
 
 ### Testing
 
-The rekuiper project leverages Github actions to run unit test & FVT (functional verification test), so please take a
-look at the PR status result, and make sure that all of testcases run successfully.
+The project uses GitHub Actions to run unit tests and Functional Verification Tests (FVT). Verify that all tests pass on your pull request.
 
-- Write Golang unit testcases to test your code if necessary.
-- A set of [FVT testcases](https://github.com/lf-edge/ekuiper/blob/master/test/README.md) will be triggered with any PR
-  submission, so please make sure that these
-  testcases can be run successfully.
+- Write Go unit tests to validate new code.
+- Pull requests trigger the [FVT test suite](https://github.com/lf-edge/ekuiper/blob/master/test/README.md). Verify that all tests pass.
 
 ### Licensing
 
-All code contributed to rekuiper will be licensed under Apache License V2. You need to ensure every new files you are
-adding have the right license header.
+All code contributions are licensed under the Apache License 2.0. Add the correct license header to every new file.
 
-### Sign-off commit
+### Sign-Off Commits
 
-The sign-off is to certify the origin of the commit. It is required to commit to this project. If you set
-your `user.name` and `user.email` git configs, you can sign your commit automatically with `git commit -s`. Each commit
-must be signed off.
+You must sign off each commit to certify origin. Configure `user.name` and `user.email` in Git, then use `git commit -s`.
 
-### Syncing
+### Synchronize Your Branch
 
-Periodically while you work, and certainly before submitting a pull request, you should update your branch with the most
-recent changes to the target branch. We prefer rebase than merge to avoid extraneous merge commits.
+Rebase your branch on the latest upstream changes before you submit a pull request:
 
 ```shell
 git fetch upstream
 git rebase upstream/master
 ```
 
-Then you can push to your forked repo. Assume the remove name for your forked is the default `origin`. If you have
-rebased the git history before the last push, add `-f` to force pushing the changes.
+Push changes to your fork. If you rebased previously pushed commits, use force push:
 
 ```shell
 git push origin -f
 ```
 
-### Submitting changes
+### Submit Pull Requests
 
-The `master` branch is active development branch, so it's recommended to set `master` as base branch, and also create PR
-against `master` branch.
+Base your pull requests on the `master` branch.
 
-Organize your commits to make a committer’s job easier when reviewing. Committers normally prefer multiple small pull
-requests, instead of a single large pull request. Within a pull request, a relatively small number of commits that break
-the problem into logical steps is preferred. For most pull requests, you'll squash your changes down to 1 commit. You
-can use the following command to re-order, squash, edit, or change description of individual commits.
+Submit small, focused pull requests. Squash commits into a single commit where appropriate:
 
 ```shell
 git rebase -i upstream/master
 ```
 
-Make sure all your commits comply to the [commit message guidelines](#commit-message-guidelines).
-
-You'll then push to your branch on your forked repo and then navigate to rekuiper repo to create a pull request. Our
-GitHub repo provides automatic testing with GitHub action. Please make sure those tests pass. We will review the code
-after all tests passed.
+Ensure all commit messages follow the guidelines below. Push to your branch and create the pull request on GitHub.
 
 ### Commit Message Guidelines
 
-Each commit message consists of a **header**, a **body** and a **footer**. The header has a special format that includes
-a **type**, a **scope** and a **subject**:
+Commit messages must have a header, an optional body, and an optional footer:
 
 ```text
 <type>(<scope>): <subject>
@@ -274,16 +223,12 @@ a **type**, a **scope** and a **subject**:
 <footer>
 ```
 
-The **header** with **type** is mandatory. The **scope** of the header is optional. This repository has no predefined
-scopes. A custom scope can be used for clarity if desired.
+Rules:
+- The header with `<type>` is mandatory.
+- The maximum line length is 100 characters.
+- Reference related issues in the footer (for example, `Closes: #123`).
 
-Any line of the commit message cannot be longer 100 characters! This allows the message to be easier to read on GitHub
-as well as in various git tools.
-
-The footer should contain
-a [closing reference to an issue](https://help.github.com/articles/closing-issues-via-commit-messages/) if any.
-
-Example 1:
+Example:
 
 ```text
 feat: add Fuji release compose files
@@ -299,136 +244,93 @@ Closes: #123, #245, #992
 
 #### Revert
 
-If the commit reverts a previous commit, it should begin with `revert:`, followed by the header of the reverted commit.
-In the body it should say: `This reverts commit <hash>.`, where the hash is the SHA of the commit being reverted.
+If a commit reverts a previous change, prefix the header with `revert:`. In the body, write: `This reverts commit <hash>.`
 
 #### Type
 
-Must be one of the following:
+The type must be one of the following:
 
-- **feat**: New feature for the user, not a new feature for build script
-- **fix**: Bug fix for the user, not a fix to a build script
-- **docs**: Documentation only changes
-- **style**: Formatting, missing semi colons, etc; no production code change
-- **refactor**: Refactoring production code, eg. renaming a variable
-- **chore**: Updating grunt tasks etc; no production code change
-- **perf**: A code change that improves performance
-- **test**: Adding missing tests, refactoring tests; no production code change
-- **build**: Changes that affect the CI/CD pipeline or build system or external dependencies (example scopes: travis,
-  jenkins, makefile)
-- **ci**: Changes provided by DevOps for CI purposes.
-- **revert**: Reverts a previous commit.
+- **feat**: New user-facing feature
+- **fix**: Defect fix for the user
+- **docs**: Documentation changes
+- **style**: Formatting and stylistic corrections without code logic changes
+- **refactor**: Code restructuring without bug fixes or feature additions
+- **chore**: Build tasks and dependency maintenance
+- **perf**: Performance improvements
+- **test**: Test suite additions or modifications
+- **build**: Build system or dependency changes
+- **ci**: Continuous integration configuration changes
+- **revert**: Revert of a previous commit
 
 #### Scope
 
-There are no predefined scopes for this repository. A custom scope can be provided for clarity.
+No predefined scopes exist. Use a custom scope when helpful.
 
 #### Subject
 
-The subject contains a succinct description of the change:
-
-- use the imperative, present tense: "change" not "changed" nor "changes"
-- don't capitalize the first letter
-- no dot (.) at the end
+The subject must contain a succinct description:
+- Use imperative present tense (for example, "change", not "changed" or "changes").
+- Do not capitalize the first letter.
+- Do not add a period at the end.
 
 #### Body
 
-Just as in the **subject**, use the imperative, present tense: "change" not "changed" nor "changes". The body should
-include the motivation for the change and contrast this with previous behavior.
+Use imperative present tense. Describe the motivation for the change and compare with previous behavior.
 
 #### Footer
 
-The footer should contain any information about **Breaking Changes** and is also the place to reference GitHub issues
-that this commit **Closes**.
-
-**Breaking Changes** should start with the word `BREAKING CHANGE:` with a space or two newlines. The rest of the commit
-message is then used for this.
+Document breaking changes with prefix `BREAKING CHANGE:`. Reference closed GitHub issues with `Closes: #<issue>`.
 
 ## Community Promotion
 
-Besides coding, other types of contributions are a great way to get involved. Welcome to contribute to this project by
-promoting it to the open source community and the world.
+You can also contribute by promoting the project in the community:
 
-The promotion contributions include but not limit to:
+- Integrate rekuiper into your open-source projects.
+- Organize workshops or meetups.
+- Answer user questions in GitHub Issues, Slack, or mailing lists.
+- Write tutorials.
+- Mentor new contributors.
 
-- Integrate rekuiper to your open source project
-- Organize workshops or meetups about the project
-- Answer questions about the project on issues, slack or maillist
-- Write tutorials for how a project can be used
-- Offer to mentor another contributor
-
-Thank you for taking the time to contribute!
-
-## Roles and responsibilities
+## Roles and Responsibilities
 
 ### Contributor
 
-Contributors are community members who contribute in concrete ways to the project.
-Anyone can contribute to the project and become a contributor, regardless of their skillset.
-There is no expectation of commitment to the project, no specific skill requirements, and no selection process.
-There are many ways to contribute to the project, which may be one or more of the following (but not limited to):
+Contributors are community members who contribute to the project. Any person can become a contributor. Common contribution activities include:
 
-- Reporting or fixing bugs.
-- Identifying requirements, strengths, and weaknesses.
+- Reporting and fixing defects.
+- Reviewing requirements and software capabilities.
 - Writing documentation.
 
-For first-time contributors,
-it is recommended to start by going through [code and doc contribution](#code-and-doc-contribution),
-and joining our community Slack channel.
-
-As one continues to contribute to the project and engage with the community,
-he/she may at some point become eligible for an rekuiper committer.
+Start with the [Code and Documentation Contributions](#code-and-documentation-contributions) guide and join the community Slack channel.
 
 ### Committer
 
-Committers are active community members who have shown that they are committed to the continuous development of the
-project through ongoing engagement with the community.
-Committership allows contributors to more easily carry on with their project-related activities by giving them direct
-access to the project’s resources.
+Committers have direct access to project repositories. To qualify as a committer:
 
-Typically, a potential committer needs to show that they have a sufficient understanding of the project, its objectives,
-and its strategy. To become a committer, you are expected to:
+- Contribute actively to the rekuiper project.
+- Express interest to maintainers.
+- Submit 6 or more substantial pull requests.
+- Demonstrate technical understanding of the codebase and project goals.
 
-- Be a rekuiper contributor.
-- Express interest to the existing maintainers that you are interested in becoming a committer.
-- Have contributed 6 or more substantial PRs.
-- Have an above-average understanding of the project codebase, its goals, and directions.
-
-Contributors that meet the above requirements will be nominated by an existing maintainer to become a committer. It is
-recommended to describe the reasons for the nomination and the contribution of the nominee in the PR. The existing
-maintainers will confer and decide whether to grant committer status or not.
-
-Committers are expected to review issues and PRs. Their LGTM counts towards the required LGTM count to merge a PR. While
-committership indicates a valued member of the community who has demonstrated a healthy respect for the project’s aims
-and objectives, their work continues to be reviewed by the community before acceptance in an official release.
-
-A committer who shows an above-average level of contribution to the project, particularly with respect to its strategic
-direction and long-term health, may be nominated to become a maintainer. This role is described below.
+An existing maintainer nominates eligible contributors. Committers review issues and pull requests.
 
 ### Maintainer
 
-Maintainers are first and foremost committers that have shown they are committed to the long term success of a project.
-They are the planners and designers of the rekuiper project.
-Maintainership is about building trust with the current maintainers of the project and being a person that they can
-depend on to make decisions in the best interest of the project in a consistent manner.
+Maintainers plan and design the project architecture. To qualify as a maintainer, committers must:
 
-Committers want to become maintainers are expected to:
+- Expand adoption and ecosystem integrations.
+- Collaborate in community meetings and discussions.
+- Demonstrate mastery of rekuiper architecture and strategy.
+- Lead major feature designs and implementations.
 
-- Enable adoptions or ecosystems.
-- Collaborate well. Participate in community meetings and events.
-- Demonstrate a deep and comprehensive understanding of rekuiper's architecture, technical goals, and directions.
-- Actively engage with major rekuiper feature proposals and implementations.
+An existing maintainer nominates candidates on the [Maintainer List](https://github.com/lf-edge/ekuiper/blob/master/MAINTAINERS.md).
 
-A new maintainer must be nominated by an existing maintainer. The nominating maintainer will create a PR to update
-the [Maintainer List](https://github.com/lf-edge/ekuiper/blob/master/MAINTAINERS.md). It is recommended to describe the
-reasons for the nomination and the contribution of the nominee in the PR. Upon consensus of incumbent maintainers, the
-PR will be approved and the new maintainer becomes active.
+### Nomination Process
 
-### Nomination process
+The following table describes how the nomination is approved:
 
-The following table describes how the nomination is approved.
+| Nomination | Description | Approval | Binding Roles | Minimum Length (days) |
+| :--- | :--- | :--- | :--- | :--- |
+| New Committer | Proposed by a maintainer | [Lazy Consensus](https://communitymgt.fandom.com/wiki/Lazy_consensus) | Active maintainers | 7 |
+| New Maintainer | Proposed by a maintainer | Supermajority (2/3) Approval | Active maintainers | 7 |
 
-| Nomination     | Description                                                                  | Approval                                                              | Binding Roles      | Minimum Length (days) |
-|:---------------|:-----------------------------------------------------------------------------|:----------------------------------------------------------------------|:-------------------|:----------------------|
-| New Committer  | When a new committer is proposed, should be only nominated by a maintainer.  | [Lazy Consensus](https://communitymgt.fandom.com/wiki/Lazy_consensus) | Active maintainers | 7                     |
-| New Maintainer | When a new maintainer is proposed, should be only nominated by a maintainer. | Supermajority (2/3) Approval                                          | Active maintainers | 7                     |

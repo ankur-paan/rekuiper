@@ -1,77 +1,77 @@
-# Plugins management
+# Plugins Management
 
-The rekuiper plugin command line tools allows you to manage plugins, such as create, show and drop plugins. Notice that, drop a plugin will need to restart rekuiper to take effect. To update a plugin, do the following:
+The rekuiper plugin CLI manages plugins. You can create, list, describe, register, and drop plugins.
 
-1. Drop the plugin.
-2. Restart rekuiper.
-3. Create the plugin with the new configuration.
+> [!NOTE]
+> Deleting a plugin requires restarting rekuiper to complete the removal. To update an existing plugin:
+> 1. Delete the plugin.
+> 2. Restart rekuiper.
+> 3. Create the plugin using the updated binary or configuration.
 
-## create a plugin
+## Create a Plugin
 
-The command is used for creating a plugin.  The plugin's definition is specified with JSON format.
+Use this command to install and register a plugin. Specify plugin definitions in JSON format:
 
 ```shell
 create plugin $plugin_type $plugin_name $plugin_json | create plugin $plugin_type $plugin_name -f $plugin_def_file
 ```
 
-The plugin can be created with three ways.
+You can create plugins using three methods:
 
-- Specify the plugin definition in command line.
-
-Sample:
+### Specify the Definition on the Command Line
 
 ```shell
 # bin/kuiper create plugin source random {"file":"http://127.0.0.1/plugins/sources/random.zip"}
 ```
 
-The command create a source plugin named `random`.
+This command creates a source plugin named `random`.
 
-- Specify the plugin definition in a file. If the plugin is complex, or the plugin is already wrote in text files with well organized formats, you can just specify the plugin definition through `-f` option.
+### Specify the Definition in a File
 
-Sample:
+Use the `-f` flag to load the plugin definition from a file:
 
 ```shell
 # bin/kuiper create plugin sink plugin1 -f /tmp/plugin1.txt
 ```
 
-Below is the contents of `plugin1.txt`.
+Example contents of `/tmp/plugin1.txt`:
 
 ```json
 {
-  "file":"http://127.0.0.1/plugins/sources/random.zip"
+  "file": "http://127.0.0.1/plugins/sources/random.zip"
 }
 ```
 
-To create a function plugin with multiple exported functions, specify the exported functions list as below:
+To create a function plugin that exports multiple functions, specify the function names in the `functions` array:
 
 ```shell
-# bin/kuiper create plugin function mulfuncs "{\"file\":\"file:///tmp/kuiper/plugins/functions/mulfuncs.zip\",\"functions\":[\"func1\",\"func2\"]}"}
+# bin/kuiper create plugin function mulfuncs "{\"file\":\"file:///tmp/kuiper/plugins/functions/mulfuncs.zip\",\"functions\":[\"func1\",\"func2\"]}"
 ```
 
-- Specify the plugin local path. If you are hosting kuiperd locally you can specify the path to the zip file through `-zf` option.
+### Specify a Local Zip File
 
-Sample:
+When running `kuiperd` locally, use the `-zf` flag to point directly to a local `.zip` file:
 
 ```shell
 # bin/kuiper create plugin sink plugin1 -zf ./plugin1.zip
 ```
 
-### parameters
+### Plugin Parameters
 
-1. plugin_type: the type of the plugin. Available values are `["source", "sink", "function", "portable"]`
-2. plugin_name: a unique name of the plugin. The name must be the same as the camel case version of the plugin with lowercase first letter. For example, if the exported plugin name is `Random`, then the name of this plugin is `random`.
-3. file: the url of the plugin files. It must be a zip file with: a compiled so file and the yaml file(only required for sources). The name of the files must match the name of the plugin. Please check [Extension](../../extension/overview.md) for the naming rule.
-4. functions: only apply to function plugin which exports multiple functions. The property specifies the exported function names.
+- `plugin_type`: The plugin type. Supported values are `"source"`, `"sink"`, `"function"`, and `"portable"`.
+- `plugin_name`: The unique identifier of the plugin in lowerCamelCase format (for example, `random` for `Random`).
+- `file`: The URL or path of the `.zip` archive containing the compiled `.so` file and YAML metadata. For file layout rules, refer to [Plugin Extension Overview](../../extension/overview.md).
+- `functions`: A string array specifying exported function names for multi-function plugins.
 
-## show plugins
+## Show Plugins
 
-The command is used for displaying all plugins defined in the server for a plugin type.
+Use this command to list all installed plugins for a specified plugin type:
 
 ```shell
 show plugins function
 ```
 
-Sample:
+Example output:
 
 ```shell
 # bin/kuiper show plugins function
@@ -79,15 +79,15 @@ function1
 function2
 ```
 
-## describe a plugin
+## Describe a Plugin
 
-The command is used to print out the detailed definition of a plugin.
+Use this command to display metadata for an installed plugin:
 
 ```shell
 describe plugin $plugin_type $plugin_name
 ```
 
-Sample:
+Example output:
 
 ```shell
 # bin/kuiper describe plugin source plugin1
@@ -97,43 +97,44 @@ Sample:
 }
 ```
 
-## drop a plugin
+## Drop a Plugin
 
-The command is used for drop the plugin.
+Use this command to delete an installed plugin:
 
 ```shell
 drop plugin $plugin_type $plugin_name -s $stop
 ```
 
-In which, `-s $stop` is an optional boolean parameter. If it is set to true, the rekuiper server will be stopped for the delete to take effect. The user will need to restart it manually.
-Sample:
+The `-s $stop` flag is an optional boolean. When set to `true`, the rekuiper server process stops so the file deletion takes effect. You must restart the server manually.
+
+Example command:
 
 ```shell
 # bin/kuiper drop plugin source random
 Plugin random is dropped.
 ```
 
-## commands to handle function plugin with multiple functions
+## Multi-Function Plugin Commands
 
-Unlike source and sink plugins, function plugin can export multiple functions at once. The exported names must be unique globally across all plugins. There will be a one to many mapping between function and its container plugin. Thus, we provide show udf(user defined function) command to query all user defined functions so that users can check the name duplication. And we provide udf describe command to find out the defined plugin of a function. We also provide the function register command to register the udf list for an auto loaded plugin.
+Function plugins can export multiple functions. Function names must be globally unique across all plugins.
 
-### show udfs
+### Show User-Defined Functions
 
-The command will list all user defined functions.
+Use this command to display all registered user-defined functions:
 
 ```shell
 show udfs
 ```
 
-### describe an udf
+### Describe a User-Defined Function
 
-The command will show the plugin which defines the udf.
+Use this command to identify the plugin that provides a specific user-defined function:
 
 ```shell
 describe udf $udf_name
 ```
 
-Sample output:
+Example output:
 
 ```json
 {
@@ -142,15 +143,15 @@ Sample output:
 }
 ```
 
-### register functions
+### Register Functions
 
-The command aims to register all exported functions in an auto loaded function plugin or when the exported functions are changed. If the plugin was loaded by create command or REST create API with functions property specified, then this is not needed. The register command will persist the functions list in the kv. Unless the exported functions are changed, users only need to register it once.
+Use this command to register exported function names for an auto-loaded plugin or when exported functions change:
 
 ```shell
 register plugin function $pluginName "{\"functions\":[\"$funcName\",\"$anotherFuncName\"]}"
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper register plugin function myPlugin "{\"functions\":[\"func1\",\"func2\",\"funcn\"]}"

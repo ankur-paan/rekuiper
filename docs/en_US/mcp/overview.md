@@ -2,22 +2,19 @@
 
 rekuiper includes a native Rust [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server (`rekuiper-mcp`). It connects AI coding assistants and autonomous agents directly to the rekuiper stream processing engine over standard JSON-RPC 2.0 stdio transport.
 
-With `rekuiper-mcp`, assistants like Cursor, Claude Desktop, Antigravity IDE, and Continue.dev can validate streaming SQL offline, simulate rule evaluations against sample telemetry, inspect topologies, and manage live streams without leaving the editor.
-
----
+Using `rekuiper-mcp`, assistants such as Antigravity IDE, Cursor, Claude Desktop, and Continue.dev can validate streaming SQL offline, simulate rule execution against mock event payloads, inspect execution DAGs, and manage live streams directly.
 
 ## Architecture
 
-`rekuiper-mcp` acts as a protocol bridge between your AI development environment and the rekuiper engine:
+`rekuiper-mcp` acts as a protocol bridge between AI development environments and the rekuiper engine:
 
 ![rekuiper-mcp Architecture](../public/diagrams/mcp_architecture.svg)
 
 ### Stdio Communication Discipline
-All JSON-RPC protocol frames are transmitted exclusively over standard input (`stdin`) and standard output (`stdout`). All diagnostic logging, connection notices, and errors are directed to standard error (`stderr`) to prevent protocol corruption.
 
----
+The server transmits JSON-RPC frames exclusively through standard input (`stdin`) and standard output (`stdout`). All diagnostic logging, connection notices, and error messages route to standard error (`stderr`) to prevent protocol frame corruption.
 
-## Client Setup & Configuration
+## Client Setup and Configuration
 
 Add `rekuiper-mcp` to your MCP client configuration file:
 
@@ -42,8 +39,8 @@ Add `rekuiper-mcp` to your MCP client configuration file:
 
 ### 2. Claude Desktop (`claude_desktop_config.json`)
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+Path on macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+Path on Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -61,7 +58,7 @@ Add `rekuiper-mcp` to your MCP client configuration file:
 
 ### 3. Windows via WSL
 
-If your rekuiper engine runs inside WSL2 or Docker:
+When the rekuiper daemon runs inside WSL2 or Docker:
 
 ```json
 {
@@ -78,88 +75,86 @@ If your rekuiper engine runs inside WSL2 or Docker:
 }
 ```
 
----
-
 ## Tool Capabilities
 
-`rekuiper-mcp` exposes 42 tools across stream analytics and engine management:
+`rekuiper-mcp` exposes 42 tools across six operational categories:
 
-### 1. SQL Intelligence & Offline Simulation
+### 1. SQL Intelligence and Offline Simulation
 
-These tools leverage the embedded `rekuiper-sql` parser and evaluator directly, requiring zero network calls to the running daemon:
+These tools use the embedded `rekuiper-sql` parser and evaluation engine in memory without network calls to the running daemon:
 
 | Tool | Purpose |
 | :--- | :--- |
-| `validate_sql` | Parses SQL AST, verifies keywords, and validates streaming DDL syntax offline. |
-| `test_sql_expression` | Executes SQL queries and projections against mock JSON event payloads in memory. |
+| `validate_sql` | Parses SQL abstract syntax trees, checks keywords, and validates streaming DDL syntax offline. |
+| `test_sql_expression` | Executes queries and projections against mock JSON event payloads in memory. |
 | `explain_sql` | Deconstructs a SQL query into sources, projections, joins, window clauses, and filters. |
 
-#### Example: Testing a Streaming Query Offline
-You can ask your AI assistant:
-> *"Test if `SELECT temperature * 1.8 + 32 AS temp_f FROM stream WHERE temperature > 20` works with payload `{"temperature": 25.0}`."*
+#### Example: Offline Simulation
 
-The assistant calls `test_sql_expression` and inspects the computed output in memory without publishing events to a broker.
+Ask your AI assistant:
 
-### 2. Stream & Table DDL Management
+> "Test if `SELECT temperature * 1.8 + 32 AS temp_f FROM stream WHERE temperature > 20` works with payload `{\"temperature\": 25.0}`."
 
-| Tool | Purpose |
-| :--- | :--- |
-| `list_streams` | List all active stream definitions in the catalog. |
-| `get_stream` | Inspect stream schema, data format (JSON/Protobuf), and datasource options. |
-| `create_stream` | Execute a `CREATE STREAM` statement. |
-| `delete_stream` | Drop an existing stream from the catalog. |
-| `push_stream_data` | Ingest test events directly into a stream endpoint. |
-| `list_tables` | List all dimension and lookup tables. |
-| `create_table` | Register an external lookup table (File, SQLite, Redis, Memory). |
-| `delete_table` | Drop a dimension table from the catalog. |
-| `push_table_data` | Insert or update records in a lookup table. |
+The assistant invokes `test_sql_expression` and evaluates the output in memory without sending data to an external broker.
 
-### 3. Rule Lifecycle & DAG Inspection
+### 2. Stream and Table DDL Management
 
 | Tool | Purpose |
 | :--- | :--- |
-| `list_rules` | Enumerate all deployed rules and their execution statuses. |
-| `get_rule` | Retrieve complete rule JSON (SQL query, sinks, QoS, checkpoint settings). |
-| `create_rule` | Deploy a new streaming rule topology. |
-| `update_rule` | Modify SQL logic or sinks for an active rule. |
-| `start_stop_rule` | Start, pause, or restart a rule. |
-| `bulk_start_stop_rules` | Batch start or stop multiple rules simultaneously. |
-| `get_rule_status` | Retrieve real-time throughput metrics, latency, and error counters. |
-| `get_rule_topo` | Retrieve DAG topological execution graph of source, operator, and sink nodes. |
-| `reset_rule_state` | Clear checkpointed offsets and state store for clean rule restarts. |
+| `list_streams` | Lists all active stream definitions in the catalog. |
+| `get_stream` | Inspects stream schema, serialization format (JSON or Protobuf), and data source options. |
+| `create_stream` | Executes a `CREATE STREAM` statement. |
+| `delete_stream` | Drops an existing stream definition from the catalog. |
+| `push_stream_data` | Ingests test events directly into a stream endpoint. |
+| `list_tables` | Lists all dimension and lookup tables. |
+| `create_table` | Registers an external lookup table (File, SQLite, Redis, or Memory). |
+| `delete_table` | Drops a dimension table from the catalog. |
+| `push_table_data` | Inserts or updates records in a lookup table. |
 
-### 4. Distributed Tracing & Diagnostics
-
-| Tool | Purpose |
-| :--- | :--- |
-| `start_rule_trace` | Begin an active tracing session for a running rule. |
-| `stop_rule_trace` | Conclude an active tracing session. |
-| `get_rule_traces` | List recorded trace sessions. |
-| `get_trace_details` | Inspect per-operator latency, event throughput, and intermediate payloads. |
-
-### 5. Connection Pooling & Extensibility
+### 3. Rule Lifecycle and DAG Inspection
 
 | Tool | Purpose |
 | :--- | :--- |
-| `list_connections` | List reusable connection resource definitions. |
-| `create_connection` | Register a shared connection (MQTT broker, Kafka cluster, SQL database). |
-| `delete_connection` | Remove a connection from the resource pool. |
-| `list_plugins` | Enumerate installed native and portable plugins. |
-| `list_javascript_udfs` | List registered JavaScript User Defined Functions. |
-| `create_javascript_udf` | Register a custom scalar JavaScript function for streaming SQL. |
-| `delete_javascript_udf` | Delete a JavaScript UDF. |
+| `list_rules` | Lists all deployed rules and their runtime execution states. |
+| `get_rule` | Retrieves complete rule JSON (query, sinks, QoS, and checkpoint settings). |
+| `create_rule` | Deploys a new streaming rule topology. |
+| `update_rule` | Modifies SQL logic or action sinks for an active rule. |
+| `start_stop_rule` | Starts, pauses, or restarts a rule. |
+| `bulk_start_stop_rules` | Starts or stops multiple rules simultaneously in batch. |
+| `get_rule_status` | Retrieves real-time throughput metrics, latency, and error counters. |
+| `get_rule_topo` | Retrieves the DAG execution graph of source, operator, and sink nodes. |
+| `reset_rule_state` | Clears checkpointed offsets and state stores for clean rule restarts. |
 
-### 6. Health & Universal REST Proxy
+### 4. Distributed Tracing and Diagnostics
 
 | Tool | Purpose |
 | :--- | :--- |
-| `get_engine_metrics` | Fetch engine uptime, memory usage, CPU load, and message throughput. |
-| `ping_engine` | Test daemon connectivity and measure ping latency. |
-| `export_data` | Export a full or filtered JSON backup of the catalog. |
-| `import_data` | Restore catalog configuration from a JSON backup. |
-| `execute_rekuiper_api` | Universal proxy executing any arbitrary HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`) against any rekuiper REST endpoint. |
+| `start_rule_trace` | Initiates an active tracing session for a running rule. |
+| `stop_rule_trace` | Concludes an active tracing session. |
+| `get_rule_traces` | Lists recorded trace sessions. |
+| `get_trace_details` | Inspects per-operator latency, event throughput, and intermediate payloads. |
 
----
+### 5. Connection Pooling and Extensibility
+
+| Tool | Purpose |
+| :--- | :--- |
+| `list_connections` | Lists reusable shared connection configurations. |
+| `create_connection` | Registers a shared connection (MQTT broker, Kafka cluster, SQL database). |
+| `delete_connection` | Removes a connection profile from the shared pool. |
+| `list_plugins` | Lists installed native and portable plugins. |
+| `list_javascript_udfs` | Lists registered JavaScript User-Defined Functions. |
+| `create_javascript_udf` | Registers a custom scalar JavaScript function for streaming SQL queries. |
+| `delete_javascript_udf` | Deletes a JavaScript UDF. |
+
+### 6. Health and Universal REST Proxy
+
+| Tool | Purpose |
+| :--- | :--- |
+| `get_engine_metrics` | Retrieves engine uptime, memory usage, CPU load, and message throughput. |
+| `ping_engine` | Tests daemon connectivity and measures ping roundtrip latency. |
+| `export_data` | Exports a full or filtered JSON backup of the catalog. |
+| `import_data` | Restores catalog configurations from a JSON backup. |
+| `execute_rekuiper_api` | Executes arbitrary HTTP requests (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`) against rekuiper REST endpoints. |
 
 ## Live Resources
 
@@ -177,30 +172,26 @@ The assistant calls `test_sql_expression` and inspects the computed output in me
 | `rekuiper://metadata/sinks` | Catalog of available sink connectors. |
 | `rekuiper://metadata/functions` | Catalog of built-in SQL mathematical, string, and window functions. |
 
----
-
 ## Specialized Prompts
 
 `rekuiper-mcp` provides pre-engineered prompt workflows that AI assistants can execute on demand:
 
-- `troubleshoot_rule`: Step-by-step diagnostic procedure for rules with high latency or dropped messages.
-- `optimize_stream_sql`: SQL analysis for temporal window performance, memory allocation, and predicate pushdown.
-- `generate_iot_alert_rule`: Creates end-to-end industrial monitoring rules with deadbanding, windowing, and alert actions.
+- `troubleshoot_rule`: Step-by-step diagnostic workflow for rules with high processing latency or dropped messages.
+- `optimize_stream_sql`: Analyzes SQL queries for temporal window efficiency, memory allocation, and predicate pushdown.
+- `generate_iot_alert_rule`: Generates complete industrial monitoring rules with deadbanding, windowing, and alert actions.
 - `create_end_to_end_pipeline`: Interactive pipeline generator linking streams, lookup tables, and multi-sink fanout.
-- `diagnose_data_drop`: Pinpoints discrepancies between source ingestion rates and sink output rates.
+- `diagnose_data_drop`: Identifies discrepancies between source ingestion rates and sink output rates.
 
----
+## Build from Source
 
-## Building from Source
-
-To compile the `rekuiper-mcp` binary:
+Compile the `rekuiper-mcp` binary using Cargo:
 
 ```shell
-# Debug build
+# Debug compilation
 cargo build -p rekuiper-mcp
 
 # Optimized release binary
 cargo build --release -p rekuiper-mcp
 ```
 
-The resulting binary will be located at `target/release/rekuiper-mcp`.
+The compiled binary is located at `target/release/rekuiper-mcp`.

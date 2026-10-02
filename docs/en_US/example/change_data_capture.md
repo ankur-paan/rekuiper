@@ -1,11 +1,10 @@
-# Notify when current changes
+# Notify When Current Changes
 
-In IoT scenarios, it is a very common scenario to trigger events when indicators change. This article will use current changes as an example to introduce rekuiper SQL rules.
+In IoT environments, monitoring metric variations to trigger events is a common requirement. This article uses electrical current measurements to demonstrate rekuiper SQL rules for event triggering.
 
 ## Background
 
-In this scenario, stream will continuously send the current current data in the form of a stream, as well as the
-timestamp to which the data belongs. In this document, we will use the sample input data as follows:
+In this scenario, an input stream transmits current measurements, timestamps, and device identifiers. The examples use this sample input data:
 
 ```json
 {
@@ -50,24 +49,19 @@ timestamp to which the data belongs. In this document, we will use the sample in
 }
 ```
 
-### Trigger When Changed Value Pass Threshold
+### Trigger When a Changed Value Crosses a Threshold
 
-In IoT applications, users often need to monitor whether sensor values exceed a certain threshold, thereby triggering
-alarms or other actions. Simply comparing the current value with the threshold may lead to continuous triggering of
-alarms. Therefore, what users might actually need is to trigger an alarm when the value changes from not exceeding the
-threshold to exceeding it, which implies a process of judging the change. Let's check how rekuiper can help to fulfill
-this requirement.
+In IoT applications, monitoring whether a value exceeds a threshold often triggers alarms. Simple comparison (`current > 300`) emits an alarm for every incoming event while the condition remains true. You can detect state transitions to trigger an alarm only when the value transitions from below the threshold to above the threshold.
 
-#### 1. Changed current value exceeds 300
+#### 1. Changed Current Value Exceeds 300 Across All Devices
 
 ```sql
-select current, ts
-from demo
-where current > 300 and lag(current) <= 300;
+SELECT current, ts
+FROM demo
+WHERE current > 300 AND lag(current) <= 300;
 ```
 
-This rule will record the last data of the current, and then compare it with the current data. Once the conditions are
-met, the event will be triggered.
+This rule compares the current value with the previous value from the stream. The rule triggers an event only when the value transitions across 300:
 
 ```json
 {"current":400,"ts":2}
@@ -81,18 +75,17 @@ met, the event will be triggered.
 }
 ```
 
-Notice that, this rule will check all deviceIds all together. If you need to separate devices, checkout the next
-scenario.
+This rule evaluates all devices together. To evaluate devices independently, partition by device identifier.
 
-#### 2. Changed current value of a deviceId exceeds 300
+#### 2. Changed Current Value Exceeds 300 Partitioned by Device
 
 ```sql
-select current, deviceId, ts
-from demo
-where current > 300 and lag(current) over (partition by deviceId) < 300;
+SELECT current, deviceId, ts
+FROM demo
+WHERE current > 300 AND lag(current) OVER (PARTITION BY deviceId) < 300;
 ```
 
-This rule will record lag value partition by device. Thus the output will be:
+This rule calculates the previous value independently for each `deviceId`. The rule produces this output:
 
 ```json
 {
@@ -107,19 +100,19 @@ This rule will record lag value partition by device. Thus the output will be:
 }
 ```
 
-Although the input stream mixes data from multiple devices, we can still calculate the lag value separately.
+Although the input stream contains data from multiple devices, the partition clause separates state evaluation by device.
 
-#### 3. Changed value of a specific device
+#### 3. Changed Value for a Specific Device
 
-If users only care about a specific device, we can use OVER when clause to only calculate state of concerned device.
+To monitor only a specific device, use the `OVER (WHEN ...)` clause:
 
 ```sql
-select current, deviceId, ts
-from demo
-where current > 300 and deviceId = 1 and lag(current) over (when deviceId = 1) < 300;
+SELECT current, deviceId, ts
+FROM demo
+WHERE current > 300 AND deviceId = 1 AND lag(current) OVER (WHEN deviceId = 1) < 300;
 ```
 
-The output will be:
+The rule produces this output:
 
 ```json
 {
@@ -129,20 +122,17 @@ The output will be:
 }
 ```
 
-In this rule, the where clause has condition `deviceId = 1` to specify the deviceId. And in the lag function, over when
-clause limits the lag value to only record when `deviceId=1`. This will only capture changes of device 1, regardless of
-other devices in the same stream.
+The `WHERE` clause filters out events from other devices. The `OVER (WHEN deviceId = 1)` clause records the previous value only when the condition matches.
 
-Besides `lag` function, other analytic functions like had_changed also supports the OVER clause to limit the state
-dimension. Check [analytic functions](../sqls/functions/analytic_functions.md) for detail.
+Other analytical functions such as `had_changed` also support the `OVER` clause. Refer to [Analytical Functions](../sqls/functions/analytic_functions.md) for details.
 
-### Trigger When Passing Threshold for Some Time
+### Trigger When a Value Exceeds a Threshold for a Time Duration
 
 ```sql
-select current from demo group by SLIDINGWINDOW(ss,0,10) over (when current > 200) having min(current) > 200;
+SELECT current FROM demo GROUP BY SLIDINGWINDOW(ss, 0, 10) OVER (WHEN current > 200) HAVING min(current) > 200;
 ```
 
-This rule will open a window when receiving current data above 200A. If the smallest data in the window is also greater than 200A, the requirements are met and the event is output.
+This rule evaluates a sliding window when incoming values exceed 200. If the minimum value in the 10-second window exceeds 200, the rule emits an event:
 
 ```json
 {"current":100,"ts":1}
@@ -158,5 +148,5 @@ This rule will open a window when receiving current data above 200A. If the smal
 {
   "current": 300,
   "ts": 11
-} Output Event
+}
 ```

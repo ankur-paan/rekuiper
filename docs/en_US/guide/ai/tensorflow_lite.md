@@ -1,99 +1,107 @@
-# Run TensorFlow Lite model with rekuiper function plugin
+# Execute TensorFlow Lite Models with the Function Plugin
 
-[LF Edge eKuiper](https://www.lfedge.org/projects/ekuiper/) is an edge lightweight IoT data analytics / streaming
-software which can be run at all kinds of resource constrained IoT devices.
+[TensorFlow Lite](https://www.tensorflow.org/lite/guide) provides tools to execute machine learning models on mobile, embedded, and IoT devices with low latency and small binary sizes.
 
-[TensorFlow Lite](https://www.tensorflow.org/lite/guide) is a set of tools to help developers run TensorFlow models on
-mobile, embedded, and IoT devices. It enables on-device machine learning inference with low latency and a small binary
-size.
+By integrating rekuiper and TensorFlow Lite, you can upload pre-trained models and invoke them in SQL rules to analyze data streams. This tutorial demonstrates how to load and execute pre-trained TensorFlow Lite models.
 
-By integrating eKuiper and TensorFlow Lite, users only need to upload a pre-built TensorFlow model, which can be used in rules to analyze data in the flow. In this tutorial, we will demonstrate how to quickly call a pre-trained TensorFlow model through ekuiper.
+## Prerequisites
 
-## Prerequisite
+### Download Models
 
-### Model Download
+To execute model inference, download a trained model file. Refer to the [TensorFlow Lite converter documentation](https://www.tensorflow.org/lite/convert) for conversion instructions.
 
-To run the TensorFlow Lite interpreter, we need a trained model. In this tutorial, we will not describe how to train and cover this model, you can see how to do it by looking at [tflite converter](https://www.tensorflow.org/lite/convert). We can either train a new model or select a trained model online.
-In this tutorial we will use the [sin](https://github.com/mattn/go-tflite/tree/master/_example/sin) model and [mobilenet_v1_1.0_224](https://tfhub.dev/tensorflow/lite-model/mobilenet_v1_1.0_224/1/default/1) demo.
+This tutorial uses two pre-trained models:
 
-### rekuiper Start up
+- The [sin model](https://github.com/mattn/go-tflite/tree/master/_example/sin).
+- The [MobileNet V1 model](https://tfhub.dev/tensorflow/lite-model/mobilenet_v1_1.0_224/1/default/1).
 
-This tutorial uses the eKuiper Docker image `lfedge/ekuiper:1.8.0-slim` and the eKuiper manager Docker image `emqx/ekuiper-manager:1.8.0` released by the team to demonstrate. Please refer to [here](https://hub.docker.com/r/emqx/ekuiper-manager) on how to use them.
+### Start rekuiper
 
-### TensorFlow Lite Plugin Download
+You can use the release Docker image `lfedge/ekuiper:1.8.0-slim` and the web manager image `emqx/ekuiper-manager:1.8.0`. Refer to the [eKuiper manager repository](https://hub.docker.com/r/emqx/ekuiper-manager) for setup instructions.
 
-TensorFlow Lite is provided as a precompiled plug-in, and users need to download and install it themselves.
+### Install the TensorFlow Lite Plugin
 
-![download plugin](../../resources/tflite_install.png)
-![symbol register](../../resources/tflite_register.png)
+Download and install the precompiled TensorFlow Lite plugin through the management console:
 
-## Sin Mode Set up
+![Download plugin](../../resources/tflite_install.png)
+![Register plugin symbol](../../resources/tflite_register.png)
 
-Please download the [sin model](https://github.com/mattn/go-tflite/blob/master/_example/sin/sin_model.tflite), which returns inference results based on input values. For example, if the user enters π/2, let us take 1.57, the calculation result of sin 1.57 is about 1.
-Users need to prepare MQTT Broker and create an MQTT source to send data to be processed to rekuiper rule and send inference results back to MQTT Broker.
+## Sine Model Setup
 
-### MQTT Source
+Download the [sin model file](https://github.com/mattn/go-tflite/blob/master/_example/sin/sin_model.tflite). The model computes the sine value of the input number. For example, for input `1.57` (approximately $\pi / 2$), the result is approximately `1.0`.
 
-Note that the model input data format must be a byte array, and json does not support the byte type, so the data type needs to be specified in the data source, and the source will preprocess it into a byte array.
-![stream set up](../../resources/stream_byte.png)
+Configure an MQTT broker and an MQTT stream source to transmit input data and receive inference results.
 
-### Model Upload
+### Configure the MQTT Source
 
-Users can upload model files to rekuiper through rekuiper manager. As shown below.
-![model upload](../../resources/sin_upload.png)
+The model requires a byte array as input. Define the stream schema so the source formats data into binary bytes:
 
-### Call Model in TensorFlow Lite
+![Configure stream schema](../../resources/stream_byte.png)
 
-After users install the TensorFlow Lite plugin, they can call the model in SQL as normal built-in functions. The first parameter is the model name, and the second parameter is the data to be processed.
-![call model](../../resources/tflite_sin_rule.png)
+### Upload the Model
 
-### Validation results
+Upload the model file through the management console:
 
-The result is shown in the figure below, when the input is 1.57, the derivation result is about 1.
-![result check](../../resources/mqttx_sin.png)
+![Upload sine model](../../resources/sin_upload.png)
 
-## MobileNet V1 Model Set up
+### Invoke the Model in SQL
 
-Please download the [MobileNet V1 model](https://tfhub.dev/tensorflow/lite-model/mobilenet_v1_1.0_224/1/default/1), this model inputs image information of 224 * 224 pixels, and returns a size of 1001 float array.
-In order to obtain image information, we use another precompiled video plug-in to regularly extract images from the live stream as the input of the rules, and send the inference results to the MQTT Broker.
+After installing the plugin, invoke the model in SQL queries. Pass the model name as the first argument and the input field as the second argument:
 
-### video source install and configure
+![Configure sine model rule](../../resources/tflite_sin_rule.png)
 
-The video source periodically pulls data from the live source and extracts image data from it. [This link](https://gcwbcdks.v.kcdnvip.com/gcwbcd/cdrmipanda_1/index.m3u8) can be used as the live broadcast source. The figure below shows the video plug-in download and configuration respectively.
+### Verify Results
 
-![video install](../../resources/video_install.png)
-![video config](../../resources/video_config.png)
+When the input value is `1.57`, the rule outputs a value close to `1.0`:
 
-*Note*: The source data format part should be selected as binary type.
+![Verify sine calculation output](../../resources/mqttx_sin.png)
 
-### image function plugin install
+## MobileNet V1 Model Setup
 
-Since the precompiled model requires 224 * 224 pixel image data, another precompiled plugin image needs to be installed to resize the image.
+Download the [MobileNet V1 model file](https://tfhub.dev/tensorflow/lite-model/mobilenet_v1_1.0_224/1/default/1). The model accepts an input image of 224x224 pixels and returns an array of 1001 floating-point confidence scores.
 
-![image install](../../resources/image_install.png)
-![resize register](../../resources/image_register.png)
+Use the video source plugin to capture frames from a live video stream, and publish inference outputs to an MQTT broker.
 
-### Model Upload
+### Install and Configure the Video Source
 
-Users can upload model files to rekuiper through rekuiper manager. As shown below.
-![model upload](../../resources/mobilenet_upload.png)
+The video source pulls data from a live video feed and extracts image frames. Use `https://gcwbcdks.v.kcdnvip.com/gcwbcd/cdrmipanda_1/index.m3u8` as the live broadcast URL:
 
-### Call Model in TensorFlow Lite
+![Download video plugin](../../resources/video_install.png)
+![Configure video source parameters](../../resources/video_config.png)
 
-After users install the TensorFlow Lite plugin, they can call the model in SQL as normal built-in functions. The first parameter is the model name, and the second parameter is the return result of calling the resize function. Where `self` is the key corresponding to the binary data.
-![call model](../../resources/tflite_resize_rule.png)
+> [!NOTE]
+> Select `binary` as the stream format.
 
-### Validation results
+### Install the Image Function Plugin
 
-The result is shown in the figure below. After the image data is inferred, the returned result is a byte array (encoded by base64).
-![check result](../../resources/mqttx_mobilenet.png)
+The model requires images sized to 224x224 pixels. Install the `image` function plugin to resize incoming video frames:
 
-The following is the byte array obtained after base64 decoding, with a total of 1001 elements. Its significance needs to be interpreted in conjunction with the model being tested.
-In this example, the test model is an image recognition model, which supports a total of 1001 item classifications, so the 1001 elements in the derivation result correspond to the 1001 items in sequence. For example, the first array element matches the first item, and the value of the element represents the matching degree, and the larger the value, the higher the matching degree.
-A list of items is available [here](https://github.com/lf-edge/ekuiper/blob/master/extensions/functions/labelImage/etc/labels.txt).
-![result](../../resources/tflite_image_result.png)
+![Download image plugin](../../resources/image_install.png)
+![Register resize function](../../resources/image_register.png)
 
-Users can write code to filter out the item tags with the highest matching degree, the following is the sample code
+### Upload the Model
+
+Upload the model file through the management console:
+
+![Upload MobileNet model](../../resources/mobilenet_upload.png)
+
+### Invoke the Model in SQL
+
+Invoke the model in your query, passing the resized image data as the input parameter:
+
+![Configure MobileNet rule](../../resources/tflite_resize_rule.png)
+
+### Verify Results
+
+The model outputs a Base64-encoded byte array containing 1001 classification elements:
+
+![Verify MobileNet output](../../resources/mqttx_mobilenet.png)
+
+Each element corresponds to an item in the [MobileNet classification labels list](https://github.com/lf-edge/ekuiper/blob/master/extensions/functions/labelImage/etc/labels.txt). Higher values indicate higher prediction confidence:
+
+![View raw inference scores](../../resources/tflite_image_result.png)
+
+The following Go code demonstrates how to parse output scores and select the label with the highest confidence:
 
 ```go
 package demo
@@ -128,7 +136,7 @@ func bestMatchLabel(keyValue map[string]interface{}) (string, bool) {
     resultArray := keyValue["tfLite"].([]interface{})
     outputArray := resultArray[0].([]byte)
     outputSize := len(outputArray)
-  
+
     var results []result
     for i := 0; i < outputSize; i++ {
         score := float64(outputArray[i]) / 255.0
@@ -140,16 +148,14 @@ func bestMatchLabel(keyValue map[string]interface{}) (string, bool) {
     sort.Slice(results, func(i, j int) bool {
         return results[i].score > results[j].score
     })
-    // output is the biggest score labelImage
     if len(results) > 0 {
         return labels[results[0].index], true
     } else {
         return "", true
     }
-
 }
 ```
 
-## in conclusion
+## Summary
 
-In this tutorial, we use the pre-compiled TensorFlow Lite plugin to directly call the pre-trained TensorFlow Lite model in ekuiper, which avoids writing code and simplifies the inference steps.
+The precompiled TensorFlow Lite plugin enables direct model execution in streaming queries without writing custom inference code.

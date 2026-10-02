@@ -1,49 +1,45 @@
-# Data types
+# Data Types
 
-In rekuiper, each column or an expression has a related data type. A data type describes (and constrains) the set of values that a column of that type can hold or an expression of that type can produce.
+In rekuiper, every column and expression has an associated data type that restricts valid values and available operations.
 
-## Supported data types
+## Supported Data Types
 
-Below is the list of data types supported.
+rekuiper supports the following data types:
 
-| # | Data type | Description                                                                                                                |
-|---|-----------|----------------------------------------------------------------------------------------------------------------------------|
-| 1 | bigint    | The int type.                                                                                                              |
-| 2 | float     | The float type.                                                                                                            |
-| 3 | string    | Text values, comprised of Unicode characters.                                                                              |
-| 4 | datetime  | datetime type.                                                                                                             |
-| 5 | boolean   | The boolean type, the value could be `true` or `false`.                                                                    |
-| 6 | bytea     | A sequence of bytes to store binary data. If the stream format is "JSON", the bytea field must be a base64 encoded string. |
-| 7 | array     | The array type, can be any types from simple data or struct type.                                                          |
-| 8 | struct    | The complex type. Set of name/value pairs. Values must be of supported data type.                                          |
+| Number | Data Type | Description |
+|---|---|---|
+| 1 | `bigint` | 64-bit signed integer. |
+| 2 | `float` | 64-bit floating-point number. |
+| 3 | `string` | Unicode text characters. |
+| 4 | `datetime` | Date and time timestamp value. |
+| 5 | `boolean` | Boolean value (`true` or `false`). |
+| 6 | `bytea` | Binary byte array. In JSON streams, represent `bytea` fields as Base64-encoded strings. |
+| 7 | `array` | Ordered list of scalar elements or nested struct values. |
+| 8 | `struct` | Complex object consisting of named key-value attributes. |
 
-## Compatibility of comparison and calculation
+## Compatibility for Comparison and Calculation
 
-There may be binary operations in each sql clause. In this
-example, `Select temperature * 2 from demo where temperature > 20`, a calculation operation is used in select clause and
-a comparison operation is used in the where clause. In the binary operations, if incompatible data types are used, a
-runtime error will happen and send to the sinks.
+Binary operations evaluate expressions in `SELECT` and `WHERE` clauses. If an expression combines incompatible operand types, rekuiper generates a runtime error and delivers the error message to configured sinks.
 
-Array and struct are not supported in any binary operations. The compatibility of other data types is listed in below
-table. Whereas, the row header is the left operand data type and the column header is the right operand data. The value
-is the compatibility in which Y stands for yes and N stands for no.
+Arrays and structs cannot participate directly in arithmetic or comparison operations. The following compatibility matrix specifies permitted operations between scalar types:
 
-| #        | bigint | float | string                    | datetime | boolean |
-|----------|--------|-------|---------------------------|----------|---------|
-| bigint   | Y      | Y     | N                         | N        | N       |
-| float    | Y      | Y     | N                         | N        | N       |
-| string   | N      | N     | Y                         | N        | N       |
-| datetime | Y      | Y     | Y, if in the valid format | Y        | N       |
-| boolean  | N      | N     | N                         | N        | Y       |
+| Left Operand | `bigint` | `float` | `string` | `datetime` | `boolean` |
+|---|---|---|---|---|---|
+| `bigint` | Yes | Yes | No | No | No |
+| `float` | Yes | Yes | No | No | No |
+| `string` | No | No | Yes | No | No |
+| `datetime` | Yes | Yes | Yes (if formatted correctly) | Yes | No |
+| `boolean` | No | No | No | No | Yes |
 
- The default format for datetime string is `"2006-01-02T15:04:05.000Z07:00"`
+The default parsing format for datetime strings is `"2006-01-02T15:04:05.000Z07:00"`.
 
- For `nil` value, we follow the rules:
+### Null Value Handling
 
-  1. Compare with nil always return false
-  2. Calculate with nil always return nil
+When an expression encounters a `nil` (null) operand:
 
-## Type conversions
+1. Any comparison against `nil` evaluates to `false`.
+2. Any arithmetic calculation with `nil` returns `nil`.
 
-There is a built-in function `cast(col, targetType)` to explicitly convert from one date type to another in runtime.
-Please refer to [cast](./functions/transform_functions.md) for detail.
+## Type Conversions
+
+Use the built-in `cast(col, targetType)` function to convert values between data types at runtime. Refer to [transformation functions](./functions/transform_functions.md) for usage details.

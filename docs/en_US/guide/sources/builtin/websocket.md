@@ -1,16 +1,21 @@
-# Websocket Source Connector
+# WebSocket Source Connector
 
-<span style="background:green;color:white;">stream source</span>
+<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 
-rekuiper has built-in support for Websocket data sources. Through the Websocket data source connector, rekuiper can obtain data through websocket connection.
+The WebSocket source connector ingests real-time events over WebSocket network connections.
 
-When rekuiper uses the websocket data source, rekuiper will get the data from the websocket TextMessage and parse it in the form of json object data.
+The connector reads incoming WebSocket `TextMessage` frames and parses payloads as JSON objects.
 
-## rekuiper as websocket client
+The connector operates in two modes:
 
-rekuiper can serve as a websocket client, initiate a websocket connection to the remote websocket server, and receive data on the websocket connection as a message source.
+1. **Client Mode**: rekuiper connects to an external WebSocket server.
+2. **Server Mode**: rekuiper hosts a WebSocket endpoint and accepts incoming client connections.
 
-When you need rekuiper as a websocket client, you need to specify the server address of the websocket connection in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
+## Mode 1: rekuiper as a WebSocket Client
+
+In client mode, rekuiper initiates a WebSocket connection to a remote server and receives streaming data.
+
+Configure the server address in `etc/sources/websocket.yaml`:
 
 ```yaml
 default:
@@ -18,105 +23,78 @@ default:
   scheme: ws
 ```
 
+Define a stream referencing the configuration and target path:
+
 ```sql
-CREATE STREAM demo'() with(CONF_KEY="default", datasource="/api/data", type="websocket")'
+CREATE STREAM demo () WITH (CONF_KEY = "default", DATASOURCE = "/api/data", TYPE = "websocket");
 ```
 
-At this time, rekuiper will act as a websocket client, establish a websocket connection to 127.0.0.1:8080/api/data, and use this connection to receive data as the message source.
+rekuiper connects to `ws://127.0.0.1:8080/api/data` and consumes incoming messages.
 
-You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
+Verify server reachability using the [Connectivity Check API](../../../api/restapi/connection.md#connectivity-check).
 
-## rekuiper as websocket server
+## Mode 2: rekuiper as a WebSocket Server
 
-rekuiper can serve as a websocket server. At this time, the remote websocket client can actively initiate a websocket connection to rekuiper, and rekuiper will receive messages on the websocket connection as the message source.
+In server mode, rekuiper hosts a WebSocket endpoint. External clients connect to rekuiper and push messages.
 
-When you need rekuiper as a websocket server, you need to specify that the websocket server address is empty in the corresponding confKey, and declare the corresponding url in the dataSource of the stream, as follows:
+To enable server mode, set `addr: ""` in `etc/sources/websocket.yaml`:
 
 ```yaml
 default:
   addr: ""
 ```
 
+Define the stream with the listener path:
+
 ```sql
-CREATE STREAM demo'() with(CONF_KEY="default", datasource="/api/data", type="websocket")'
+CREATE STREAM demo () WITH (CONF_KEY = "default", DATASOURCE = "/api/data", TYPE = "websocket");
 ```
 
-At this time, rekuiper will serve as the websocket server, use itself as the host, wait for the websocket connection to be established at the URL of /api/data, and use this connection to receive data as the message source.
+rekuiper listens on `/api/data` and receives data pushed by external WebSocket clients.
 
-### Server Configuration
+### Server Listener Configuration
 
-To set up rekuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
+Configure listener binding and TLS settings under `source` in `etc/sources/websocket.yaml`:
 
 ```yaml
 source:
-  ## Configurations for the global websocket server for websocket source
-  # HTTP data service ip
   httpServerIp: 0.0.0.0
-  # HTTP data service port
   httpServerPort: 10081
   # httpServerTls:
   #    certfile: /var/https-server.crt
   #    keyfile: /var/https-server.key
 ```
 
-Users can specify the following properties:
+- `httpServerIp`: Network interface address bound by the WebSocket server. Default is `0.0.0.0`.
+- `httpServerPort`: Port number bound by the WebSocket server. Default is `10081`.
+- `httpServerTls`: TLS certificate and key paths for secure WebSocket (`wss://`) connections.
 
-- `httpServerIp`: IP to bind the HTTP data server.
-- `httpServerPort`: Port to bind the HTTP data server.
-- `httpServerTls`: Configuration of the HTTP TLS.
-
-The global server initializes when any rule requiring an Websocket source is activated. It terminates once all associated rules are closed.
+The server starts when any rule referencing the WebSocket source starts. The server stops when all referencing rules terminate.
 
 ## Create a Stream Source
 
-Once you've set up your streams with their respective configurations, you can integrate them with rekuiper rules to process and act on the incoming data.
+The WebSocket connector functions as a [stream source](../../streams/overview.md).
 
-::: tip
+### Create Stream via REST API
 
-Websocket connector can function as a [stream source](../../streams/overview.md). This section illustrates the integration using the Websocket Source connector as a stream source example.
+Send a `POST` request to `/streams`:
 
-:::
-
-You can define the Websocket source as the data source either by REST API or CLI tool.
-
-### Use REST API
-
-The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
-
-Example:
-
-```sql
-CREATE STREAM websocketDemo() WITH (FORMAT="json", TYPE="websocket")
+```json
+{
+  "sql": "CREATE STREAM websocketDemo () WITH (DATASOURCE = \"/api/data\", FORMAT = \"json\", TYPE = \"websocket\")"
+}
 ```
 
-**Create with Custom Configuration**
+With default server settings, the connector listens on `ws://localhost:10081/api/data`.
 
-You can use the `endpoint` property corresponds to the `datasource` property in the stream creation statement.
+For REST API specifications, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
 
-Example
+### Create Stream via CLI
 
-```sql
-CREATE STREAM websocketDemo() WITH (DATASOURCE="/api/data", FORMAT="json", TYPE="websocket")
+Run the `kuiper create stream` command:
+
+```bash
+bin/kuiper create stream demo '() WITH (FORMAT = "json", DATASOURCE = "/api/data", TYPE = "websocket")'
 ```
 
-In this example, we bind the source to `/api/data` endpoint. Thus, with the default server configuration, it will listen on `http://localhost:10081/api/data`.
-
-More details can be found at [Streams Management with REST API](../../../api/restapi/streams.md).
-
-### Use CLI
-
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
-
-1. Navigate to the rekuiper binary directory:
-
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to create a rule, specifying the Websocket connector as its source, for example:
-
-   ```bash
-   bin/kuiper CREATE STREAM demo'() with(format="json", datasource="/api/data", type="websocket")'
-   ```
-  
-More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).
+For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).

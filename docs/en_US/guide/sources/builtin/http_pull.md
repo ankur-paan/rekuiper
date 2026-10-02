@@ -2,296 +2,211 @@
 
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
+<span style="background:green;color:white;padding:1px;margin:2px">lookup table source</span>
 
-The HTTP Pull source connector allows rekuiper to retrieve data from external HTTP servers, providing a flexible way to pull data on demand or based on a schedule. This section focuses on how to configure and use the HTTP Pull as a source connector.
+The HTTP Pull source connector retrieves data periodically from external HTTP servers.
 
-The HTTP Pull source connector is designed to fetch data by making HTTP requests to external servers. It can be set to pull data based on a specified interval or triggered by certain conditions.
+The connector supports fixed polling intervals, conditional fetching, dynamic URL templating, and OAuth 2.0 token management.
 
-## Configurations
+## Configuration Overview
 
-The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
+Configure the connector using [environment variables](../../../configuration/configuration.md#environment-variable-syntax), the [REST API](../../../api/restapi/configKey.md), or the configuration file.
 
-rekuiper's default HTTP Pull source configuration resides at `$rekuiper/etc/sources/http_pull.yaml`. This configuration file provides a set of default settings, which you can override as needed.
+The configuration file resides at `$rekuiper/etc/sources/http_pull.yaml`. Properties defined in the `default` section provide global default values. Custom sections override default values.
 
-See below for a demo configuration with the global configuration and a customized `application_conf` section.
+Example configuration file:
 
 ```yaml
-#Global httppull configurations
 default:
-  # url of the request server address
   url: http://localhost
-  # post, get, put, delete
   method: post
-  # The interval between the requests, time unit is ms
   interval: 10000
-  # The timeout for http request, time unit is ms
   timeout: 5000
-  # If it's set to true, then will compare with last result; If response of two requests are the same, then will skip sending out the result.
-  # The possible setting could be: true/false
   incremental: false
-  # The body of request, such as '{"data": "data", "method": 1}'
   body: '{}'
-  # Body type, none|text|json|html|xml|javascript|form
   bodyType: json
-  # HTTP headers required for the request
   insecureSkipVerify: true
   headers:
     Accept: application/json
-  # how to check the response status, by status code or by body
   states:
-  #   state_key: state_value  
   responseType: code
-  #  # Get token
-#  oAuth:
-#    # Access token fetch method
-#    access:
-#      # Url to fetch access token, always use POST method
-#      url: https://127.0.0.1/api/token
-#      # Body of the request
-#      body: '{"username": "admin","password": "123456"}'
-#      # Expire time of the token in string, time unit is second, allow template
-#      expire: '3600'
-#    # Refresh token fetch method
-#      # Request header
-#      headers:
-#        Accept: application/json
-#    refresh:
-#      # Url to refresh the token, always use POST method
-#      url: https://127.0.0.1/api/refresh
-#      # HTTP headers required for the request, allow template from the access token
-#      headers:
-#        identityId: '{{.data.identityId}}'
-#        token: '{{.data.token}}'
-#      # Request body
-#      body: ''
 
-#Override the global configurations
-application_conf: #Conf_key
+application_conf:
   incremental: true
   url: http://localhost:9090/pull
 ```
 
 ## Global Configurations
 
-Use can specify the global HTTP pull settings here. The configuration items specified in `default` section will be taken as default settings for all HTTP connections.
+Properties in the `default` section apply to all HTTP connections unless explicitly overridden.
 
-### **HTTP Request Configurations**
+### HTTP Request Parameters
 
-- `url`: The URL where to get the result.
-- `method`: HTTP method, it could be post, get, put & delete.
-- `interval`: The interval between the requests, time unit is ms.
-- `timeout`: The timeout for http request, time unit is ms.
-- `body`: The body of request, such as `'{"data": "data", "method": 1}'`
-- `bodyType`: Body type, it could be none|text|json|html|xml|javascript|format.
-- `headers`: The HTTP request headers that you want to send along with the HTTP request.
-- `states`: The status of httppull, can update the url by rendering.
-- `responseType`: Define how to parse the HTTP response. There are two types defined:
-  - `code`: To check the response status from the HTTP status code.
-  - `body`: To check the response status from the response body. The body must be "application/json" content type and contains a "code" field.
+- `url`: Target endpoint URL.
+- `method`: HTTP method: `post`, `get`, `put`, or `delete`.
+- `interval`: Polling interval in milliseconds.
+- `timeout`: Request timeout in milliseconds.
+- `body`: Request payload string (for example, `'{"data": "telemetry"}'`).
+- `bodyType`: Payload content format: `none`, `text`, `json`, `html`, `xml`, `javascript`, or `form`.
+- `headers`: Map of HTTP headers sent with the request.
+- `states`: Key-value pairs rendered into URL template parameters.
+- `responseType`: Response validation method:
+  - `code`: Validates success based on the HTTP response status code.
+  - `body`: Validates success based on a `code` field inside a JSON response body.
 
-### Security Configurations
+### TLS and Security Parameters
 
-#### Certificate Paths
+- `certificationPath`: Path to client certificate file in PEM format.
+- `privateKeyPath`: Path to client private key file in PEM format.
+- `rootCaPath`: Path to Root CA certificate file in PEM format.
+- `certficationRaw`: Base64-encoded client certificate string.
+- `privateKeyRaw`: Base64-encoded client private key string.
+- `rootCARaw`: Base64-encoded Root CA certificate string.
+- `insecureSkipVerify`: Boolean. Set to `true` to skip certificate validation.
 
-- `certificationPath`:  Specifies the path to the certificate, example: `d3807d9fa5-certificate.pem`. This can be an absolute or relative path. The base path for a relative address depends on where the `kuiperd` command is executed.
-  - If executed as `bin/kuiperd` from `/var/kuiper`, the base is `/var/kuiper`.
-  - If executed as `./kuiperd` from `/var/kuiper/bin`, the base is `/var/kuiper/bin`.
+### OAuth 2.0 Authentication
 
-- `privateKeyPath`: Path to the private key, example `d3807d9fa5-private.pem.key`. Can be an absolute or a relative path. For relative paths, refer to the behavior described under `certificationPath`.
-- `rootCaPath`: Path to the root CA. Can be an absolute or a relative path.
-- `certficationRaw`: base64 encoded original text of Cert, use `certificationPath` first if both defined.
-- `privateKeyRaw`: base64 encoded original text of Key, use `privateKeyPath` first if both defined.
-- `rootCARaw`: base64 encoded original text of CA, use `rootCaPath` first if both defined.
-- `insecureSkipVerify`: Control if to skip the certification verification. If set to `true`, then skip certification verification; Otherwise, verify the certification.
-
-#### OAuth Authentication
-
-OAuth 2.0 allows an API client limited access to user data on a web server. The most common OAuth flow is the authorization code, prevalent in server-side and mobile web apps. In this flow, users authenticate with a web app using their account, receiving an authentication code. This code allows the app to request an access token, which may be refreshed after expiration.
-
-The following configurations are designed under the assumption that the authentication code is already known. It allows the user to define the token retrieval process.
-
-`OAuth`: Defines the authentication flow that follows OAuth standards. For other authentication methods like API keys, the key can be set directly in the header, eliminating the need for this configuration.
-
-- `access`
-
-  - `url`: The url to fetch access token, will always use POST method.
-
-  - `body`: The request body to fetch access token. Usually, the authorization code is needed here.
-
-  - `expire`: Expire time of the token, time unit is second, allow to use template, so it must be a string.
-
-- `refresh`
-
-  - `url`: The url to refresh the token, always use POST method.
-
-  - `headers`: The request header to refresh the token. Usually put the tokens here for authorization.
-
-  - `body`: The request body to refresh the token. May not need when using header to pass the refresh token.
-
-### Data Processing Configurations
-
-#### Incremental Data Processing
-
-`incremental`: If it's set to `true`, then will compare with the last result; If the responses of two requests are the same, then will skip sending out the result.
-
-#### State Update
-
-State updates are dynamically updated at runtime. When creating the http_pull source, you can specify the initial state. The state can currently be rendered in the HTTP request URL.  The format for these properties is based on the [data template](../../sinks/data_template.md) syntax.
-
-State can also be updated based on the results of the http_pull result. When QOS is set to 1, the state will be periodically flushed to disk and loaded after the next boot.
-
-For the following http_pull source configuration
+Configure OAuth 2.0 token acquisition and refresh under the `oAuth` property:
 
 ```yaml
-
-default:
-# URL to request the server address
-
-url: http://localhost/path?key1={{.key1}}&key2={{.key2}}
-# post, get, put, delete
-
-method: get
-# Interval between requests, in milliseconds
-
-interval: 10000
-# HTTP request timeout, in milliseconds
-
-timeout: 5000
-# Request body, for example, '{"data": "data", "method": 1}'
-
-body: '{}'
-# Body type, none, text, json, html, xml, javascript, form
-
-bodyType: json
-# Required HTTP headers for the request
-
-headers:
-
-Accept: application/json
-# How to check the response status, either by status code or body
-
-states:
-
-key1: value1
-
-key2: value2
-# Parameters used for state rendering in the URL
-
-responseType: code
+oAuth:
+  access:
+    url: https://127.0.0.1/api/token
+    body: '{"username": "admin", "password": "password"}'
+    expire: "3600"
+  refresh:
+    url: https://127.0.0.1/api/refresh
+    headers:
+      Accept: application/json
+      identityId: '{{.data.identityId}}'
+      token: '{{.data.token}}'
+    body: ''
 ```
 
-In this When the http_pull source sends its first request, it will send the following request:
+- `access.url`: Endpoint URL for initial token retrieval using HTTP POST.
+- `access.body`: Request payload containing user credentials or authorization codes.
+- `access.expire`: Token lifetime in seconds. Supports template expressions.
+- `refresh.url`: Endpoint URL for token refresh using HTTP POST.
+- `refresh.headers`: Headers required for token refresh. Supports template values extracted from initial responses.
+- `refresh.body`: Payload required for token refresh.
+
+### Incremental Fetching and State Tracking
+
+#### Incremental Processing
+
+Set `incremental: true` to prevent duplicate processing. The engine compares each response against the previous response. If values are identical, the connector discards the result.
+
+#### Dynamic State Tracking
+
+Configure the `states` property to store runtime values between polling cycles. The engine renders state values into URL parameters using [Data Template](../../sinks/data_template.md) syntax.
+
+When `qos: 1` is configured, the engine flushes state to disk during checkpoints and restores state upon restart.
+
+Configuration example:
+
+```yaml
+default:
+  url: http://localhost/path?key1={{.key1}}&key2={{.key2}}
+  method: get
+  interval: 10000
+  timeout: 5000
+  body: '{}'
+  bodyType: json
+  headers:
+    Accept: application/json
+  states:
+    key1: value1
+    key2: value2
+  responseType: code
+```
+
+The first request fetches:
 
 ```txt
 GET http://localhost/path?key1=value1&key2=value2
 ```
 
-When the response received is as follows:
+If the response returns:
 
 ```json
 {
-"key1": "value3",
-"key2": "value4"
+  "key1": "value3",
+  "key2": "value4"
 }
 ```
 
-The http_pull source will record the corresponding key1/key2 status and send the following request the next time:
+The next request uses the updated values:
 
 ```txt
 GET http://localhost/path?key1=value3&key2=value4
 ```
 
-#### Dynamic Properties
+### Dynamic Properties
 
-Dynamic properties adapt in real time and can be employed to customize the HTTP request's URL, body, and header. The format for these properties is based on the [data template](../../sinks/data_template.md) syntax.
+Dynamic properties resolve values at runtime:
 
-Key dynamic properties include:
-
-- `PullTime`: The timestamp of the current pull time in int64 format.
-- `LastPullTime`: The timestamp of the last pull time in int64 format.
-- Properties from oAuth: The properties from the oAuth response body. For example, if access request return json
-  body `{"token": "xxxxxx"}`. Then you can use <span v-pre>`{{.token}}`</span> to get the token.
-
-For HTTP services that allow time-based filtering, `PullTime` and `LastPullTime` can be harnessed for incremental data pulls. Depending on how the service accepts time parameters:
+- `PullTime`: Unix timestamp of the current poll execution in milliseconds (`int64`).
+- `LastPullTime`: Unix timestamp of the previous poll execution in milliseconds (`int64`).
+- OAuth response fields: Access tokens or session IDs returned by authentication endpoints.
 
 ::: v-pre
+Use these variables to query time-windowed external APIs:
 
-- From URL parameters: `http://localhost:9090/pull?start={{.LastPullTime}}&end={{.PullTime}}`.
-- From body parameters: `{"start": {{.LastPullTime}}, "end": {{.PullTime}}`.
-
+- In URL parameters: `http://localhost:9090/pull?start={{.LastPullTime}}&end={{.PullTime}}`
+- In request payloads: `{"start": {{.LastPullTime}}, "end": {{.PullTime}}}`
 :::
 
 ## Custom Configurations
 
-For scenarios where you need to customize certain connection parameters, rekuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
-
-Here's how to set up a custom configuration:
+Define named configuration blocks in `http_pull.yaml`:
 
 ```yaml
-#Override the global configurations
-application_conf: #Conf_key
+application_conf:
   incremental: true
   url: http://localhost:9090/pull
 ```
 
-In the above example, a custom configuration named `application_conf` is created. To utilize this configuration when creating a stream, use the `CONF_KEY` option and specify the configuration name. More details can be found at [Stream Statements](../../../sqls/streams.md)).
+Reference the configuration with `CONF_KEY="application_conf"` in the stream definition:
 
-**Usage Example**
-
-```json
-demo (
-    ...
-  ) WITH (DATASOURCE="test/", FORMAT="JSON", TYPE="httppull", KEY="USERID", CONF_KEY="application_conf");
+```sql
+CREATE STREAM demo () WITH (
+  DATASOURCE = "test/",
+  FORMAT = "JSON",
+  TYPE = "httppull",
+  CONF_KEY = "application_conf"
+);
 ```
-
-Parameters defined in a custom configuration will override the corresponding parameters in the `default` configuration. Make sure to set values carefully to ensure the desired behavior.
 
 ## Create a Stream Source
 
-Once the connector is defined, the next step is integrating it into rekuiper rules for data processing.
+The HTTP Pull connector operates as a [stream source](../../streams/overview.md) or as a [scan table](../../tables/scan.md).
 
-::: tip
+### Create Stream via REST API
 
-HTTP Pull Source connector can function as a [stream source](../../streams/overview.md) or a [scan table](../../tables/scan.md) source. This section illustrates the integration using the HTTP Pull Source connector as a stream source example.
+```http
+POST http://{{host}}/streams
+Content-Type: application/json
 
-:::
-
-You can define the HTTP Pull source as the data source either by REST API or CLI tool.
-
-### Use REST API
-
-The REST API offers a programmatic way to interact with rekuiper, making it suitable for those who aim to automate tasks or integrate rekuiper operations into other systems.
-
-Example
-
-```sql
-{"sql":"create stream http_stream () WITH (FORMAT="json", TYPE="http_pull"}
+{
+  "sql": "CREATE STREAM http_stream () WITH (FORMAT = \"json\", TYPE = \"httppull\");"
+}
 ```
 
-For a comprehensive guide, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
+### Create Stream via CLI
 
-### Use CLI
+```bash
+bin/kuiper create stream http_stream '() WITH (FORMAT = "json", TYPE = "httppull")'
+```
 
-If you favor a more hands-on approach, the Command Line Interface (CLI) offers direct access to rekuiper's functionalities.
+## Create a Lookup Table Source
 
-1. Navigate to the rekuiper binary directory:
+HTTP Pull supports lookup tables. The engine executes on-demand HTTP requests when a rule joins a stream with the table:
 
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to create a rule, specifying the HTTP Pull connector as its source, for example:
-
-   ```bash
-   bin/kuiper create stream http_stream '() WITH (FORMAT="json", TYPE="http_pull")'
-   ```
-
-For a step-by-step guide, check [Streams Management with CLI](../../../api/cli/streams.md).
-
-## Lookup Table
-
-httppull also supports being a lookup table. We can use the create table statement to create an httppull lookup table. It will be tied to the entity relational database and queried on demand:
-
-```text
-CREATE TABLE httppullTable() WITH (DATASOURCE="/url", CONF_KEY="default", TYPE="httppull", KIND="lookup")
+```sql
+CREATE TABLE httppullTable () WITH (
+  DATASOURCE = "/url",
+  CONF_KEY = "default",
+  TYPE = "httppull",
+  KIND = "lookup"
+);
 ```

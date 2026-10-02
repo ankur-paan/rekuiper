@@ -1,131 +1,114 @@
 # Down Sampling
 
-The process of down sampling aggregates the input data at the source, thereby reducing the computation required for data
-decoding and transformation. The functionality of down sampling itself can be achieved through the aggregation
-calculation using a time window. However, the time window uses the full sampled data source, and the discarded data has
-actually undergone unnecessary computations such as decoding. Compared to the time window scheme, down sampling at the
-data source mainly enhances the performance of data processing. The greater the difference between the sampling
-frequency and the input frequency, the more significant the performance and resource utilization improvement. Data
-source down sampling is suitable for scenarios with higher performance requirements.
+Down sampling aggregates incoming records at the source layer before payload decoding and transformation.
 
-## Applicable Types
+You can also aggregate streaming data using time windows. However, time windows decode every incoming event before evaluating the window condition. Discarded events consume CPU cycles during decoding.
 
-Data streams can be categorized into PullSource and PushSource based on the method of data acquisition. PullSource is a
-data stream that samples data periodically, and down sampling can be achieved by setting the sampling rate. The data
-inflow frequency of PushSource is determined by the push speed of the data source. In rekuiper, common configurations
-such as sampling frequency are provided, and various strategies for down sampling can also be implemented.
+Source down sampling filters or merges raw events before decoding. This design reduces CPU usage and memory consumption. As the ratio between input frequency and sampling frequency increases, efficiency gains become more significant.
 
-## Configuration
+## Applicable Source Categories
 
-rekuiper data sources provide the following common properties for configuring down sampling characteristics.
+Connectors belong to two categories based on data ingestion:
+
+- **Pull Sources**: The engine polls the external system at scheduled intervals. Set the polling interval to control down sampling.
+- **Push Sources**: The external publisher controls ingestion frequency. The push source buffers incoming records and emits them based on the configured down sampling strategy.
+
+## Configuration Properties
+
+Configure down sampling using these source properties:
 
 ### interval
 
-The sampling interval, in the format of a Go duration string, such as "10s", "500ms", etc.
-For PullSource, this property determines the interval at which data is pulled.
-For PushSource, the data pushed by the data source will accumulate until the sampling interval, and then it will be
-emitted according to the configured sampling strategy.
+Specifies the sampling duration using a duration string (such as `"10s"` or `"500ms"`).
+
+- For pull sources, `interval` defines the polling period.
+- For push sources, the connector accumulates incoming events during the interval and emits records when the interval elapses.
 
 ### mergeField
 
-The default down sampling strategy takes the last message within the sampling period. If mergeField is configured, it
-will take the last message corresponding to each mergeField and then merge them into a single message for output.
+Defines the column name used for record aggregation (for example, `"id"`).
 
-The mergeField is configured as the column name in the message, such as "id". Data with different ids will be aggregated
-into a single downs ample data.
+The default down sampling strategy emits the last record received during the sampling period. If you configure `mergeField`, the engine retains the last record for each distinct key value and merges them into a single composite record.
 
-Notes:
+> [!NOTE]
+> - `mergeField` requires formats that support partial decoding (such as JSON). Custom formats can implement `message.PartialDecoder`.
+> - `mergeField` supports top-level non-composite fields. Nested objects or array structures resolve to the same key.
 
-- Only formats that support columnar decoding support this property. Currently, only the JSON format is supported. Users
-  can implement `message.PartialDecoder` to support columnar decoding for custom formats.
-- The mergeField currently only supports top-level non-composite fields. Nested fields or composite types such as arrays
-  or structures will be aggregated as the same key.
+## Down Sampling Strategies
 
-## Down sampling Strategy Examples
+Source down sampling converts multiple events received during an interval into a single output event. rekuiper supports two strategies:
 
-The input for Source down sampling is N messages within the sampling period, and the output is a single message. How to
-convert from N messages to a single message is determined by the down sampling strategy. Currently, we support two down
-sampling strategies: taking the latest value and aggregating by column.
+1. **Latest Value**: Emits the final record received during the sampling period.
+2. **Column Aggregation**: Merges the latest records for each unique key in `mergeField`.
 
-Taking the MQTT data source as an example, by subscribing to the MQTT topic, the data source will receive pushed data,
-such as 1Hz or higher frequency data. Suppose the calculation does not require such high-frequency data; we can
-configure a 1-second down sampling to reduce the consumption of computing resources. The following are examples of
-configurations for the two down sampling strategies.
+### Strategy 1: Latest Value
 
-### Taking the Latest Value
+This strategy outputs the last record received during the sampling interval.
 
-This strategy will output the last data received within the sampling period when it receives N data.
+#### Step 1: Create the Source Configuration
 
-1. Create down sampling configuration: Through the following REST API, we create the MQTT configuration `onesec`. It
-   includes the configuration item `interval`, setting the sampling period to 1 second. Note: The MQTT server address
-   and other configurations will follow the default settings.
+Create an MQTT configuration named `onesec` with a 1-second sampling period:
 
-    ```http request
-    PUT http://{{host}}/metadata/sources/mqtt/confKeys/onesec
-    
-    {
-      "interval": "1s"
-    }
-    ```
+```http
+PUT http://{{host}}/metadata/sources/mqtt/confKeys/onesec
+Content-Type: application/json
 
-2. Create data stream: The following API creates a data stream named `mqttOneSec`, which uses the down sampling
-   configuration created in step 1 through `CONF_KEY="onesec"`.
-
-    ```http request
-    POST http://{{host}}/streams
-    Content-Type: application/json
-    
-    {
-      "sql": "CREATE STREAM mqttOneSec() WITH (TYPE=\"mqtt\",FORMAT=\"json\",DATASOURCE=\"demo\",CONF_KEY=\"onesec\");"
-    }
-    ```
-
-3. Create rules based on the down sampling data stream: Next, users can create rules based on this data stream. The
-   following is the simplest rule, which sends all data to MQTT. This rule will receive data at a 1-second sampling
-   rate, that is, the last data of each second.
-
-    ```http request
-    POST http://{{host}}/rules
-    Content-Type: application/json
-    
-    {
-      "id": "ruleOneSecLatest",
-      "sql": "SELECT * FROM mqttOneSec",
-      "actions": [
-        {
-          "mqtt": {
-            "server": "tcp://127.0.0.1:1883",
-            "topic": "result/onesec",
-            "sendSingle": true
-          }
-        }
-      ]
-    }
-    ```
-
-### Column Aggregation
-
-This strategy, when it receives N data entries within the sampling period, will distinguish these entries by the values
-of the specified columns and merge the last entry for each column into a complete data entry. This strategy is suitable
-for situations where the data stream inherently contains data from different sources with different schemas. For
-example, the input might be:
-
-```json lines
 {
-  "id": 1,
-  "temperature": 20
-}
-{
-  "id": 2,
-  "humidity": 80
-}
-{
-  "id": 1,
-  "temperature": 30
+  "interval": "1s"
 }
 ```
 
-The aggregated result is a single data entry:
+#### Step 2: Create the Stream
+
+Create a stream that uses the `onesec` configuration:
+
+```http
+POST http://{{host}}/streams
+Content-Type: application/json
+
+{
+  "sql": "CREATE STREAM mqttOneSec() WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"demo\", CONF_KEY=\"onesec\");"
+}
+```
+
+#### Step 3: Create the Rule
+
+Create a rule to process the downsampled stream:
+
+```http
+POST http://{{host}}/rules
+Content-Type: application/json
+
+{
+  "id": "ruleOneSecLatest",
+  "sql": "SELECT * FROM mqttOneSec",
+  "actions": [
+    {
+      "mqtt": {
+        "server": "tcp://127.0.0.1:1883",
+        "topic": "result/onesec",
+        "sendSingle": true
+      }
+    }
+  ]
+}
+```
+
+The rule receives records once per second and emits the latest record for each interval.
+
+### Strategy 2: Column Aggregation
+
+This strategy groups records by key and combines the latest values across distinct fields into a single record.
+
+Consider this sequence of input events within a 1-second window:
+
+```json
+{"id": 1, "temperature": 20}
+{"id": 2, "humidity": 80}
+{"id": 1, "temperature": 30}
+```
+
+The engine merges the events into one composite record:
 
 ```json
 {
@@ -135,82 +118,76 @@ The aggregated result is a single data entry:
 }
 ```
 
-1. Create downsampling configuration: Through the following REST API, we create the MQTT configuration `onesec_merge`.
-   It includes the `interval` configuration item, setting the sampling period to 1 second. It also configures
-   the `mergeField` for aggregation. Note: The MQTT server address and other configurations will follow the default
-   settings.
+#### Step 1: Create the Merge Configuration
 
-    ```http request
-    PUT http://{{host}}/metadata/sources/mqtt/confKeys/onesec_merge
-    
-    {
-      "interval": "1s",
-      "mergeField": "id"
-    }
-    ```
+Create an MQTT configuration named `onesec_merge` with `interval` and `mergeField`:
 
-2. Create data stream: The following API creates a data stream named `mqttOneSecM`, which adopts the downsampling
-   configuration created in the first step through `CONF_KEY="onesec_merge"`.
+```http
+PUT http://{{host}}/metadata/sources/mqtt/confKeys/onesec_merge
+Content-Type: application/json
 
-    ```http request
-    POST http://{{host}}/streams
-    Content-Type: application/json
-    
-    {
-      "sql": "CREATE STREAM mqttOneSecM() WITH (TYPE=\"mqtt\",FORMAT=\"json\",DATASOURCE=\"demo\",CONF_KEY=\"onesec_merge\");"
-    }
-    ```
-
-3. Create rules based on the downsampling data stream: Next, users can create rules based on this data stream. The
-   following is the simplest rule, which takes all data and sends it to MQTT. This rule will receive data at a 1-second
-   sampling rate, aggregate it into a single data entry by column, and then send it.
-
-    ```http request
-    POST http://{{host}}/rules
-    Content-Type: application/json
-    
-    {
-      "id": "RuleOneSecM",
-      "sql": "SELECT * FROM mqttOneSecM",
-      "actions": [
-        {
-          "mqtt": {
-            "server": "tcp://127.0.0.1:1883",
-            "topic": "result/onesecm",
-            "sendSingle": true
-          }
-        }
-      ]
-    }
-    ```
-
-### Full Aggregation?
-
-The column-based aggregation rule requires a specified column for aggregation. What if you want to aggregate without
-specifying a column? It is recommended to use a time window approach and perform aggregation through the `merge_agg`
-function.
-
-```SQL
-SELECT merge_agg(*)
-FROM normalStream
-GROUP BY TumblingWindow(ss, 1)
+{
+  "interval": "1s",
+  "mergeField": "id"
+}
 ```
 
-Why this design: The original intention of the down sampling data stream is to reduce unnecessary computations, thereby
-decreasing CPU and resource usage. The current two down sampling strategies only require minimal decoding computations
-to determine whether the data needs to be sampled and computed. Full aggregation, however, requires a resource-intensive
-decoding operation for each data entry. Essentially, there is no down sampling at the data source level; instead, data
-transformation is performed after full sampling. Therefore, users can directly use a fully sampled data source and
-perform aggregation operations through window functions.
+#### Step 2: Create the Stream
 
-## Down sampling Metrics Observation
+Create a stream referencing `onesec_merge`:
 
-Data source downsampling is implemented in the `ratelimit` operator. To obtain rule execution metrics, you can observe
-the operation of downsampling through the metrics of the `ratelimit` operator. For example, in the following case:
-`source_mqttOneMiMerge_0_records_out_total` indicates that the MQTT data source has read in 25 data entries.
-The metrics of the `ratelimit` operator include `op_2_ratelimit_0_records_in_total`: 25
-and `op_2_ratelimit_0_records_out_total`: 1, which means that 25 data entries were read in and downsample to 1 entry.
-The subsequent `decode` operator only needs to parse the downsampled data.
+```http
+POST http://{{host}}/streams
+Content-Type: application/json
+
+{
+  "sql": "CREATE STREAM mqttOneSecM() WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"demo\", CONF_KEY=\"onesec_merge\");"
+}
+```
+
+#### Step 3: Create the Rule
+
+Create a rule to process the merged stream:
+
+```http
+POST http://{{host}}/rules
+Content-Type: application/json
+
+{
+  "id": "RuleOneSecM",
+  "sql": "SELECT * FROM mqttOneSecM",
+  "actions": [
+    {
+      "mqtt": {
+        "server": "tcp://127.0.0.1:1883",
+        "topic": "result/onesecm",
+        "sendSingle": true
+      }
+    }
+  ]
+}
+```
+
+### Full Aggregation with Windows
+
+To aggregate records across all columns without specifying a key field, use a time window with the `merge_agg` function:
+
+```sql
+SELECT merge_agg(*)
+FROM normalStream
+GROUP BY TumblingWindow(ss, 1);
+```
+
+Source down sampling minimizes decoding overhead by inspecting only key fields before decoding. Full aggregation decodes every event payload. For full aggregation, ingest records using a standard stream and apply window functions in SQL.
+
+## Down Sampling Observability
+
+The `ratelimit` operator executes source down sampling. Inspect the `ratelimit` metrics to monitor down sampling efficiency.
+
+In the following status output:
+- `source_mqttOneMiMerge_0_records_out_total` indicates the MQTT connector ingested 25 records.
+- `op_2_ratelimit_0_records_in_total` is 25, and `op_2_ratelimit_0_records_out_total` is 1. The operator reduced 25 incoming records to 1 record.
+- The downstream `op_3_payload_decoder_0` decoded only the single downsampled record.
 
 ```json
 {

@@ -1,12 +1,11 @@
 # Windowing
 
-As streaming data is infinite, it is impossible to process it as a whole. Windowing provides a mechanism to split the unbounded data into a continuous series of bounded data to calculate.
+Because streaming data is infinite, systems cannot process entire streams simultaneously. Windowing divides unbounded streams into bounded segments for calculation.
 
-In rekuiper, the built-in windowing supports:
+rekuiper supports these built-in window categories:
 
-- Time window: window split by time
-- Count window: window split by element count
+- **Time Windows**: Partitions streams based on time duration. Supports both processing time and event time.
+- **Count Windows**: Partitions streams based on record count.
 
-In time window, both processing time and event time are supported.
+For complete window syntax and types, refer to [Window Functions](../../sqls/windows.md).
 
-For all the supported window type, please check [window functions](../../sqls/windows.md).

@@ -3,111 +3,79 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-In IoT ecosystems, devices often need to transmit data to processing platforms. The HTTP Push connector in rekuiper allows devices to send their data directly to rekuiper for real-time processing. With eKuiper acting as an endpoint, devices can send data using standard HTTP methods, making integration seamless and straightforward.
+The HTTP Push source connector exposes an HTTP server endpoint in rekuiper to receive data pushed directly by external clients.
 
-When configured as an HTTP Push source, rekuiper exposes an HTTP endpoint so devices can push their data. Once the data is received, eKuiper processes it according to the defined rules and streams.
-
-The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
+When a client sends an HTTP request to the endpoint, rekuiper captures the payload and ingests it into the stream processing pipeline.
 
 ## Server Configuration
 
-To set up rekuiper as an HTTP endpoint, configure the server settings in `etc/sources/httppush.yaml`.
+Configure the HTTP data listener in `etc/sources/httppush.yaml`:
 
 ```yaml
 source:
-  ## Configurations for the global http data server for httppush source
-  # HTTP data service ip
   httpServerIp: 0.0.0.0
-  # HTTP data service port
   httpServerPort: 10081
   # httpServerTls:
   #    certfile: /var/https-server.crt
   #    keyfile: /var/https-server.key
 ```
 
-Users can specify the following properties:
+### Global Listener Parameters
 
-- `httpServerIp`: IP to bind the HTTP data server.
-- `httpServerPort`: Port to bind the HTTP data server.
-- `httpServerTls`: Configuration of the HTTP TLS.
+- `httpServerIp`: Network interface IP address bound by the HTTP data server. Default is `0.0.0.0`.
+- `httpServerPort`: Network port bound by the HTTP data server. Default is `10081`.
+- `httpServerTls`: TLS certificate and key paths for HTTPS termination.
 
-The global server initializes when any rule requiring an HTTP Push source is activated. It terminates once all associated rules are closed.
+The server starts when any rule referencing an HTTP Push source starts. The server stops when all associated rules stop.
 
 ## Source Configuration
 
-Each [stream](../../streams/overview.md) can have its own unique configuration, allowing it to define URL endpoints and HTTP methods. This flexibility ensures that different streams can handle different types of data and respond to different endpoints as needed.
-
-The HTTP Push source configuration file is located at `etc/sources/httppush.yaml`. The configuration items in the `default` section provide a set of default settings, which you can override as needed.
-
-See below for a demo configuration with the global configuration and a customized `application_conf` section.
+Configure endpoint-specific behavior in `etc/sources/httppush.yaml`:
 
 ```yaml
-#Global httppush configurations
 default:
-  # the request method to listen on
   method: "POST"
-  
-#Override the global configurations
-application_conf: #Conf_key
-  server: "PUT"
+
+application_conf:
+  method: "PUT"
 ```
 
-::: tip
+### Source Parameters
 
-Note: Currently, only the `method` property is available for configuring the HTTP method to listen to.
-
-:::
+- `method`: HTTP request method accepted by the listener. Default is `"POST"`.
 
 ## Create a Stream Source
 
-Once you've set up your streams with their respective configurations, you can integrate them with rekuiper rules to process and act on the incoming data.
+The HTTP Push connector operates as a [stream source](../../streams/overview.md) or as a [scan table source](../../tables/scan.md).
 
-::: tip
+### Create Stream via REST API
 
-HTTP Push connector can function as a [stream source](../../streams/overview.md) or a [scan table](../../tables/scan.md) source. This section illustrates the integration using the HTTP Push Source connector as a stream source example.
+Send a `POST` request to `/streams`:
 
-:::
-
-You can define the HTTP Push source as the data source either by REST API or CLI tool.
-
-### Use REST API
-
-The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
-
-Example:
-
-```sql
-CREATE STREAM httpDemo() WITH (FORMAT="json", TYPE="httppush")
+```json
+{
+  "sql": "CREATE STREAM httpDemo () WITH (FORMAT = \"json\", TYPE = \"httppush\")"
+}
 ```
 
-**Create with Custom Configuration**
+### Bind Stream to a Specific URL Path
 
-You can use the `endpoint` property corresponds to the `datasource` property in the stream creation statement.
-
-Example
+Specify the endpoint path using the `DATASOURCE` property:
 
 ```sql
-CREATE STREAM httpDemo() WITH (DATASOURCE="/api/data", FORMAT="json", TYPE="httppush")
+CREATE STREAM httpDemo () WITH (DATASOURCE = "/api/data", FORMAT = "json", TYPE = "httppush");
 ```
 
-In this example, we bind the source to `/api/data` endpoint. Thus, with the default server configuration, it will listen on `http://localhost:10081/api/data`.
+With default server settings, the connector listens on `http://localhost:10081/api/data`.
 
-More details can be found at [Streams Management with REST API](../../../api/restapi/streams.md).
+For API specifications, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
 
-### Use CLI
+### Create Stream via CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
+Run the `kuiper create stream` command:
 
-1. Navigate to the rekuiper binary directory:
+```bash
+bin/kuiper create stream demo '() WITH (FORMAT = "json", DATASOURCE = "/api/data", TYPE = "httppush")'
+```
 
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to create a rule, specifying the HTTP Push connector as its source, for example:
-
-   ```bash
-   bin/kuiper CREATE STREAM demo'() with(format="json", datasource="/api/data type="httppush")'
-   ```
-
-More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).
+For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).

@@ -1,54 +1,60 @@
-# Configuration
+# Configuration Overview
 
-rekuiper configuration is based on yaml file and allow to configure by updating the file, environment variable and REST API.
+rekuiper configurations use YAML files. You can configure parameters through configuration files, environment variables, command-line arguments, and REST APIs.
 
 ## Configuration Scope
 
-rekuiper configurations include
+rekuiper configurations include:
 
-1. `etc/kuiper.yaml`: global configuration file. Make change to it need to restart the rekuiper instance. Please refer to [basic configuration file](./global_configurations.md) for detail.
-2. `etc/sources/${source_name}.yaml`: the configuration file for each source to define the default properties (except MQTT source, whose configuration file is `etc/mqtt_source.yaml`). Please refer to the doc for each source for detail, such as the [MQTT source](../guide/sources/builtin/mqtt.md).
-3. `etc/connections/connection.yaml`: shared connection configuration file.
+1. `etc/kuiper.yaml`: The global configuration file. Changes require restarting the rekuiper server process. Refer to [Global Configurations](./global_configurations.md) for complete parameter details.
+2. `etc/sources/${source_name}.yaml`: Source configuration profiles (and `etc/mqtt_source.yaml` for MQTT sources). Refer to individual source documentation, such as the [MQTT Source Guide](../guide/sources/builtin/mqtt.md).
+3. `etc/connections/connection.yaml`: Shared reusable connection profiles.
 
-## Configuration Methods
+## Configuration Precedence
 
-Users can set the configuration through 3 methods order by precedence.
+rekuiper resolves configuration parameters using the following hierarchy, from highest to lowest precedence:
 
-1. Management Console/REST API
+1. Management Console and REST API
 2. Environment variables
-3. Yaml files in etc folder.
+3. YAML files in the `etc` directory
 
-The yaml files usually be used to set up the default configurations. It can be heavily use when deploy in bare metal and the user can access the file system easily.
+YAML files define default baseline settings for bare-metal host installations.
 
-When deploying in docker or k8s, it is not easy enough to manipulate files, small amount of configurations can then be set or override by environment variables. And in runtime, end users will use management console to change the configurations dynamically. The `Configuration` page in the eKuiper manager can help users to modify the configurations visually.
+In containerized Docker or Kubernetes deployments, use environment variables to override default settings without modifying image layers. In active production environments, update configurations dynamically through the REST API or Web Manager interface.
 
-### Environment variable syntax
+### Environment Variable Syntax
 
-There is a mapping from environment variable to the configuration yaml file. When modifying configuration through environment variables, the environment variables need to be set according to the prescribed format, for example:
+rekuiper maps environment variables to YAML settings using double underscore (`__`) separators.
+
+The prefix identifies the target configuration file:
+- `KUIPER`: Maps to `etc/kuiper.yaml`.
+- `MQTT_SOURCE`: Maps to `etc/mqtt_source.yaml`.
+- `CONNECTION`: Maps to `etc/connections/connection.yaml`.
+- Any other name: Maps to `etc/sources/${source_name}.yaml`.
+
+Example mappings:
 
 ```text
 KUIPER__BASIC__DEBUG => basic.debug in etc/kuiper.yaml
 MQTT_SOURCE__DEMO_CONF__QOS => demo_conf.qos in etc/mqtt_source.yaml
 EDGEX__DEFAULT__PORT => default.port in etc/sources/edgex.yaml
-CONNECTION__EDGEX__REDISMSGBUS__PORT => edgex.redismsgbus.port int etc/connections/connection.yaml
+CONNECTION__EDGEX__REDISMSGBUS__PORT => edgex.redismsgbus.port in etc/connections/connection.yaml
 ```
 
-The environment variables are separated by "__", the content of the first part after the separation matches the file name of the configuration file, and the remaining content matches the different levels of the configuration items. The file name could be `KUIPER` and `MQTT_SOURCE` in the `etc` folder; or  `CONNECTION` in `etc/connection` folder. Otherwise, the file should in `etc/sources` folder.
+### Command-Line Arguments
 
-### command line parameters
+The `kuiperd` binary accepts command-line flags to configure directory paths:
 
-rekuiper supports importing configuration from command line parameters, as follows:
+| Flag Name | Data Type | Description |
+| :--- | :--- | :--- |
+| `loadFileType` | string | Defines path resolution mode. Supported values: `relative` and `absolute`. |
+| `etc` | string | Specifies the absolute directory path for configuration files. Active when `loadFileType` is `absolute`. |
+| `data` | string | Specifies the absolute directory path for application state. Active when `loadFileType` is `absolute`. |
+| `log` | string | Specifies the absolute directory path for log files. Active when `loadFileType` is `absolute`. |
+| `plugins` | string | Specifies the absolute directory path for external plugins. Active when `loadFileType` is `absolute`. |
 
-| configuration name | type   | configuration role                                                                         |
-|--------------------|--------|--------------------------------------------------------------------------------------------|
-| loadFileType       | string | Set the way to load files, support "relative" and "absolute"                               |
-| etc                | string | Set absolute path of etc directory, only valid when loadFileType is "absolute"             |
-| data               | string | Set the absolute path of the data directory, only valid when loadFileType is "absolute"    |
-| log                | string | Set the absolute path of the log directory, only valid when loadFileType is "absolute"     |
-| plugins            | string | Set the absolute path of the plugins directory, only valid when loadFileType is "absolute" |
+Example command:
 
-example:
-
-```sh
+```bash
 ./bin/kuiperd -loadFileType absolute -etc /etc/kuiper
 ```

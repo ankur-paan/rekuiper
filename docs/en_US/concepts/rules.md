@@ -1,57 +1,54 @@
 # Rules
 
-Each rule represents a computing job to run in rekuiper. It defines the continuous streaming data source as the input, the computing logic and the result actions as the output.
+Each rule represents a processing task in rekuiper. It defines the continuous data source input, the computing logic, and the output actions.
 
 ## Rule Lifecycle
 
-rekuiper currently **only supports Streaming Rules**. These types of rules require at least one Continuous Stream as a
-data source.
+rekuiper supports streaming rules. These rules require at least one continuous stream as an input data source.
 
-Once a rule is started, it will run continuously until:
+Once started, a rule executes continuously until one of these conditions occurs:
 
-1. The user explicitly sends a stop command.
-2. The rule abnormally terminates due to an internal error or the rekuiper instance exiting.
+1. An operator sends an explicit stop command.
+2. The rule terminates because of an internal error or engine shutdown.
 
-**Asynchronous Rule Startup and Status Management**
+### Asynchronous Rule Startup and Status Management
 
-The rule startup process is **asynchronous**. When a user sends a start command, rekuiper performs necessary static
-checks and then asynchronously executes the rule's startup operation. Therefore:
+Rule startup is asynchronous. When a client submits a start command, rekuiper completes static checks and begins rule startup asynchronously.
 
-* The command response received by the user only indicates that rekuiper has accepted the startup request and set the
-  rule's **Expected Status** to 'started'.
-* This does not mean the rule has begun running. Users need to further check the rule's **Runtime Status** to confirm
-  that the rule has successfully started and is running.
+Therefore:
 
-**Rule Update and Error Rollback**
+* The response confirms only that rekuiper accepted the start request. The engine sets the **Expected Status** of the rule to `started`.
+* The response does not confirm that rule execution has begun. Check the **Runtime Status** of the rule to verify that execution is active.
 
-During the rule update process, rekuiper provides **rollback** support. If the updated rule fails to start, the system
-will automatically maintain and continue running the original old rule to ensure service stability.
+### Rule Updates and Error Rollback
 
-## Rules Relationship
+rekuiper provides rollback support during rule updates. If an updated rule fails to start, the engine continues to execute the previous rule version.
 
-It is common to run multiple rules simultaneously. As rekuiper is a single instance process, the rules are running in the same memory space. However, there are separated in the runtime and the error in one rule should not affect others. Regarding workload, all rules share the same hardware resource. Each rule can specify the operator buffer to limit the processing rate to avoid taking all resources.
+## Rule Relationships
 
-When multiple rules use a **[Shared Stream](../guide/streams/overview.md#share-source-instance-across-rules)**, they
-share the upstream source components, including data ingestion and decoding.
+You can run multiple rules simultaneously. rekuiper runs as a single process, and all rules share memory space. The engine isolates rules at runtime so an error in one rule does not terminate other rules.
 
-In execution, all rules utilizing a shared stream form a single **Directed Acyclic Graph (DAG)** where downstream rules
-can be dynamically added or removed.
+All rules share hardware resources. You can configure operator buffer limits on individual rules to control resource consumption.
 
-**Impact of Shared Streams**
+When multiple rules reference a **[Shared Stream](../guide/streams/overview.md#share-source-instance-across-rules)**, they share upstream source components for ingestion and decoding.
 
-Due to this shared structure, rules within the DAG will influence each other. Specifically:
+Rules that reference a shared stream form a single Directed Acyclic Graph (DAG). You can add or remove downstream rules dynamically.
 
-* **Backpressure Propagation:** Backpressure originating from one rule can propagate backward through the shared source
-  component.
-* **Wider Impact:** This backpressure on the shared stream will then affect the performance and processing of **all**
-  other rules connected to that same shared source.
+### Effects of Shared Streams
 
-Besides this, the shared source side ignores checkpoint.
+Rules within a shared stream DAG interact in these ways:
 
-## Rule Pipeline
+* **Backpressure Propagation**: Backpressure from one rule propagates to the shared source component.
+* **System Impact**: Backpressure on the shared source affects the performance of all rules connected to that source.
+* **Checkpoints**: The shared source ignores checkpoint operations.
 
-Multiple rules can form a processing pipeline by specifying a joint point in sink/source. For example, the first rule produce the result to a topic in memory sink and the other rule subscribe to that topic in its memory source. Besides the pair of memory sink/source, users can also use mqtt or other sink/source pair to connect rules.
+## Rule Pipelines
 
-## More Readings
+You can connect multiple rules into a processing pipeline through intermediate sources and sinks. For example, a first rule sends output to an in-memory sink topic, and a second rule reads that topic through an in-memory source.
+
+You can also use MQTT topics or other connector pairs to connect rules.
+
+## Further Reading
 
 * [Rule Reference](../guide/rules/overview.md)
+

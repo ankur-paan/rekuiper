@@ -1,60 +1,60 @@
+# Plugins Management
 
-The rekuiper REST API for plugins allows you to manage plugins, such as create, drop and list plugins. Notice that, drop a plugin will need to restart rekuiper to take effect. To update a plugin, do the following:
+The rekuiper REST API manages native and portable plugins. You can create, list, inspect, update, register, and drop plugins.
 
-1. Drop the plugin.
-2. Restart rekuiper.
-3. Create the plugin with the new configuration.
+> [!NOTE]
+> Deleting a native plugin requires restarting the rekuiper server process. To update a plugin:
+> 1. Delete the plugin.
+> 2. Restart rekuiper.
+> 3. Create the plugin with updated binaries or configuration.
 
-## create a plugin
+## Create a Plugin
 
-The API accepts a JSON content to create a new plugin. Each plugin type has a standalone endpoint. The supported types are `["sources", "sinks", "functions","portables"]`. The plugin is identified by the name. The name must be unique.
+Use these endpoints to install and register a new plugin:
 
-```shell
+```http
 POST http://localhost:9081/plugins/sources
 POST http://localhost:9081/plugins/sinks
 POST http://localhost:9081/plugins/functions
 POST http://localhost:9081/plugins/portables
 ```
 
-Request Sample when the file locates in a http server
+Request payload using a remote HTTP URL:
 
 ```json
 {
-  "name":"random",
-  "file":"http://127.0.0.1/plugins/sources/random.zip"
+  "name": "random",
+  "file": "http://127.0.0.1/plugins/sources/random.zip"
 }
 ```
 
-Request Sample for files locates in the same machine of the rekuiper server.
+Request payload using a local filesystem URI:
 
 ```json
 {
-  "name":"random",
-  "file":"file:///var/plugins/sources/random.zip"
+  "name": "random",
+  "file": "file:///var/plugins/sources/random.zip"
 }
 ```
 
 ### Parameters
 
-1. name: a unique name of the plugin. The name must be the same as the camel case version of the plugin with lowercase first letter. For example, if the exported plugin name is `Random`, then the name of this plugin is `random`.
-2. file: the url of the plugin files. The url can be `http` or `https` scheme or `file` scheme to refer to a local file path of the rekuiper server. It must be a zip file with: a compiled so file and the yaml file(only required for sources). If the plugin depends on some external dependencies, a bash script named install.sh can be provided to do the dependency installation. The name of the files must match the name of the plugin. Please check [Extension](../../extension/overview.md) for the naming rule.
+- `name`: The unique identifier of the plugin in lowerCamelCase (for example, `random` for `Random`).
+- `file`: The URL or filesystem URI pointing to a `.zip` archive containing the compiled `.so` file and YAML metadata. For packaging details, refer to [Plugin Extension Overview](../../extension/overview.md).
 
-### Plugin File Format
+### Plugin Package Structure
 
-`Note`: For `portables` type, please refer to this [format](../../extension/portable/overview.md#package).
+> [!NOTE]
+> For portable plugins, refer to the [Portable Plugin Packaging Guide](../../extension/portable/overview.md#package).
 
-A sample zip file for a source named random.zip
+An example `random.zip` archive contains:
+1. `Random@v1.0.0.so`
+2. `random.yaml`
+3. `install.sh`
+4. Dependency files referenced by `install.sh` (for example, `mysdk.zip`, `myconfig.conf`)
+5. `etc/`: Configuration files and runtime dependencies. The installer copies this folder to `<span v-pre>{{rekuiperPath}}/etc/{{pluginType}}</span>`.
 
-1. Random@v1.0.0.so
-2. random.yaml
-3. install.sh
-4. Various dependency files/folders of install.sh
-   - mysdk.zip
-   - myconfig.conf
-5. etc directory: the runtime configuration files or dependency files. After installation, this directory will be
-   renamed to the plugin name under <span v-pre>{{rekuiperPath}}/etc/{{pluginType}}</span> directory.
-
-Notice that, the install.sh will be run that the system may already had the lib or package. Make sure to check the path before. Below is an example install.sh to install a sample sdk lib.
+Example `install.sh` dependency script:
 
 ```bash
 #!/bin/sh
@@ -89,37 +89,35 @@ ldconfig
 echo "Done"
 ```
 
-## show plugins
+## Show Plugins
 
-The API is used for displaying all of plugins defined in the server for a plugin type.
+Use these endpoints to list installed plugins for a specific plugin type:
 
-```shell
+```http
 GET http://localhost:9081/plugins/sources
 GET http://localhost:9081/plugins/sinks
 GET http://localhost:9081/plugins/functions
 GET http://localhost:9081/plugins/portables
 ```
 
-Response Sample:
+Response sample:
 
 ```json
-["plugin1","plugin2"]
+["plugin1", "plugin2"]
 ```
 
-## describe a plugin
+## Describe a Plugin
 
-The API is used to print out the detailed definition of a plugin.
+Use these endpoints to display metadata for an installed plugin:
 
-```shell
+```http
 GET http://localhost:9081/plugins/sources/{name}
 GET http://localhost:9081/plugins/sinks/{name}
 GET http://localhost:9081/plugins/functions/{name}
 GET http://localhost:9081/plugins/portables/{name}
 ```
 
-Path parameter `name` is the name of the plugin.
-
-Response Sample:
+Response sample:
 
 ```json
 {
@@ -128,46 +126,47 @@ Response Sample:
 }
 ```
 
-## drop a plugin
+## Drop a Plugin
 
-The API is used for drop the plugin. Notice that, for native plugins, the rekuiper server needs to be restarted to take effect. The current rules will continue to run with the deleted native plugins successfully. For portable plugin, the deletion will take effect immediately. The current rules which are using that plugin may encounter errors but won't stop and can continue running if an updated plugin with the same name is created later. If this is not expected, manually stop or delete those rules before deleting a plugin.
+Use these endpoints to delete an installed plugin:
 
-```shell
+```http
 DELETE http://localhost:9081/plugins/sources/{name}
 DELETE http://localhost:9081/plugins/sinks/{name}
 DELETE http://localhost:9081/plugins/functions/{name}
 DELETE http://localhost:9081/plugins/portables/{name}
 ```
 
-The user can pass a query parameter to decide if rekuiper should be stopped after a delete in order to make the deletion take effect. The parameter is `stop` and only when the value is `1` will the eKuiper be stopped. The user has to manually restart it.
+For native plugins, you must restart the rekuiper server to complete deletion. For portable plugins, deletion takes effect immediately.
 
-```shell
+Append `?stop=1` to stop the rekuiper server process automatically upon deletion:
+
+```http
 DELETE http://localhost:9081/plugins/sources/{name}?stop=1
 ```
 
-## update a plugin
+## Update a Plugin
 
-Notice that, native plugins can be updated, but the new version will not take effect until the rekuiper server is
-restarted.
-Portable plugins can be updated, and the new version will take effect immediately even for the running rules.
-The request body is the same as the create plugin request.
+Use these endpoints to update an installed plugin:
 
-```shell
+```http
 PUT http://localhost:9081/plugins/sources/{name}
 PUT http://localhost:9081/plugins/sinks/{name}
 PUT http://localhost:9081/plugins/functions/{name}
 PUT http://localhost:9081/plugins/portables/{name}
 ```
 
+The request body matches the schema used for plugin creation.
+
 ## Portable Plugin Status
 
-This API can get the Portable plugin running status.
+Use this endpoint to inspect the runtime process status of a portable plugin:
 
-```shell
+```http
 GET http://localhost:9081/plugins/portables/{name}
 ```
 
-The return message is like:
+Response sample:
 
 ```json
 {
@@ -180,33 +179,33 @@ The return message is like:
 }
 ```
 
-## APIs to handle function plugin with multiple functions
+## Function Plugin Management
 
-Unlike source and sink plugins, function plugin can export multiple functions at once. The exported names must be unique globally across all plugins. There will be a one to many mapping between function and its container plugin. Thus, we provide show udf(user defined function) api to query all user defined functions so that users can check the name duplication. And we provide describe udf api to find out the defined plugin of a function. We also provide the register functions api to register the udf list for an auto loaded plugin.
+Function plugins can export multiple user-defined functions. Function names must be globally unique across all plugins.
 
-### show udfs
+### Show All User-Defined Functions
 
-The API is used for displaying all user defined functions which are defined across all plugins.
+Use this endpoint to list all user-defined functions registered across all plugins:
 
-```shell
+```http
 GET http://localhost:9081/plugins/udfs
 ```
 
-Response Sample:
+Response sample:
 
 ```json
-["func1","func2"]
+["func1", "func2"]
 ```
 
-### describe an udf
+### Describe a User-Defined Function
 
-The API is used to find out the plugin which defines the UDF.
+Use this endpoint to identify the plugin that provides a specific function:
 
-```shell
+```http
 GET http://localhost:9081/plugins/udfs/{name}
 ```
 
-Response Sample:
+Response sample:
 
 ```json
 {
@@ -215,31 +214,33 @@ Response Sample:
 }
 ```
 
-### register functions
+### Register Functions for a Plugin
 
-The API aims to register all exported functions in an auto loaded function plugin or when the exported functions are changed. If the plugin was loaded by CLI create command or REST create API with functions property specified, then this is not needed. The register API will persist the functions list in the kv. Unless the exported functions are changed, users only need to register it once.
+Use this endpoint to register exported function names for auto-loaded plugins:
 
-```shell
-POST http://{{host}}/plugins/functions/{plugin_name}/register
+```http
+POST http://localhost:9081/plugins/functions/{plugin_name}/register
+Content-Type: application/json
 
-{"functions":["func1","func2"]}
-
+{
+  "functions": ["func1", "func2"]
+}
 ```
 
-## Get the available plugins
+## Prebuilt Plugins (Legacy Compatibility)
 
 > [!NOTE]
 > Native Go `.so` plugins are not supported in rekuiper. Built-in connectors are compiled into the binary, and custom logic is loaded via WebAssembly or external services. The endpoints below exist for legacy eKuiper compatibility.
 
-In legacy eKuiper, according to the configuration `pluginHosts` in `etc/kuiper.yaml`, this endpoint returns the list of pre-built plugins that can be installed.
+In legacy eKuiper, these endpoints query available prebuilt plugins configured in `pluginHosts` within `etc/kuiper.yaml`:
 
-```shell
+```http
 GET http://localhost:9081/plugins/sources/prebuild
 GET http://localhost:9081/plugins/sinks/prebuild
 GET http://localhost:9081/plugins/functions/prebuild
 ```
 
-The sample result is as following, and the key is plugin name, the value is plugin download address.
+Response sample:
 
 ```json
 {

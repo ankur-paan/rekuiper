@@ -1,46 +1,50 @@
-# Services management
+# Services Management
 
-The rekuiper command line tools allows you to manage services, such as create, show, drop, describe services.
+The rekuiper service CLI manages external services and service functions. You can register, list, describe, and drop services.
 
-## Register service
+## Register a Service
 
-The command is used for creating a service. The service's definition is specified with JSON format
+Use this command to register an external service using a JSON specification:
 
 ```shell
 create service $service_name $service_json
 ```
 
-Service package file should be prepared at first and put at a place that rekuiper can access.
+Before you run the command, store the service package archive at a location accessible to rekuiper.
 
-Example：
+Example command:
 
 ```shell
 # bin/kuiper create service sample '{"name": "sample","file": "file:///tmp/sample.zip"}'
 ```
 
-This command creates a service named sample whose content is provided by `file` field in the json.
+This command creates a service named `sample` using the package file at `file:///tmp/sample.zip`.
 
-## Show services and service_funcs
+## Show Services and Service Functions
 
-The command is used for describing all services and service_funcs defined in the server.
+Use these commands to list all registered services and their associated functions:
+
+List services:
 
 ```shell
 # bin/kuiper show services
 ```
 
+List service functions:
+
 ```shell
 # bin/kuiper show service_funcs
 ```
 
-## Describe a service
+## Describe a Service
 
-The command prints the detailed definition of a service.
+Use this command to display configuration details and interfaces for a service:
 
 ```shell
 describe service $service_name
 ```
 
-Example：
+Example command and output:
 
 ```shell
 # bin/kuiper describe service sample
@@ -77,18 +81,17 @@ Example：
     }
   }
 }
-
 ```
 
-## Describe a service function
+## Describe a Service Function
 
-The command prints the detailed information of a service function.
+Use this command to display details about an individual service function:
 
 ```shell
-describe service_func $service_name
+describe service_func $func_name
 ```
 
-Example：
+Example command and output:
 
 ```shell
 # bin/kuiper describe service_func label
@@ -101,15 +104,15 @@ Example：
 }
 ```
 
-## Drop a service
+## Drop a Service
 
-The command drops the service.
+Use this command to delete a service:
 
 ```shell
 drop service $service_name
 ```
 
-Example：
+Example command:
 
 ```shell
 # bin/kuiper drop service sample

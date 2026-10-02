@@ -1,66 +1,66 @@
-# Tables management
+# Tables Management
 
-The rekuiper table command line tools allow you to manage the tables, such as create, describe, show and drop table definitions.
+The rekuiper table command-line interface manages table definitions. You can create, describe, list, and drop tables.
 
-## create a table
+## Create a Table
 
-The command is used for creating a table. For more detailed information of table definition, please refer to [tables](../../sqls/tables.md).
+Use this command to create a new table. For table syntax details, refer to [Tables](../../sqls/tables.md).
 
 ```shell
 create table $table_name $table_def | create table -f $table_def_file
 ```
 
-- Specify the table definition in command line.
+### Specify the Table Definition on the Command Line
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper create table my_table '(id bigint, name string, score float) WITH ( datasource = "lookup.json", FORMAT = "json", KEY = "id");'
 table my_table created
 ```
 
-The command create a table named `my_table`.
+This command creates a table named `my_table`.
 
-- Specify the table definition in file. If the table is complex, or the table is already wrote in text files with well organized formats, you can just specify the table definition through `-f` option.
+### Specify the Table Definition in a File
 
-Sample:
+Use the `-f` flag to load table definitions from a text file:
 
 ```shell
 # bin/kuiper create table -f /tmp/my_table.txt
 table my_table created
 ```
 
-Below is the contents of `my_table.txt`.
+The file `/tmp/my_table.txt` contains:
 
-```text
+```sql
 my_table(id bigint, name string, score float)
     WITH ( datasource = "lookup.json", FORMAT = "json", KEY = "id");
 ```
 
-## show tables
+## Show Tables
 
-The command is used for displaying all of tables defined in the server.
+Use this command to display all tables defined in the server:
 
 ```shell
 show tables
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper show tables
 my_table
 ```
 
-## describe a table
+## Describe a Table
 
-The command is used for print the detailed definition of table.
+Use this command to display the schema and configuration options of a table:
 
 ```shell
 describe table $table_name
 ```
 
-Sample:
+Example output:
 
 ```shell
 # bin/kuiper describe table my_table
@@ -75,17 +75,18 @@ KEY: id
 DATASOURCE: lookup.json
 ```
 
- *Note*: rekuiper does not support querying table data by CLI. Users need join the table with a stream and check the result
+> [!NOTE]
+> The CLI does not support direct interactive queries against tables. To inspect table data, join the table with an input stream in a rule query.
 
-## drop a table
+## Drop a Table
 
-The command is used for drop the table definition.
+Use this command to delete a table definition:
 
 ```shell
 drop table $table_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper drop table my_table

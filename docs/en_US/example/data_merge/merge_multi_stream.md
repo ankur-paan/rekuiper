@@ -1,22 +1,20 @@
 # Merge Data in Multiple Streams
 
-## Problem
+## Problem Description
 
-Due to security, cost, and other considerations, data often originates from different protocols or domains. Each protocol or domain may have its own data stream. For example, in the IIoT scenario, temperature and humidity sensor data may come from MQTT, while IT data may be provided by HTTP. The same situation arises in the IoV area. To extract meaningful insights, we need to merge data across streams. This article introduces how to merge data from multiple streams. Readers can customize calculations based on the examples in this article to meet their specific needs.
+Telemetry frequently originates from multiple communication protocols or network domains. For example, in industrial IoT (IIoT), environmental sensors publish data through MQTT, while enterprise systems deliver production state through HTTP. In connected vehicle (IoV) systems, telematics and roadside units use separate channels. Downstream analytics require combining data from these disparate streams.
 
 ::: tip
-
-To run the case by hand, please check [here](../howto.md).
-
+To execute this scenario manually, refer to the [step-by-step guide](../howto.md).
 :::
 
-## Sample input
+## Sample Input
 
-We mimic two streams of data, one for temperature and one for humidity. Thanks to the abstraction of eKuiper, the data source can be MQTT, HTTP, or any other protocol. The sample data is as follows:
+This scenario uses two streams: one for temperature and one for humidity. Through rekuiper source abstractions, streams can ingest data from MQTT, HTTP, files, or other protocols.
 
-**Data from stream1**
+**Data from stream1 (Temperature)**:
 
-```json lines
+```json
 {"device_id":"A","temperature":27.23,"ts":1681786070368}
 {"device_id":"A","temperature":27.68,"ts":1681786070479}
 {"device_id":"A","temperature":27.28,"ts":1681786070588}
@@ -29,9 +27,9 @@ We mimic two streams of data, one for temperature and one for humidity. Thanks t
 {"device_id":"A","temperature":30.34,"ts":1681786071362}
 ```
 
-**Data from stream2**
+**Data from stream2 (Humidity)**:
 
-```json lines
+```json
 {"device_id":"B","humidity":79.66,"ts":1681786070367}
 {"device_id":"B","humidity":83.86,"ts":1681786070477}
 {"device_id":"B","humidity":75.79,"ts":1681786070590}
@@ -44,9 +42,9 @@ We mimic two streams of data, one for temperature and one for humidity. Thanks t
 {"device_id":"B","humidity":80.5,"ts":1681786071361}
 ```
 
-## Desired output
+## Desired Output
 
-Combine data from multiple streams for subsequent processing. A sample single event output is as follows:
+Combine data from both streams into unified events:
 
 ```json
 {
@@ -55,105 +53,101 @@ Combine data from multiple streams for subsequent processing. A sample single ev
 }
 ```
 
-Depending on the requirements of different scenarios, we can flexibly write rules to implement data merging, control how the data is merged, how often, and the output format of the merged data.
+## Solutions
 
-## Solution
+### 1. Merge Multiple Streams into One Stream through Memory Pipelines
 
-In practice, users often have different merging algorithms. This article will list several common merge algorithms and how to use rekuiper SQL to implement them.
+You can consolidate multiple input streams into a single intermediate memory topic. Then you apply the merging rules described in [Merge Multiple Devices' Data in a Single Stream](./merge_single_stream.md).
 
-### 1. Output as One Stream by Rule Pipeline
+1. Route `stream1` to a memory topic named `merged`:
 
-In [Merge Multiple Devices' Data in a Single Stream](./merge_single_stream.md) tutorial,we introduced how to merge data in a single stream. When dealing with multiple streams, we can convert them into a single stream. The next steps remain the same as in the single stream case.
+   ```json
+   {
+     "id": "ruleMerge1",
+     "name": "Route stream1 to memory topic",
+     "sql": "SELECT * FROM stream1",
+     "actions": [
+       {
+         "memory": {
+           "topic": "merged",
+           "sendSingle": true
+         }
+       }
+     ]
+   }
+   ```
 
-- Create rules for each stream to convert the data, and output to the same stream.
-  - Rule 1 to sink stream to memory topic `merged`
-  
-  ```json
-  {
-    "id": "ruleMerge1",
-    "name": "Rule to send data from stream1 to merged stream",
-    "sql": "SELECT * FROM stream1",
-    "actions": [
-      {
-        "memory": {
-          "topic": "merged",
-          "sendSingle": true
-        }
-      }
-    ]
-  }
-  ```
-  
-  - Rule 2 to sink stream to memory topic `merged`
-  
-  ```json
-  {
-    "id": "ruleMerge2",
-    "name": "Rule to send data from stream2 to merged stream",
-    "sql": "SELECT * FROM stream2",
-    "actions": [
-      {
-        "memory": {
-          "topic": "merged",
-          "sendSingle": true
-        }
-      }
-    ]
-  }
-  ```
+2. Route `stream2` to the same memory topic `merged`:
 
-As shown in the above SQL, both rules sink the output to the same memory topic merged. In this example, we use the simplest select * in the SQL to output all the data. In practice, users can perform calculations or filters according to actual needs to further filter the output.
+   ```json
+   {
+     "id": "ruleMerge2",
+     "name": "Route stream2 to memory topic",
+     "sql": "SELECT * FROM stream2",
+     "actions": [
+       {
+         "memory": {
+           "topic": "merged",
+           "sendSingle": true
+         }
+       }
+     ]
+   }
+   ```
 
-- Create the memory stream `merged` to receive the union of the two rules.
+3. Define a new stream that reads from the memory topic:
 
-  ```json
-  {
-    "sql": "CREATE STREAM mergedStream() WITH (TYPE=\"memory\",FORMAT=\"json\",DATASOURCE=\"merged\");"
-  }
-  ```
+   ```sql
+   CREATE STREAM mergedStream() WITH (TYPE="memory", FORMAT="json", DATASOURCE="merged");
+   ```
 
-This stream is of `memory` type, and the data source is the memory topic `merged`, which is the output of the previous two streams. Thus, this new stream is the union of the two streams as one stream. The simplest rule select * from mergedStream can output the merged data similarly like below:
+   The stream `mergedStream` receives interleaved events from both sources:
 
-```text
-{"device_id":"B","humidity":79.66,"ts":1681786070367}
-{"device_id":"A","temperature":27.23,"ts":1681786070368}
-{"device_id":"B","humidity":83.86,"ts":1681786070477}
-{"device_id":"A","temperature":27.68,"ts":1681786070479}
-{"device_id":"A","temperature":27.28,"ts":1681786070588}
-{"device_id":"B","humidity":75.79,"ts":1681786070590}
-{"device_id":"B","humidity":78.21,"ts":1681786070698}
-{"device_id":"A","temperature":27.06,"ts":1681786070700}
-```
+   ```text
+   {"device_id":"B","humidity":79.66,"ts":1681786070367}
+   {"device_id":"A","temperature":27.23,"ts":1681786070368}
+   {"device_id":"B","humidity":83.86,"ts":1681786070477}
+   {"device_id":"A","temperature":27.68,"ts":1681786070479}
+   {"device_id":"A","temperature":27.28,"ts":1681786070588}
+   {"device_id":"B","humidity":75.79,"ts":1681786070590}
+   {"device_id":"B","humidity":78.21,"ts":1681786070698}
+   {"device_id":"A","temperature":27.06,"ts":1681786070700}
+   ```
 
-Users can then use the solutions in [Merge Multiple Devices' Data in a Single Stream](./merge_single_stream.md) to merge the data.
+4. Apply single-stream merge rules to `mergedStream` to produce the final output.
 
-### 2. Join Streams
+### 2. Join Streams Directly with Windows
 
-If the data from different streams are related, we can use the join algorithm to merge the data. In stream processing systems, data is ingested as a sequence of unbounded events. However, the join operator requires a boundary for the data to be joined. Therefore, we need to add a window to collect a set of events for the join operation. The following is an example of joining two streams of data:
+When records across streams share temporal or relational keys, join them directly by using windowed joins:
 
 ```json
 {
   "id": "ruleJoin",
-  "name": "Rule to join data from stream1 and stream2",
+  "name": "Join stream1 and stream2 with tumbling window",
   "sql": "SELECT temperature, humidity FROM stream1 INNER JOIN stream2 ON stream1.ts - stream2.ts BETWEEN 0 AND 10 GROUP BY TumblingWindow(ms, 500)",
   "actions": [
     {
-      "log": {
-      }
+      "log": {}
     }
   ]
 }
 ```
 
-In this example, we use a 500 ms tumbling window to split the unbounded stream to a set of bounded windows. The join happens in each window. The join condition is that the difference between the timestamps of the data in two streams is less than 10 ms. The output sample is as below:
+This rule divides the streams into 500-millisecond tumbling windows. Within each window, it matches temperature and humidity events whose timestamps differ by 10 milliseconds or less.
 
-```json lines
+Example output:
+
+```json
 [{"humidity":79.66,"temperature":27.23},{"humidity":83.86,"temperature":27.68},{"humidity":78.21,"temperature":27.06},{"humidity":75.4,"temperature":26.48}]
 [{"humidity":80.85,"temperature":28.51},{"humidity":72.68,"temperature":31.57},{"humidity":76.34,"temperature":34.31},{"humidity":80.5,"temperature":30.34}]
 ```
 
-Notice that, since window is used, the output frequency is now controlled by window and the output becomes a list. The equi-join is also widely used. `SELECT temperature, humidity FROM stream1 INNER JOIN stream2 ON stream1.device_id = stream2.device_id GROUP BY TumblingWindow(ms, 500)` is an example of equi-join if the data can be connected by device id.
+When streams share a common device key, use an equi-join:
 
-### More merge algorithms
+```sql
+SELECT temperature, humidity FROM stream1 INNER JOIN stream2 ON stream1.device_id = stream2.device_id GROUP BY TumblingWindow(ms, 500);
+```
 
-The above are some of the most common merge algorithms. If you have better merge algorithms and unique merge scenarios, please discuss in [GitHub Discussions](https://github.com/lf-edge/ekuiper/discussions/categories/use-case).
+### Additional Merge Scenarios
+
+For further discussion of custom merging patterns, visit the [GitHub Discussions](https://github.com/lf-edge/ekuiper/discussions/categories/use-case) forum.

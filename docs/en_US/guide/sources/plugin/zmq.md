@@ -1,50 +1,46 @@
-# Zmq Source
+# ZeroMQ Source Connector
 
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-The source will subscribe to a Zero Mq topic to import the messages into rekuiper
+The ZeroMQ source connector subscribes to ZeroMQ publishers and channels messages into the rekuiper stream processing engine.
 
-## Compile & deploy plugin
+## Configuration Overview
 
-```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sources/Zmq.so extensions/sources/zmq/zmq.go
-# cp plugins/sources/Zmq.so $rekuiper_install/plugins/sources
-```
-
-Restart the rekuiper server to activate the plugin.
-
-## Configuration
-
-The configuration for this source is `$rekuiper/etc/sources/zmq.yaml`. The format is as below:
+Configure the connector in `$rekuiper/etc/sources/zmq.yaml`:
 
 ```yaml
-#Global Zmq configurations
 default:
   server: tcp://192.168.2.2:5563
+
 test:
   server: tcp://127.0.0.1:5563
 ```
 
-### Global configurations
+### Configuration Parameters
 
-Use can specify the global zmq source settings here. The configuration items specified in `default` section will be taken as default settings for the source when connects to Zero Mq.
+- `server`: Target ZeroMQ publisher endpoint URL (such as `tcp://127.0.0.1:5563`).
 
-### server
+## Custom Configurations
 
-The url of the Zero Mq server that the source will subscribe to.
+Define custom configuration blocks in `zmq.yaml` to connect to distinct ZeroMQ endpoints:
 
-## Override the default settings
-
-If you have a specific connection that need to overwrite the default settings, you can create a customized section. In the previous sample, we create a specific setting named with `test`.  Then you can specify the configuration with option `CONF_KEY` when creating the stream definition (see [stream specs](../../../sqls/streams.md) for more info).
-
-## Sample usage
-
-```text
-demo (
-    ...
-  ) WITH (DATASOURCE="demo", FORMAT="JSON", CONF_KEY="test", TYPE="zmq");
+```yaml
+test:
+  server: tcp://127.0.0.1:5563
 ```
 
-The configuration keys "test" will be used. The Zero Mq topic to subscribe is "demo" as specified in the `DATASOURCE`.
+Reference the configuration using `CONF_KEY="test"`:
+
+```sql
+CREATE STREAM demo () WITH (
+  DATASOURCE = "demo",
+  FORMAT = "JSON",
+  CONF_KEY = "test",
+  TYPE = "zmq"
+);
+```
+
+In this definition, `DATASOURCE` specifies the ZeroMQ subscription topic.
+
+For stream syntax and management details, refer to [Streams Management](../../streams/overview.md).

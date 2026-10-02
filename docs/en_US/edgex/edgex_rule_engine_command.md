@@ -1,69 +1,48 @@
-# Command device with EdgeX rekuiper rules engine
+# Actuate EdgeX Devices Using the rekuiper Rules Engine
 
-## Overview
+This tutorial describes how to actuate EdgeX Foundry devices based on streaming rules in rekuiper. The walkthrough uses the EdgeX virtual device service (`device-virtual`) to receive automated commands.
 
-This document describes how to actuate a device with rules trigger by the rekuiper rules engine. To make the example
-simple, the virtual device [device-virtual](https://github.com/edgexfoundry/device-virtual-go) is used as the actuated
-device. The rekuiper rules engine analyzes the data sent from device-virtual services, and then sends a command to
-virtual device based a rule firing in rekuiper based on that analysis. It should be noted that an application service is
-used to route core data through the rules engine.
+## Architecture and Scenario
+
+An EdgeX application service routes incoming telemetry to rekuiper. When incoming sensor records satisfy rule conditions, rekuiper dispatches command requests back to the EdgeX Core Command service to actuate downstream devices.
+
+![Actuation Flow](./flow.png)
 
 ### Use Case Scenarios
 
-Rules will be created in rekuiper to watch for two circumstances:
+This tutorial configures two automated actuation rules:
 
-1. monitor for events coming from the `Random-UnsignedInteger-Device` device (one of the default virtual device managed
-   devices), and if a `uint8` reading value is found larger than `20` in the event, then send a command
-   to `Random-Boolean-Device` device to start generating random numbers (specifically - set random generation bool to
-   true).
-2. monitor for events coming from the `Random-Integer-Device` device (another of the default virtual device managed
-   devices), and if the average for `int8` reading values (within 20 seconds) is larger than 0, then send a command
-   to `Random-Boolean-Device` device to stop generating random numbers (specifically - set random generation bool to
-   false).
+1. **Rule 1**: Monitor `Random-UnsignedInteger-Device`. When a reading has `uint8 > 20`, send a command to `Random-Boolean-Device` to enable random generation (`EnableRandomization_Bool = true`).
+2. **Rule 2**: Monitor `Random-Integer-Device`. When the average `int8` reading exceeds `0` over a 20-second tumbling window, send a command to `Random-Boolean-Device` to disable random generation (`EnableRandomization_Bool = false`).
 
-These use case scenarios do not have any real business meaning, but easily demonstrate the features of EdgeX automatic
-actuation accomplished via the rekuiper rule engine.
+## Prerequisites
 
-### Prerequisite Knowledge
+Before continuing, verify that:
+- EdgeX Foundry runs with the virtual device service enabled. Refer to the [EdgeX Quick Start](https://docs.edgexfoundry.org/2.0/getting-started/quick-start/).
+- rekuiper is running and connected to EdgeX. Refer to the [EdgeX Rules Engine Tutorial](./edgex_rule_engine_tutorial.md).
 
-This document will not cover basic operations of EdgeX or LF Edge eKuiper. Readers should have basic knowledge of:
+## Create the EdgeX Stream
 
-- Get and start EdgeX. Refer to [Quick Start](https://docs.edgexfoundry.org/2.0/getting-started/quick-start/) for how to
-  get and start EdgeX with the virtual device service.
-- Run the eKuiper Rules Engine. Refer
-  to [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/edgex/edgex_rule_engine_tutorial.md)
-  to understand the basics of eKuiper and EdgeX.
+Create an EdgeX stream named `demo` if it does not already exist:
 
-## Start rekuiper and Create an EdgeX Stream
-
-Make sure you read
-the [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/edgex/edgex_rule_engine_tutorial.md)
-and successfully run rekuiper with EdgeX.
-
-First create a stream that can consume streaming data from the EdgeX application service (rules engine profile). This
-step is not required if you already finished
-the [EdgeX eKuiper Rule Engine Tutorial](https://github.com/lf-edge/ekuiper/blob/master/docs/en_US/edgex/edgex_rule_engine_tutorial.md)
-.
-
-``` bash
+```bash
 curl -X POST \
-  http://$rekuiper_docker:59720/streams \
+  http://localhost:59720/streams \
   -H 'Content-Type: application/json' \
   -d '{"sql": "create stream demo() WITH (FORMAT=\"JSON\", TYPE=\"edgex\")"}'
 ```
 
-## Get and Test the Command URL
+## Discover Device Command Endpoints
 
-Since both use case scenario rules will send commands to the `Random-Boolean-Device` virtual device, use the curl
-request below to get a list of available commands for this device.
+Query the EdgeX Core Command service to discover available actuation commands for `Random-Boolean-Device`:
 
-``` bash
+```bash
 curl http://127.0.0.1:59882/api/v2/device/name/Random-Boolean-Device | jq
 ```
 
-It should print results like those below.
+Example response:
 
-``` json
+```json
 {
   "apiVersion": "v2",
   "statusCode": 200,
@@ -86,90 +65,30 @@ It should print results like those below.
             "valueType": "Bool"
           }
         ]
-      },
-      {
-        "name": "WriteBoolArrayValue",
-        "set": true,
-        "path": "/api/v2/device/name/Random-Boolean-Device/WriteBoolArrayValue",
-        "url": "http://edgex-core-command:59882",
-        "parameters": [
-          {
-            "resourceName": "BoolArray",
-            "valueType": "BoolArray"
-          },
-          {
-            "resourceName": "EnableRandomization_BoolArray",
-            "valueType": "Bool"
-          }
-        ]
-      },
-      {
-        "name": "Bool",
-        "get": true,
-        "set": true,
-        "path": "/api/v2/device/name/Random-Boolean-Device/Bool",
-        "url": "http://edgex-core-command:59882",
-        "parameters": [
-          {
-            "resourceName": "Bool",
-            "valueType": "Bool"
-          }
-        ]
-      },
-      {
-        "name": "BoolArray",
-        "get": true,
-        "set": true,
-        "path": "/api/v2/device/name/Random-Boolean-Device/BoolArray",
-        "url": "http://edgex-core-command:59882",
-        "parameters": [
-          {
-            "resourceName": "BoolArray",
-            "valueType": "BoolArray"
-          }
-        ]
       }
     ]
   }
 }
 ```
 
-From this output, look for the URL associated to the `PUT` command (the first URL listed). This is the command eKuiper
-will use to call on the device. There are two parameters for this command:
+Test actuating the command endpoint manually using `curl`:
 
-- `Bool`: Set the returned value when other services want to get device data. The parameter will be used only
-  when `EnableRandomization_Bool` is set to false.
-- `EnableRandomization_Bool`: Enable/disable the randomization generation of bool values. If this value is set to true,
-  then the 1st parameter will be ignored.
-
-You can test calling this command with its parameters using curl as shown below.
-
-``` bash
+```bash
 curl -X PUT \
   http://edgex-core-command:59882/api/v2/device/name/Random-Boolean-Device/WriteBoolValue \
   -H 'Content-Type: application/json' \
   -d '{"Bool":"true", "EnableRandomization_Bool": "true"}'
 ```
 
-## Create rules
+## Configure Rules
 
-Now that you have EdgeX and eKuiper running, the EdgeX stream defined, and you know the command to
-actuate `Random-Boolean-Device`, it is time to build the rekuiper rules.
+### Rule 1: Enable Random Generation on High Values
 
-### The first rule
+#### Option A: Command via REST Sink
 
-Again, the 1st rule is to monitor for events coming from the `Random-UnsignedInteger-Device` device (one of the default
-virtual device managed devices), and if a `uint8` reading value is found larger than `20` in the event, then send the
-command to `Random-Boolean-Device` device to start generating random numbers (specifically - set random generation bool
-to true).
-
-#### Option 1: Use Rest API
-
-Given the URL and parameters to the command, below is the curl command to declare the first rule in rekuiper.
-
-``` bash
+```bash
 curl -X POST \
-  http://$rekuiper_server:59720/rules \
+  http://localhost:59720/rules \
   -H 'Content-Type: application/json' \
   -d '{
   "id": "rule1",
@@ -184,74 +103,67 @@ curl -X POST \
       }
     },
     {
-      "log":{}
+      "log": {}
     }
   ]
 }'
 ```
 
-#### Option 2: Use Messaging
+#### Option B: Command via Asynchronous MQTT Messaging
 
-See [core-command](https://docs.edgexfoundry.org/3.0/microservices/core/command/Ch-Command/#commands-via-messaging) for details. Take the first rule as an example to describe how to configure it:
+Set EdgeX Core Command environment variables:
+- `MESSAGEQUEUE_EXTERNAL_ENABLED=true`
+- `MESSAGEQUEUE_EXTERNAL_URL=tcp://mqtt-server:1883`
 
-1. Set the MESSAGEQUEUE_EXTERNAL_ENABLED environment variable to true to enable the external messagebus of core-command.
-   Set the MESSAGEQUEUE_EXTERNAL_URL environment variable to the address and port number of the external messagebus.
-2. Create the rule using the following configuration:
+Create the rule with an MQTT action pointing to the command topic:
 
-   ```shell
-   {
-     "sql": "SELECT uint8 FROM demo WHERE uint8 > 20",
-     "actions": [
-       {
-         "mqtt": {
-           "server": "tcp://mqtt-server:1883",
-           "topic": "edgex/command/request/Random-Boolean-Device/WriteBoolValue/set",
-           "dataTemplate": "{\"ApiVersion\": \"v2\", \"contentType\": \"application/json\", \"CorrelationID\": \"14a42ea6-c394-41c3-8bcd-a29b9f5e6840\", \"RequestId\": \"e6e8a2f4-eb14-4649-9e2b-175247911380\", \"Payload\": \"eyJCb29sIjogInRydWUiLCAiRW5hYmxlUmFuZG9taXphdGlvbl9Cb29sIjogInRydWUifQ==\"}"
-         }
-       },
-       {
-         "log":{}
-       }
-     ]
-   }
-   ```
+```json
+{
+  "id": "rule1_mqtt",
+  "sql": "SELECT uint8 FROM demo WHERE uint8 > 20",
+  "actions": [
+    {
+      "mqtt": {
+        "server": "tcp://mqtt-server:1883",
+        "topic": "edgex/command/request/Random-Boolean-Device/WriteBoolValue/set",
+        "dataTemplate": "{\"ApiVersion\": \"v2\", \"contentType\": \"application/json\", \"CorrelationID\": \"14a42ea6-c394-41c3-8bcd-a29b9f5e6840\", \"RequestId\": \"e6e8a2f4-eb14-4649-9e2b-175247911380\", \"Payload\": \"eyJCb29sIjogInRydWUiLCAiRW5hYmxlUmFuZG9taXphdGlvbl9Cb29sIjogInRydWUifQ==\"}"
+      }
+    },
+    {
+      "log": {}
+    }
+  ]
+}
+```
 
-   The payload is the base64-encoding json struct:
+The payload is a base64-encoded representation of:
 
-   ```shell
-   {"Bool":"true", "EnableRandomization_Bool": "true"}
-   ```
+```json
+{"Bool":"true", "EnableRandomization_Bool": "true"}
+```
 
-3. Receive command response message from external MQTT broker on topic ```edgex/command/response/#```
+The Core Command service publishes responses to `edgex/command/response/#`:
 
-   ```shell
-   {
-     "ReceivedTopic": "edgex/device/command/response/device-virtual/Random-Boolean-Device/WriteBoolValue/set",
-     "CorrelationID": "14a42ea6-c394-41c3-8bcd-a29b9f5e6840",
-     "ApiVersion": "v2",
-     "RequestID": "e6e8a2f4-eb14-4649-9e2b-175247911380",
-     "ErrorCode": 0,
-     "Payload": null,
-     "ContentType": "application/json",
-     "QueryParams": {}
-   }
-   ```
+```json
+{
+  "ReceivedTopic": "edgex/device/command/response/device-virtual/Random-Boolean-Device/WriteBoolValue/set",
+  "CorrelationID": "14a42ea6-c394-41c3-8bcd-a29b9f5e6840",
+  "ApiVersion": "v2",
+  "RequestID": "e6e8a2f4-eb14-4649-9e2b-175247911380",
+  "ErrorCode": 0,
+  "Payload": null,
+  "ContentType": "application/json",
+  "QueryParams": {}
+}
+```
 
-### The second rule
+### Rule 2: Disable Random Generation on Positive Moving Average
 
-The 2nd rule is to monitor for events coming from the `Random-Integer-Device` device (another of the default virtual
-device managed devices), and if the average for `int8` reading values (within 20 seconds) is larger than 0, then send a
-command to `Random-Boolean-Device` device to stop generating random numbers (specifically - set random generation bool
-to false).
+#### Option A: Command via REST Sink
 
-#### Option 1: Use Rest API
-
-Here is the curl request to setup the second rule in rekuiper. The same command URL is used as the same device
-action (`Random-Boolean-Device's PUT bool command`) is being actuated, but with different parameters.
-
-``` bash
+```bash
 curl -X POST \
-  http://$rekuiper_server:59720/rules \
+  http://localhost:59720/rules \
   -H 'Content-Type: application/json' \
   -d '{
   "id": "rule2",
@@ -266,19 +178,18 @@ curl -X POST \
       }
     },
     {
-      "log":{}
+      "log": {}
     }
   ]
 }'
 ```
 
-#### Option 2: Use Messaging
+#### Option B: Command via Asynchronous MQTT Messaging
 
-The procedure is the same as the previous step. Use the following configuration to create a rule:
-
-```shell
+```json
 {
-  "sql": "SELECT avg(int8) AS avg_int8 FROM demo WHERE int8 != nil GROUP BY  TUMBLINGWINDOW(ss, 20) HAVING avg(int8) > 0",
+  "id": "rule2_mqtt",
+  "sql": "SELECT avg(int8) AS avg_int8 FROM demo WHERE int8 != nil GROUP BY TUMBLINGWINDOW(ss, 20) HAVING avg(int8) > 0",
   "actions": [
     {
       "mqtt": {
@@ -288,57 +199,34 @@ The procedure is the same as the previous step. Use the following configuration 
       }
     },
     {
-      "log":{}
+      "log": {}
     }
   ]
 }
 ```
 
-## Watch the rekuiper Logs
+## Monitor Execution and Verify Commands
 
-Both rules are now created in rekuiper. rekuiper is busy analyzing the event data coming for the virtual devices looking
-for readings that match the rules you created. You can watch the edgex-kuiper container logs for the rule triggering and
-command execution.
+Monitor container logs to verify trigger firings and command invocations:
 
-``` bash
-docker logs edgex-kuiper
+```bash
+docker logs -f edgex-kuiper
 ```
 
-## Explore the Results
+### Format Dynamic Parameters with Templates
 
-You can also explore the eKuiper analysis that caused the commands to be sent to the service. To see the data from
-the analysis, use the SQL below to query eKuiper filtering data.
-
-``` sql
-SELECT int8, "true" AS randomization FROM demo WHERE uint8 > 20
-```
-
-The output of the SQL should look similar to the results below.
-
-``` json
-[{"int8":-75, "randomization":"true"}]
-```
-
-Let's suppose a service need following data format, while `value` field is read from field `int8`, and `EnableRandomization_Bool` is read from field `randomization`.
-
-```shell
-curl -X PUT \
-  http://edgex-core-command:59882/api/v2/device/name/${deviceName}/command \
-  -H 'Content-Type: application/json' \
-  -d '{"value":-75, "EnableRandomization_Bool": "true"}'
-```
-
-rekuiper uses [Go template](https://golang.org/pkg/text/template/) to extract data from analysis result, and the `dataTemplate` should be similar as following.
+::: v-pre
+To inject calculated values into actuation payloads dynamically, use Go template syntax in `dataTemplate`:
 
 ```text
 "dataTemplate": "{\"value\": {{.int8}}, \"EnableRandomization_Bool\": \"{{.randomization}}\"}"
 ```
+:::
 
-In some cases, you probably need to iterate over returned array values, or set different values with if conditions, then refer to [this link](https://golang.org/pkg/text/template/#hdr-Actions) for writing more complex data template expressions.
+For iterative actions and condition blocks, refer to the [Data Template Guide](../../guide/sinks/data_template.md).
 
-## Extended readings
+## Cross References
 
- If you want to explore more features of eKuiper, please refer to below resources.
-
-- [eKuiper Github code repository](https://github.com/lf-edge/ekuiper/)
-- [eKuiper reference guide](https://github.com/lf-edge/ekuiper/blob/edgex/docs/en_US/reference.md)
+- [EdgeX Rules Engine Tutorial](./edgex_rule_engine_tutorial.md)
+- [REST Sink Guide](../../guide/sinks/builtin/rest.md)
+- [MQTT Sink Guide](../../guide/sinks/builtin/mqtt.md)

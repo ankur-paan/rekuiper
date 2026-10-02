@@ -1,8 +1,8 @@
 # Functions
 
 > [!NOTE]
-> **Verification Status**: Exhaustively tested and verified against live `rekuiper` engine with real streaming MQTT payloads and live mathematical assertions on **2026-10-01 18:00:00 UTC**.  
-> **Master Scorecard**: **162 Verified (100.0%), 0 Unsupported, 0 Divergent/Broken across 162 evaluated functions**:
+> **Verification Status**: Tested and verified against the `rekuiper` runtime with streaming MQTT payloads and live assertions on **2026-10-01 18:00:00 UTC**.  
+> **Scorecard**: **162 Verified (100.0%), 0 Unsupported, 0 Divergent across 162 evaluated functions**:
 >
 > | Category | Document | Total | Verified | Unsupported | Divergent/Broken | Parity Rate |
 > | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -19,26 +19,32 @@
 > | **Transform** | [transform_functions.md](./transform_functions.md) | 11 | 11 | 0 | 0 | **100%** |
 > | **Object** | [object_functions.md](./object_functions.md) | 10 | 10 | 0 | 0 | **100%** |
 > | **Multi-Row** | [multi_row_functions.md](./multi_row_functions.md) | 2 | 2 | 0 | 0 | **100%** |
-> | **Multi-Column**| [multi_column_functions.md](./multi_column_functions.md) | 1 | 1 | 0 | 0 | **100%** |
-> | **Custom** | [custom_functions.md](./custom_functions.md) | Ext | Ext | Ext | 0 | *Plugin-Dep* |
+> | **Multi-Column** | [multi_column_functions.md](./multi_column_functions.md) | 1 | 1 | 0 | 0 | **100%** |
+> | **Custom** | [custom_functions.md](./custom_functions.md) | Ext | Ext | Ext | 0 | *Plugin-Dependent* |
 > | **TOTAL** | | **162** | **162** | **0** | **0** | **100.0%** |
 
+## Built-in Scalar and Aggregate Functions
+
 - [Aggregate Functions](./aggregate_functions.md)
-- [Math Functions](./mathematical_functions.md)
+- [Mathematical Functions](./mathematical_functions.md)
 - [String Functions](./string_functions.md)
 - [Array Functions](./array_functions.md)
 - [Object Functions](./object_functions.md)
 - [Hashing Functions](./hashing_functions.md)
-- [Transform Functions](./transform_functions.md)
+- [Transformation Functions](./transform_functions.md)
 - [JSON Functions](./json_functions.md)
 - [Date and Time Functions](./datetime_functions.md)
 - [Other Functions](./other_functions.md)
+
+## Advanced Stream Functions
 
 - [Analytic Functions](./analytic_functions.md)
 - [Multi-Row Functions](./multi_row_functions.md)
 - [Multi-Column Functions](./multi_column_functions.md)
 - [Window Functions](./window_functions.md)
 
-rekuiper also provides a set of functions though shipped plugins. Users need to install the plugins before using them.
+## Plugin Extensions
+
+rekuiper also provides functions through optional external plugins. Install the relevant plugins before invoking custom functions:
 
 - [Custom Functions](./custom_functions.md)

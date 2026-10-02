@@ -1,66 +1,66 @@
-# Streams management
+# Streams Management
 
-The rekuiper stream command line tools allows you to manage the streams, such as create, describe, show and drop stream definitions.
+The rekuiper stream command-line interface manages stream definitions. You can create, describe, list, drop, and query streams.
 
-## create a stream
+## Create a Stream
 
-The command is used for creating a stream. For more detailed information of stream definition, please refer to [streams](../../sqls/streams.md).
+Use this command to create a new stream. For syntax details, refer to [Streams](../../sqls/streams.md).
 
 ```shell
 create stream $stream_name '$stream_def' | create stream -f $stream_def_file
 ```
 
-- Specify the stream definition in command line.
+### Specify the Stream Definition on the Command Line
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper create stream my_stream '(id bigint, name string, score float) WITH ( datasource = "topic/temperature", FORMAT = "json", KEY = "id")'
 stream my_stream created
 ```
 
-The command create a stream named `my_stream`.
+This command creates a stream named `my_stream`.
 
-- Specify the stream definition in file. If the stream is complex, or the stream is already wrote in text files with well organized formats, you can just specify the stream definition through `-f` option.
+### Specify the Stream Definition in a File
 
-Sample:
+Use the `-f` flag to load complex stream definitions from a text file:
 
 ```shell
 # bin/kuiper create stream -f /tmp/my_stream.txt
 stream my_stream created
 ```
 
-Below is the contents of `my_stream.txt`.
+The file `/tmp/my_stream.txt` contains:
 
-```json
+```sql
 my_stream(id bigint, name string, score float)
     WITH ( datasource = "topic/temperature", FORMAT = "json", KEY = "id");
 ```
 
-## show streams
+## Show Streams
 
-The command is used for displaying all of streams defined in the server.
+Use this command to display all streams defined in the server:
 
 ```shell
 show streams
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper show streams
 my_stream
 ```
 
-## describe a stream
+## Describe a Stream
 
-The command is used for print the detailed definition of stream.
+Use this command to display the schema and configuration options of a stream:
 
 ```shell
 describe stream $stream_name | describe stream $stream_name -json
 ```
 
-Sample:
+Example standard output:
 
 ```shell
 # bin/kuiper describe stream my_stream
@@ -75,9 +75,7 @@ KEY: id
 DATASOURCE: topic/temperature
 ```
 
-You can also use the `-json` option to get json formatted output.
-
-Sample:
+Use the `-json` option to format the output as JSON:
 
 ```shell
 # bin/kuiper describe stream my_stream -json
@@ -104,39 +102,39 @@ Sample:
 }'
 ```
 
-## drop a stream
+## Drop a Stream
 
-The command is used for drop the stream definition.
+Use this command to delete a stream definition:
 
 ```shell
 drop stream $stream_name
 ```
 
-Sample:
+Example command:
 
 ```shell
 # bin/kuiper drop stream my_stream
 stream my_stream dropped
 ```
 
-## query against streams
+## Query Against Streams
 
-The command is used for querying data from stream.
+Use this command to run interactive SQL queries against streams from the console:
 
 ```shell
 query
 ```
 
-Sample:
+Example interactive session:
 
 ```shell
 # bin/kuiper query
 kuiper >
 ```
 
-After typing `query` sub-command, it prompts `kuiper >`, then type SQLs (see [rekuiper SQL reference](../../sqls/overview.md) for how to use rekuiper SQL) in the command prompt and press enter.
+After the `kuiper >` prompt displays, enter an SQL statement (refer to [rekuiper SQL Reference](../../sqls/overview.md)) and press Enter.
 
-The results will be print in the console.
+The CLI displays the results in the terminal:
 
 ```shell
 kuiper > SELECT * FROM my_stream WHERE id > 10;
@@ -144,6 +142,5 @@ kuiper > SELECT * FROM my_stream WHERE id > 10;
 ...
 ```
 
-- Press `CTRL + C` to stop the query;
-
-- If no SQL are type, you can type `quit` or `exit` to quit the `kuiper` prompt console.
+- Press `CTRL + C` to terminate the active query.
+- Enter `quit` or `exit` to exit the interactive prompt console.

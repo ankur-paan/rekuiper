@@ -5,7 +5,7 @@
 > **Scorecard**: **10 Verified, 0 Unsupported, 0 Broken**:  
 > - **Verified (10)**: `keys`, `values`, `object`, `zip`, `items`, `object_construct`, `object_concat`, `erase`, `object_pick`, `obj_to_kvpair_array`.
 
-Object functions are used to manipulate objects/maps.
+Object functions construct, manipulate, and extract data from JSON objects and map structures.
 
 ## KEYS
 
@@ -13,15 +13,15 @@ Object functions are used to manipulate objects/maps.
 keys(obj)
 ```
 
-Return an array containing the keys of the map.
+Returns an array that contains all keys of the object.
 
-example:
+Example:
 
 ```sql
 keys({"a":1, "b":2})
 ```
 
-result:
+Result:
 
 ```sql
 ["a","b"]
@@ -33,19 +33,19 @@ result:
 values(obj)
 ```
 
-example:
+Returns an array that contains all values of the object.
+
+Example:
 
 ```sql
 values({"a":1, "b":2})
 ```
 
-result:
+Result:
 
 ```sql
 [1,2]
 ```
-
-Return an array containing the values of the map.
 
 ## OBJECT
 
@@ -53,16 +53,15 @@ Return an array containing the values of the map.
 object(keys, values)
 ```
 
-Construct an object from an array of keys and an array of values. Keys must be an array of strings. Values must be an
-arbitrary array of the same length as keys.
+Constructs an object from an array of string keys and an array of corresponding values. Both arrays must have the same length.
 
-example:
+Example:
 
 ```sql
 object(["a","b"],[1,2])
 ```
 
-result:
+Result:
 
 ```sql
 {"a":1, "b":2}
@@ -74,16 +73,15 @@ result:
 zip(entries)
 ```
 
-Construct an object from an array of entries. Each entry must itself be an array of size 2: the first element is the
-key (and must be a string), and the second element is the value.
+Constructs an object from an array of two-element entry arrays. In each entry array, the first element is a string key and the second element is the value.
 
-example:
+Example:
 
 ```sql
-zip([["a",1],["b":2]])
+zip([["a",1],["b",2]])
 ```
 
-result:
+Result:
 
 ```sql
 {"a":1, "b":2}
@@ -95,19 +93,18 @@ result:
 items(obj)
 ```
 
-Return an array containing the entries of object. Each entry is a 2-element array; the first is the key, the second is
-the value.
+Returns an array of key-value pairs from the object. Each item in the returned array is a two-element array where the first element is the key and the second element is the value.
 
-example:
+Example:
 
 ```sql
 items({"a":1, "b":2})
 ```
 
-result:
+Result:
 
 ```sql
-[["a",1],["b":2]]
+[["a",1],["b",2]]
 ```
 
 ## OBJECT_CONSTRUCT
@@ -116,17 +113,15 @@ result:
 object_construct(key1, col1, key2, col2, ...)
 ```
 
-Return a struct type object/map constructed by the arguments. The arguments are a series of key value pairs, thus the
-arguments count must be an odd number. The key must be a string, and the value can be of any type. If the value is null,
-the key/value pair will not present in the final object.
+Returns an object constructed from key-value argument pairs. The function requires an even number of arguments. Keys must be strings. If a value is null, the function omits that key-value pair from the output object.
 
-example:
+Example:
 
 ```sql
 object_construct("a", 1, "b", 2)
 ```
 
-result:
+Result:
 
 ```sql
 {"a":1, "b":2}
@@ -138,13 +133,15 @@ result:
 object_concat(obj1, obj2, ...)
 ```
 
-This function concatenates the input objects and returns a new object. It requires a minimum of two input objects. In cases where there are duplicate attribute names among the input objects, the attribute from the last relevant object in the input list is selected and copied to the output object. To illustrate, here's an example:
+Merges multiple input objects into a single new object. The function requires at least two input objects. When duplicate keys exist across objects, the value from the last object in the argument list overwrites earlier values.
+
+Example:
 
 ```sql
 object_concat({"a": 1}, {"b": 2}, {"b": 3})
 ```
 
-result:
+Result:
 
 ```sql
 {"a":1, "b":3}
@@ -156,13 +153,15 @@ result:
 erase(obj, k)
 ```
 
-If k is a string, return a new object where the key k is erased. If k is an array of strings, return a new object where the keys in k are erased.
+Removes specified keys from an object. If `k` is a string, the function removes that single key. If `k` is an array of strings, the function removes all matching keys.
+
+Example:
 
 ```sql
 erase({"baz": [1, 2, 3], "bar": 'hello world',"foo":'emq'}, 'foo')
 ```
 
-result:
+Result:
 
 ```sql
 {"baz": [1, 2, 3], "bar": 'hello world'}
@@ -174,13 +173,15 @@ result:
 object_pick(obj, k)
 ```
 
-If k is a string, return a new object where the key k is preserved. If k is an array of strings, return a new object where the keys in k are preserved.
+Extracts only the specified keys from an object. If `k` is a string, the function retains only that key. If `k` is an array of strings, the function retains all matching keys.
+
+Example:
 
 ```sql
 object_pick({"baz": [1, 2, 3], "bar": 'hello world',"foo":'emq'}, 'foo')
 ```
 
-result:
+Result:
 
 ```sql
 {"foo":'emq'}
@@ -192,13 +193,15 @@ result:
 obj_to_kvpair_array(obj)
 ```
 
-Return an array of key-value pairs converted from an object.
+Converts an object into an array of key-value objects.
+
+Example:
 
 ```sql
 obj_to_kvpair_array({"key1":1, "key2":2})
 ```
 
-result:
+Result:
 
 ```sql
 [{"key":"key1", "value":1},{"key":"key2", "value":2}]

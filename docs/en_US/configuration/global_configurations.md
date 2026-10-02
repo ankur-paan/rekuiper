@@ -1,221 +1,185 @@
-# Basic configurations
+# Global Configurations
 
-The configuration file for rekuiper is at `$kuiper/etc/kuiper.yaml`. The configuration file is yaml format.
-Application can be configured through environment variables. Environment variables are taking precedence over their counterparts
-in the yaml file. In order to use env variable for given config we must use formatting as follows:
-`KUIPER__` prefix + config path elements connected by `__`.
-Example, in case of config:
+The global configuration file for rekuiper is `$kuiper/etc/kuiper.yaml`. The file uses YAML syntax.
+
+You can override YAML configurations using environment variables. Environment variables take precedence over file settings. Format variable names using the `KUIPER__` prefix followed by YAML path keys separated by double underscores (`__`):
+
+```bash
+KUIPER__BASIC__DEBUG=true
+```
+
+## Basic Configuration Options
+
+The `basic` section configures runtime logging, network binding, and security policies:
 
 ```yaml
 basic:
   # debug | info | warn | error | fatal | panic
   loglevel: info 
-  # true|false, with debug level, it prints more debug info
+  # true | false: enables verbose debug logging
   debug: false
-  # true|false, if it's set to true, then the log will be print to console
+  # true | false: outputs logs to stdout console
   consoleLog: false
-  # true|false, if it's set to true, then the log will be print to log file
+  # true | false: outputs logs to the log file
   fileLog: true
   # syslog settings
   syslog:
-    # true|false, if it's set to true, then the log will be print to syslog
     enable: false
-    # The syslog protocol, tcp or udp; Leave empty if no remote syslog server is used
     network: udp
-    # The syslog server address; Leave empty if no remote syslog server is used
     address: localhost:514
-    # The syslog level, supports debug, info, warn, error
     level: info
-    # The syslog tag; Leave empty if no tag is used
     tag: kuiper
-  # Maximum file size in bytes, if this is set, maxAge will be ignored
+  # Maximum file size in bytes before rotation
   rotateSize: 10485760 # 10 MB
-  # Maximum log file count
+  # Maximum number of rotated log files to retain
   rotateCount: 3
-  # How many hours to split the file
+  # Rotation interval in hours
   rotateTime: 24
-  # Maximum file storage hours
+  # Maximum file retention duration in hours
   maxAge: 72
-  # Whether to ignore case in SQL processing. Note that, the name of customized function by plugins are case-sensitive.
+  # Case sensitivity for SQL processing
   ignoreCase: false
   sql:
-    # maxConnections indicates the max connections for the certain database instance group by driver and dsn sharing between the sources/sinks
-    # 0 indicates unlimited
+    # Max connections per database instance group; 0 = unlimited
     maxConnections: 0
-  # rulePatrolInterval indicates the patrol interval for the internal checker to reconcile the scheudle rule
+  # Interval for rule schedule reconciliation
   rulePatrolInterval: 10s
-  # cfgStorageType indicates the storage type to store the config, support `file` and `kv`. When `cfgStorageType` is file, it will save configuration into File. When `cfgStorageType` is `kv`, it will save configuration into the storage defined in `store`
+  # Storage backend for configurations: file or kv
   cfgStorageType: file
-  # If it is enabled, each REST API call will print logs
+  # Log each REST API invocation
   enableRestAuditLog: false
-  # If it is enabled, the rule functions can access the private network.
+  # Allow rules to connect to private network addresses
   enablePrivateNet: false
-  # If it is enabled, APIs can access files outside the data/uploads directory.
+  # Allow APIs to access files outside data/uploads
   allowExternalFileAccess: false
 ```
 
-The configuration item **enablePrivateNet** is used to specify whether the rule functions (e.g. valid func, sinks)
-can access the private network (e.g. localhost, 127.0.0.1). If it is true, the private network can be accessed. Default
-is false for security.
+### Security Options
+
+#### enablePrivateNet
+
+The `enablePrivateNet` option determines whether rules and sinks can connect to private networks (such as `localhost` or `127.0.0.1`). Default is `false` for security.
 
 > [!WARNING]
-> Since version v2.4.0, the default value of `enablePrivateNet` is `false`, which means accessing private network
-> addresses is blocked by default. If your rules rely on accessing local resources (e.g., local REST services, local
-> files), you MUST set this configuration to `true`.
+> Since version 2.4.0, `enablePrivateNet` defaults to `false`. The engine blocks connections to private network addresses by default. If your rules require local network access (such as local REST services or edge brokers), you must set this value to `true`.
 
-The configuration item **allowExternalFileAccess** is used to specify whether file access APIs (e.g. file:// URLs in plugins/schemas) can access files outside the `data/uploads` directory. Default is false for security - only files in the uploads directory are accessible. This prevents path traversal attacks.
+#### allowExternalFileAccess
+
+The `allowExternalFileAccess` option specifies whether file access APIs (such as `file://` URIs) can read files outside the `data/uploads` directory. Default is `false` to prevent path traversal vulnerabilities.
 
 > [!WARNING]
-> When `allowExternalFileAccess` is `false` (default), all file:// URL access is restricted to the `data/uploads` directory. Set to `true` only if you need to access files from other locations on the filesystem.
+> When `allowExternalFileAccess` is `false`, file access is strictly restricted to `data/uploads`. Set to `true` only if you require access to other host filesystem paths.
 
-for debug option in basic following env is valid `KUIPER__BASIC__DEBUG=true` and if used debug value will be set to true.
+#### ignoreCase
 
-The configuration item **ignoreCase** is used to specify whether case is ignored in SQL processing. If it is true, the column name case of the input data can be different from that defined in SQL. If the column name case in SQL statements, stream definitions, and input data can be guaranteed to be exactly the same, it is recommended to set this value to "false" to obtain better performance. Before version 1.10, its default value was true to be compatible with standard SQL; after version 1.10, its default value was changed to false for better performance.
+The `ignoreCase` option controls case sensitivity in SQL processing. When `false`, the engine enforces case matching for column names to optimize parsing performance. Default is `false`.
 
-## Log level
+## Logging Configuration
 
 ```yaml
 basic:
-  # debug | info | warn | error | fatal | panic
   loglevel: info 
-  # true|false, with debug level, it prints more debug info
   debug: false
-  # true|false, if it's set to true, then the log will be print to console
   consoleLog: false
-  # true|false, if it's set to true, then the log will be print to log file
   fileLog: true
-  # Whether to disable the log timestamp, useful when output is redirected to logging system like syslog that already adds timestamps.
   logDisableTimestamp: false
-  # How many hours to split the file
   rotateTime: 24
-  # Maximum file storage hours
   maxAge: 72
 ```
 
-When debug is false, rekuiper's log level can be controlled through logLevel. When debug is true, rekuiper's log level will be fixed to debug.
+When `debug` is `true`, the engine forces log output to debug level regardless of `loglevel`. Set `logDisableTimestamp` to `true` when forwarding logs to external aggregators that inject timestamps.
 
-## System log
+### System Log (syslog)
 
-When the user sets the value of the environment variable named KuiperSyslogKey to true or set syslog enable to true, the
-log will be printed to the syslog. Additional syslog settings are as follows:
+Enable syslog forwarding by setting `basic.syslog.enable: true` or by setting the environment variable `KuiperSyslogKey=true`.
 
 ```yaml
-# syslog settings
 syslog:
-  # true|false, if it's set to true, then the log will be print to syslog
   enable: false
-  # The syslog protocol, tcp or udp; Leave empty if no remote syslog server is used
   network: udp
-  # The syslog server address; Leave empty if no remote syslog server is used
   address: localhost:514
-  # The syslog level, supports debug, info, warn, error
   level: info
-  # The syslog tag; Leave empty if no tag is used
   tag: kuiper
 ```
 
-All the above settings are optional. If the network and address are not set, the local syslog will be used. If the level
-is not set, the default value is info. If the tag is not set, there will be no tag used.
+If you leave `network` and `address` empty, rekuiper connects to the local system syslog daemon.
 
-Since syslog already has its own timestamp, the timestamp in the log can be disabled by setting `logDisableTimestamp` to
-true.
+### Log File Rotation
 
-## Log File Rotation
+When `fileLog` is enabled, the engine rotates logs by size or elapsed time.
 
-If the fileLog is set to true, the log will be printed to the log file. The log file rotation is supported by either
-size or time.
-
-### Rotate by size
-
-These settings are used to control the log file rotation by size:
+#### Rotate by Size
 
 ```yaml
-  # Maximum file size in bytes, if this is set, maxAge will be ignored
-  rotateSize: 10485760 # 10 MB
-  # Maximum log file count
-  rotateCount: 3
+rotateSize: 10485760 # 10 MB
+rotateCount: 3
 ```
 
-If the rotateSize is set to a positive value, the log file will be rotated when the size of the log file exceeds the
-rotateSize. The rotateCount is used to control the maximum number of log files to be kept. If the rotateCount is set to
-0, the log file rotation by size will be disabled.
+When the file size exceeds `rotateSize`, the engine rotates the file. The engine retains up to `rotateCount` archive files.
 
-### Rotate by time
-
-These settings are used to control the log file rotation by time:
+#### Rotate by Time
 
 ```yaml
-  # How many hours to split the file
-  rotateTime: 24
-  # Maximum file storage hours
-  maxAge: 72
+rotateTime: 24
+maxAge: 72
 ```
 
-If the rotateTime is set to a positive value, the log file will be rotated every rotateTime hours. The maxAge is used to
-control the maximum number of hours to keep the log files. If the maxAge is set to 0, the log file rotation by time will
-be disabled.
+The engine splits log files every `rotateTime` hours and deletes archives older than `maxAge` hours.
 
-## Timezone
+## Global Timezone
 
 ```yaml
-# The global time zone from the IANA time zone database, or UTC if not set.
 timezone: UTC
 ```
 
-The global time zone configuration based on the [IANA time zone database](https://www.iana.org/time-zones), if it is left blank, `UTC` will be used as the default time zone, and if it is set to `Local`, the system time zone will be used.
+Specify a timezone name from the [IANA Time Zone Database](https://www.iana.org/time-zones). If empty, the engine uses `UTC`. Set to `Local` to adopt the host system timezone.
 
-> Note: To use time zone configuration in an alpine-based environment, you need to ensure that the time zone data has been properly installed (e.g. `apk add tzdata`).
+> [!NOTE]
+> In Alpine Linux containers, you must install `tzdata` (`apk add tzdata`) to provide timezone definitions.
 
-## Cli Addr
+## CLI Network Binding
 
 ```yaml
 basic:
-  # CLI bind IP
   ip: 0.0.0.0
-  # CLI port
   port: 20498
 ```
 
-## Rest Service Configuration
+Configures the listening address and TCP port for the rekuiper CLI server daemon.
+
+## REST Service Configuration
 
 ```yaml
 basic:
-  # REST service bind IP
   restIp: 0.0.0.0
-  # REST service port
   restPort: 9081
   restTls:
     certfile: /var/https-server.crt
     keyfile: /var/https-server.key
 ```
 
-### restPort
+- `restPort`: The HTTP port for the REST API server.
+- `restTls`: Paths to TLS certificates and private keys. When configured, the REST API listens on HTTPS.
 
-The port for the rest api http server to listen to.
-
-### restTls
-
-The tls cert file path and key file path setting. If restTls is not set, the rest api server will listen on http. Otherwise, it will listen on https.
-
-## authentication
-
-rekuiper will check the `Token` for rest api when `authentication` option is true. please check this file for [more info](../api/restapi/authentication.md).
+### REST Authentication
 
 ```yaml
 basic:
   authentication: false
 ```
 
-## Rule Patrol Configuration
+When `true`, rekuiper requires JWT RSA256 tokens for REST API calls. Refer to [REST Authentication](../api/restapi/authentication.md).
+
+## Rule Patrol Interval
 
 ```yaml
 basic:
   rulePatrolInterval: "10s"
 ```
 
-## Prometheus Configuration
+Specifies the reconciliation interval used by the internal scheduler to inspect and trigger periodic rules.
 
-rekuiper can export metrics to prometheus if `prometheus` option is true. The prometheus will be served with the port specified by `prometheusPort` option.
+## Prometheus Metrics Export
 
 ```yaml
 basic:
@@ -223,169 +187,111 @@ basic:
   prometheusPort: 20499
 ```
 
-For such a default configuration, rekuiper will export metrics and serve prometheus at `http://localhost:20499/metrics`.
+When enabled, rekuiper exports Prometheus metrics on `http://localhost:20499/metrics`. You can set `prometheusPort` to match `restPort` to serve metrics through the REST API port.
 
-The prometheus port can be the same as the rekuiper REST API port. If so, both service will be served on the same server.
-
-## Pluginhosts Configuration
+## Plugin Hosts (Legacy Compatibility)
 
 > [!NOTE]
 > Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. Built-in connectors (including Kafka, SQL, Redis, and WebSocket) are compiled into the core engine. Custom functions and extensions run via WebAssembly (Wasm) or external service microservices.
 
-In legacy eKuiper installations, `pluginHosts` specifies the repository URL hosting pre-built native plugins.
+In legacy installations, `pluginHosts` specifies the repository URL hosting prebuilt native plugins:
 
-Legacy plugin types include:
+| Plugin Type | Legacy Plugins |
+| :--- | :--- |
+| `source` | `random`, `zmq` |
+| `sink` | `file`, `image`, `influx`, `redis`, `tdengine`, `zmq` |
+| `function` | `accumulateWordCount`, `countPlusOne`, `echo`, `geohash`, `image`, `labelImage` |
 
-| plugin types | pre-build plugins                                              |
-|--------------|----------------------------------------------------------------|
-| source       | random zmq                                                     |
-| sink         | file image influx redis tdengine zmq                           |
-| function     | accumulateWordCount countPlusOne echo geohash image labelImage |
+## Sink Cache Configuration
 
-User can get all pre-build plugins names and address by below Rest-APIs:
-
-```shell
-GET http://localhost:9081/plugins/sources/prebuild
-GET http://localhost:9081/plugins/sinks/prebuild
-GET http://localhost:9081/plugins/functions/prebuild
-```
-
-After get the plugin info, users can try these plugins, [more info](../api/restapi/plugins.md)
-
-**Note: only the official released debian based docker images support these operations**
-
-## Rule configurations
-
-Configure the default properties of the rule option. All the configuration can be overridden in rule level.
-Check [rule options](../guide/rules/overview.md#fine-tuning) for detail.
-
-## Sink configurations
-
-Configure the default properties of sink, currently mainly used to configure [cache policy](../guide/sinks/overview.md#Caching). The same configuration options are available at the rules level to override these default configurations.
+Configure default caching behavior for output sinks. You can override these settings at the rule level. Refer to [Sink Caching](../guide/sinks/overview.md#caching).
 
 ```yaml
-  sink:
-  # Control to disable cache or not. If it's set to true, then the cache will be disabled, otherwise, it will be enabled.
+sink:
   enableCache: false
-
-  # The maximum number of messages to be cached in memory.
   memoryCacheThreshold: 1024
-
-  # The maximum number of messages to be cached in the disk.
   maxDiskCache: 1024000
-
-  # The number of messages for a buffer page which is the unit to read/write to disk batchly to prevent frequent IO
   bufferPageSize: 256
-
-  # The interval in millisecond to resend the cached messages
   resendInterval: 0
-
-  # Whether to clean the cache when the rule stops
   cleanCacheAtStop: false
 ```
 
-## Store configurations
+- `enableCache`: Enables or disables disk/memory sink caching.
+- `memoryCacheThreshold`: Maximum message count retained in memory before writing to disk.
+- `maxDiskCache`: Maximum message count retained in disk storage.
+- `bufferPageSize`: Message batch size per disk read/write operation.
+- `resendInterval`: Retransmission interval in milliseconds.
+- `cleanCacheAtStop`: Clears cached data when the rule stops.
 
-### Configuration Storage
+## State and Configuration Storage
 
 ```yaml
 basic:
-  cfgStorageType: kv
+  cfgStorageType: file
 ```
 
-When `basic.cfgStorageType` is kv, the underlying storage used by it will become `store.type`, and the contents of configurations will be stored in the specified storage in the form of key-value pairs.
+Set `cfgStorageType` to `kv` to store configuration data in the database backend defined under `store`.
 
-There is possibility to configure storage of state for application. Default storage layer is sqlite database. There is option to set redis as storage.
-In order to use redis as store type property must be changed into redis value.
-
-### Sqlite
-
-It has properties
-
-* name - name of database file - if left empty it will be `sqliteKV.db`
-
-### Redis
-
-It has properties
-
-* host     - host of redis
-* port     - port of redis
-* password - password used for auth in redis, if left empty auth won't be used
-* timeout  - timeout fo connection
-* connectionSelector - reuse the connection info defined in etc/connections/connection.yaml, mainly used for edgeX redis in secure mode
-  * only applicable to redis connection information
-  * the server, port and password in connection info will overwrite the host port and password above
-  * [more info](../guide/sources/builtin/edgex.md#connection-reusability)
-
-### External State
-
-There is also a configuration item named `extStateType`.
-The configuration's usage is user can store some information in database in advance, when stream processing rules need
-these information,
-they can get them easily by [get_keyed_state](../sqls/functions/other_functions.md#getkeyedstate) function in SQL.
-
-*Note*: `type` and `extStateType` can be configured differently.
-
-### Config
+### Store Settings
 
 ```yaml
-    store:
-      #Type of store that will be used for keeping state of the application
-      type: sqlite
-      extStateType: redis
-      redis:
-        host: localhost
-        port: 6379
-        password: kuiper
-        #Timeout in ms
-        timeout: 1000
-      sqlite:
-        #Sqlite file name, if left empty name of db will be sqliteKV.db
-        name:
+store:
+  type: sqlite
+  extStateType: redis
+  redis:
+    host: localhost
+    port: 6379
+    password: kuiper
+    timeout: 1000
+    connectionSelector: edgex.redismsgbus
+  sqlite:
+    name: sqliteKV.db
 ```
 
-## Portable plugin configurations
+- `type`: Database backend for internal state (`sqlite`, `redis`, or `fdb`).
+- `extStateType`: Storage backend queried by SQL [get_keyed_state](../sqls/functions/other_functions.md#get_keyed_state).
+- `sqlite.name`: SQLite database filename (defaults to `sqliteKV.db`).
+- `redis.connectionSelector`: Reuses connection credentials defined in `etc/connections/connection.yaml`.
 
-This section configures the portable plugin runtime.
+## Portable Plugin Runtime
+
+Configure execution parameters for Python portable plugins:
 
 ```yaml
-  portable:
-      # The executable of python. Specify this if you have multiple python instances in your system
-      # or other circumstance where the python executable cannot be successfully invoked through the default command.
-      pythonBin: python
-      # control init timeout in ms. If the init time is longer than this value, the plugin will be terminated.
-      initTimeout: 5000
-      # set the timeout for plugin message sending in milliseconds.
-      sendTimeout: 5000
-      # set the timeout for plugin message receiving in milliseconds.
-      recvTimeout: 5000
+portable:
+  pythonBin: python
+  initTimeout: 5000
+  sendTimeout: 5000
+  recvTimeout: 5000
 ```
 
-## Ruleset Provision
+- `pythonBin`: Path to the Python executable.
+- `initTimeout`: Initialization timeout in milliseconds.
+- `sendTimeout`: IPC message send timeout in milliseconds.
+- `recvTimeout`: IPC message receive timeout in milliseconds.
 
-Support file based stream and rule provisioning on startup. Users can put
-a [ruleset](../api/restapi/ruleset.md#ruleset-format) file named `init.json` into `etc` directory to initialize the
-ruleset. The ruleset will only be import on the first startup of eKuiper.
+## Ruleset Provisioning
 
-## Configure FoundationDB as storage
+rekuiper supports automatic provisioning on first startup. Place a [ruleset file](../api/restapi/ruleset.md#ruleset-format) named `init.json` into the `etc` directory. The engine loads this ruleset once during initial startup.
 
-rekuiper uses sqlite by default to store some meta-information. At the same time, eKuiper also supports using FoundationDB as meta-storage data. We can achieve this through the following steps:
+## FoundationDB Storage Backend
 
-* Confirm that the environment where rekuiper is located has installed and started FoundationDB, and confirm the storage path used by FoundationDB. Please refer to [Official Document](https://apple.github.io/foundationdb/administration.html#default-cluster-file)
-* Confirm the APIVersion of the fdb c language library used by the eKuiper host, and replace the eKuiper dependent library with the corresponding version. Taking APIVersion 6.2.0 as an example, execute the following command in the eKuiper home directory:
+To use FoundationDB as the metadata storage engine:
 
-```shell
+1. Install FoundationDB client libraries on the host. Refer to the [FoundationDB Documentation](https://apple.github.io/foundationdb/administration.html#default-cluster-file).
+2. Download matching Go bindings in the rekuiper directory:
+
+```bash
 go get github.com/apple/foundationdb/bindings/go@6.2.0
 ```
 
-* Execute `make build_with_fdb` to compile kuiperd
-* Modify the configuration as follows:
+3. Compile the binary using `make build_with_fdb`.
+4. Configure `store` settings in `etc/kuiper.yaml`:
 
 ```yaml
-    store:
-      #Type of store that will be used for keeping state of the application
-      type: fdb
-      extStateType: fdb
-      fdb:
-        path: <path-of-fdb-cluster-file>
+store:
+  type: fdb
+  extStateType: fdb
+  fdb:
+    path: /etc/foundationdb/fdb.cluster
 ```

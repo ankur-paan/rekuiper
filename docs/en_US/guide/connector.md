@@ -1,92 +1,92 @@
 # Connectors
 
-In the realm of stream processing, the ability to seamlessly interact with various data sources and sinks is of paramount importance. eKuiper, being a lightweight edge stream processing engine, recognizes this necessity and incorporates it through the use of "connectors."
+Connectors connect the rekuiper stream processing engine to external systems, such as message brokers, databases, and file systems.
 
-Connectors in rekuiper serve as the bridge between the processing engine and external systems, including databases, message brokers, or other data stores. By leveraging connectors, rekuiper can ingest data from diverse sources, process it in real-time, and then dispatch the processed data to the desired destinations. This ensures that rekuiper can be integrated into a wide variety of environments and use cases, from IoT edge devices to cloud-based infrastructures. They are categorized into two primary types:
+Connectors ingest data from external systems into rekuiper and dispatch processed results to target endpoints. Connectors support edge environments, local networks, and cloud infrastructures.
 
-- **Source Connectors**: Responsible for ingesting data into the eKuiper platform from various external sources.
-- **Sink Connectors**: Handle the dispatch of processed data from rekuiper to external sinks or endpoints.
+Connectors belong to two categories:
 
-The architecture of rekuiper provides both built-in connectors, which cater to common data sources and sinks, and plugin-based connectors, allowing for extensibility and integration with custom or third-party systems. Proper configuration and management of these connectors are crucial for the efficient and reliable operation of the eKuiper platform.
+- **Source Connectors**: Ingest data from external systems into the rekuiper processing pipeline.
+- **Sink Connectors**: Dispatch processed query results from rekuiper to external destinations.
 
-This chapter details the configuration, usage, and best practices associated with both source and sink connectors in rekuiper.
+rekuiper provides built-in connectors for common protocols and supports plugin connectors for custom protocols.
 
 ## Source Connectors
 
-[Source connectors](./sources/overview.md) in rekuiper are designed to facilitate data ingestion from various external sources into the platform. Within the eKuiper framework, each source can operate in one of two distinct modes: a "Streaming" mode, where data events are streamed sequentially, or a "Reference" mode (often used in the context of 'tables'), where specific external content is fetched based on queries. To leverage these capabilities, users simply integrate these sources into their streams or tables, specifying the desired source type and fine-tuning behavior through configurable attributes.
+[Source connectors](./sources/overview.md) ingest external data into streams or tables. Sources operate in two modes:
 
-**Built-in Source Connectors**
+1. **Streaming mode**: Ingests sequential, unbounded events in real time.
+2. **Reference mode**: Fetches batch snapshots or performs key lookups (used with tables).
 
-Below are the built-in source connectors provided by rekuiper:
+To configure a source, specify the source type in the `WITH` clause of the stream or table definition.
 
-- [MQTT source](./sources/builtin/mqtt.md): A source to read data from MQTT topics.
-- [EdgeX source](./sources/builtin/edgex.md): A source to read data from EdgeX foundry.
-- [HTTP pull source](./sources/builtin/http_pull.md): A source to pull data from HTTP servers.
-- [HTTP push source](./sources/builtin/http_push.md): A source to push data to rekuiper through HTTP.
-- [File source](./sources/builtin/file.md): A source to read from file, usually used as tables.
-- [Memory source](./sources/builtin/memory.md): A source to read from rekuiper memory topic to form rule pipelines.
-- [Redis source](./sources/builtin/redis.md): A source to lookup from Redis as a lookup table.
+### Built-in Source Connectors
 
-**Plugin-based Source Connectors**
+rekuiper includes the following built-in source connectors:
 
-For scenarios where custom data sources or specific third-party integrations are needed, eKuiper offers the flexibility of plugin-based source connectors:
+- [MQTT source](./sources/builtin/mqtt.md): Ingests messages from MQTT topics.
+- [EdgeX source](./sources/builtin/edgex.md): Ingests event data from EdgeX Foundry message buses.
+- [HTTP pull source](./sources/builtin/http_pull.md): Pulls data periodically from HTTP endpoints.
+- [HTTP push source](./sources/builtin/http_push.md): Receives incoming HTTP requests sent to rekuiper endpoints.
+- [File source](./sources/builtin/file.md): Reads data from local files. Commonly used as tables.
+- [Memory source](./sources/builtin/memory.md): Consumes events from internal memory topics to create rule pipelines.
+- [Redis source](./sources/builtin/redis.md): Queries key-value data in Redis as a lookup table.
 
-- [SQL source](./sources/plugin/sql.md): A source to periodically fetch data from SQL DB.
-- [Video Source](./sources/plugin/video.md): A source to query video streams.
-- [Random source](./sources/plugin/random.md): A source to generate random data for testing.
-- [Zero MQ source](./sources/plugin/zmq.md): A source to read data from Zero MQ.
-- [Kafka source](./sources/plugin/kafka.md): A source to read data from Kafka
+### Plugin Source Connectors
+
+Use plugin connectors for specialized data protocols or custom systems:
+
+- [SQL source](./sources/plugin/sql.md): Queries relational databases on a schedule or as a lookup table.
+- [Video source](./sources/plugin/video.md): Captures image frames from video streams.
+- [Random source](./sources/plugin/random.md): Generates synthetic mock data for functional testing.
+- [ZeroMQ source](./sources/plugin/zmq.md): Consumes messages from ZeroMQ publishers.
+- [Kafka source](./sources/plugin/kafka.md): Consumes event streams from Apache Kafka topics.
 
 ## Sink Connectors
 
-Sink connectors handle the task of dispatching the processed data from rekuiper to various external endpoints or sinks. These sinks can directly interface with platforms like MQTT and EdgeX, among others, while also offering cache mechanisms to handle network interruptions and ensure data consistency. Additionally, users have the flexibility to customize sink behaviors through dynamic properties and resource reuse, streamlining integration and improving scalability.
+Sink connectors transfer processed output records to external endpoints. Sinks support disk caching to manage network interruptions and prevent data loss. Sinks also support dynamic properties and shared connection pools.
 
-Similar to source connectors, sink connectors are also categorized into built-in and plugin-based types.
+### Built-in Sink Connectors
 
-**Built-in Sink Connectors**
+rekuiper includes the following built-in sink connectors:
 
-Below are the built-in sink connectors provided by rekuiper:
+- [MQTT sink](./sinks/builtin/mqtt.md): Publishes messages to an external MQTT broker.
+- [EdgeX sink](./sinks/builtin/edgex.md): Sends events to EdgeX Foundry. Available when compiled with the EdgeX build tag.
+- [REST sink](./sinks/builtin/rest.md): Sends HTTP requests to external web servers.
+- [Redis sink](./sinks/builtin/redis.md): Writes key-value records and data structures to Redis.
+- [File sink](./sinks/builtin/file.md): Writes output records to local files.
+- [Memory sink](./sinks/builtin/memory.md): Publishes records to internal memory topics to feed downstream rules.
+- [Log sink](./sinks/builtin/log.md): Writes output records to system log files for diagnostic debugging.
+- [Nop sink](./sinks/builtin/nop.md): Discards output records without I/O operations for performance benchmarking.
 
-- [MQTT sink](./sinks/builtin/mqtt.md): A sink to external MQTT broker.
-- [EdgeX sink](./sinks/builtin/edgex.md): A sink to EdgeX Foundry. This sink only exists when enabling the edgex build tag.
-- [Rest sink](./sinks/builtin/rest.md): A sink to external HTTP server.
-- [Redis sink](./sinks/builtin/redis.md): A sink to Redis.
-- [File sink](./sinks/builtin/file.md): A sink to a file.
-- [Memory sink](./sinks/builtin/memory.md): A sink to rekuiper memory topic to form rule pipelines.
-- [Log sink](./sinks/builtin/log.md): A sink to log, usually for debugging only.
-- [Nop sink](./sinks/builtin/nop.md): A sink to nowhere. It is used for performance testing now.
+### Plugin Sink Connectors
 
-### Plugin-based Sink Connectors
+Use plugin sink connectors for external platforms and custom targets:
 
-For specialized data dispatch requirements or integrations with particular platforms, rekuiper supports plugin-based sink connectors:
+- [InfluxDB sink](./sinks/plugin/influx.md): Writes time-series points to InfluxDB v1.x.
+- [InfluxDB v2 sink](./sinks/plugin/influx2.md): Writes time-series points to InfluxDB v2.x.
+- [Image sink](./sinks/plugin/image.md): Writes binary image frames to local storage.
+- [ZeroMQ sink](./sinks/plugin/zmq.md): Publishes messages to ZeroMQ subscribers.
+- [Kafka sink](./sinks/plugin/kafka.md): Produces messages to Apache Kafka topics.
 
-- [InfluxDB sink](./sinks/plugin/influx.md): A sink to InfluxDB `v1.x`.
-- [InfluxDBV2 sink](./sinks/plugin/influx2.md): A sink to InfluxDB `v2.x`.
-- [Image sink](./sinks/plugin/image.md): A sink to an image file. Only used to handle binary results.
-- [Zero MQ sink](./sinks/plugin/zmq.md): A sink to Zero MQ.
-- [Kafka sink](./sinks/plugin/kafka.md): A sink to Kafka.
+### Data Templates in Sinks
 
-### Data Templates in Sink Connectors
-
-[Data templates](./sinks/data_template.md) in rekuiper allow for "secondary processing" of analysis results to cater to the diverse formatting requirements of different sink systems. Utilizing the Golang template system, rekuiper provides mechanisms for dynamic data transformation, conditional outputs, and iterative processing. This ensures compatibility and precise formatting for various sinks.
+[Data templates](./sinks/data_template.md) transform output payloads to match target external formats. Data templates use the Golang text template syntax to support field mapping, conditional formatting, and iteration.
 
 ## Batch Configuration
 
-For advanced data stream processing, eKuiper offers an array of connectors like Memory, File, MQTT, and more. To streamline the integration, eKuiper’s REST API introduces the capability for batch configuration, allowing users to simultaneously import or export multiple configurations.
-
-Example
+rekuiper supports batch import and export of connector, stream, and rule configurations through the REST API:
 
 ```json
 {
-    "streams": { ... },
-    "tables": { ... },
-    "rules": { ... },
-    "nativePlugins": { ... },
-    "portablePlugins": { ... },
-    "sourceConfig": { ... },
-    "sinkConfig": { ... },
-    ...
+  "streams": {},
+  "tables": {},
+  "rules": {},
+  "nativePlugins": {},
+  "portablePlugins": {},
+  "sourceConfig": {},
+  "sinkConfig": {}
 }
 ```
 
-More details can be found at [Data Import/Export Management](../api/restapi/data.md)
+For configuration import and export procedures, refer to [Data Import and Export Management](../api/restapi/data.md).

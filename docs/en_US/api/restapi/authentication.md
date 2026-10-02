@@ -1,15 +1,19 @@
-## Authentication
+# REST API Authentication
 
-eKuiper support `JWT RSA256` authentication for the RESTful management APIs since `1.4.0` if enabled . Users need put their Public Key in `etc/mgmt` folder and use the corresponding Private key to sign the JWT Tokens.
-When user request the RESTful apis, put the `Token` in http request headers in the following format:
+rekuiper supports `JWT RSA256` authentication for management REST APIs when enabled.
 
-```go
-Authorization: XXXXXXXXXXXXXXX
+To enable authentication:
+1. Place your RSA public key file in the `etc/mgmt` directory.
+2. Sign your JWT tokens using the matching RSA private key.
+3. Include the token in HTTP request headers:
+
+```http
+Authorization: <JWT_TOKEN>
 ```
 
-If the token is correct, rekuiper will respond the result; otherwise, it will return http `401`code.
+If the token validates successfully, the server processes the request. If validation fails, the server returns HTTP status code `401 Unauthorized`.
 
-### JWT Header
+## JWT Header
 
 ```json
 {
@@ -18,31 +22,31 @@ If the token is correct, rekuiper will respond the result; otherwise, it will re
 }
 ```
 
-### JWT payload
+## JWT Payload Claims
 
-The JWT Payload should use the following format
+The JWT payload must use the following claim schema:
 
-| field | optional | meaning                                                               |
-|-------|----------|-----------------------------------------------------------------------|
-| iss   | false    | Issuer , must use the same name with the public key put in `etc/mgmt` |
-| aud   | false    | Audience , must be `eKuiper`                                          |
-| exp   | true     | Expiration Time                                                       |
-| jti   | true     | JWT ID                                                                |
-| iat   | true     | Issued At                                                             |
-| nbf   | true     | Not Before                                                            |
-| sub   | true     | Subject                                                               |
+| Claim | Required | Description |
+| :--- | :--- | :--- |
+| `iss` | Yes | Issuer. Must match the filename of the public key stored in `etc/mgmt`. |
+| `aud` | Yes | Audience. Must be set to `eKuiper`. |
+| `exp` | No | Expiration timestamp in Unix epoch seconds. |
+| `jti` | No | Unique JWT identifier. |
+| `iat` | No | Issuance timestamp in Unix epoch seconds. |
+| `nbf` | No | Not-before timestamp in Unix epoch seconds. |
+| `sub` | No | Subject identifier. |
 
-There is an example in json format
+Example payload:
 
 ```json
 {
   "iss": "sample_key.pub",
-  "adu": "eKuiper"
+  "aud": "eKuiper"
 }
 ```
 
-When use this format, user must make sure the correct Public key file `sample_key.pub` are under `etc/mgmt` .
+Ensure that the public key file `sample_key.pub` exists in the `etc/mgmt` directory.
 
-### JWT Signature
+## JWT Signature
 
-need use the Private key to sign the Tokens and put the corresponding Public Key in `etc/mgmt` .
+Sign the token using your RSA private key. rekuiper verifies the signature against the matching public key located in `etc/mgmt`.

@@ -5,7 +5,7 @@
 > **Scorecard**: **1 / 1 Window Functions Fully Verified with Live Data (100% Parity)**:  
 > `row_number()` verified sequentially numbering stream events (1, 2, 3...) in live pipeline.
 
-A window function performs a calculation across a set of table rows that are somehow related to the current row. This is comparable to the type of calculation that can be done with an aggregate function. For now, window functions can only be used in select fields.
+A window function performs a calculation across a set of stream or table rows related to the current row. This calculation resembles an aggregate function. Currently, you can use window functions only in the `SELECT` clause.
 
 ## ROW_NUMBER
 
@@ -13,4 +13,4 @@ A window function performs a calculation across a set of table rows that are som
 row_number()
 ```
 
-ROW_NUMBER numbers all rows sequentially (for example 1, 2, 3, 4, 5).
+Assigns a sequential integer to each row in the window or result set, starting from 1 (for example: 1, 2, 3, 4, 5).

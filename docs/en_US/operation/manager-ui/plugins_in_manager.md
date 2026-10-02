@@ -1,23 +1,19 @@
-## How to display custom plugins in the installation list of the management console
+# Custom Plugins in the Management Console
 
 > [!NOTE]
-> Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. Core connectors (Kafka, SQL, Redis, WebSocket) are compiled into the binary. Custom functions and extensions use WebAssembly (Wasm) or external service microservices. This guide describes the metadata schema used by the management console.
+> Go C-shared native dynamic plugins (`.so`) are not supported in rekuiper. Core connectors (Kafka, SQL, Redis, and WebSocket) are compiled into the binary. Custom functions and extensions run via WebAssembly (Wasm) or external service microservices. This guide describes the metadata schema used by the management console.
 
-### Overview
+The management console uses JSON metadata files to render configuration forms, help documentation links, and input field validation for plugins.
 
-eKuiper and its management console provide a metadata mechanism for plugins. On the management console, users can inspect plugin metadata and interfaces.
+## Plugin Metadata Format
 
-### Plugin metadata
+Plugin metadata files use JSON syntax. The schema varies by plugin type (`source`, `sink`, or `function`).
 
-The plugin metadata is a json format file used to describe the information of the plugin. This information will be displayed on the management console. It can also be used for the management console to generate the plugin configuration page.
+### Source Metadata
 
-#### Metadata format
+Source metadata defines basic author information and configuration property groups. For schema definitions, refer to [Source Metadata Specifications](../../extension/native/develop/overview.md#source-metadata-file-format).
 
-The plugin metadata is a json format file, and different plugin types support different attributes.
-
-**Source**
-
-For detailed configuration of source metadata, please refer to [source metadata configuration](../../extension/native/develop/overview.md#source-metadata-file-format). Examples of configuration files are as follows:
+Example metadata file:
 
 ```json
 {
@@ -60,80 +56,63 @@ For detailed configuration of source metadata, please refer to [source metadata 
 }
 ```
 
-The configuration parameters of Source metadata are mainly consist of two parts:
+The metadata contains two primary sections:
 
-**about**
+- **`about`**: Contains metadata fields, including author name, company, documentation URL, and multi-language descriptions. The console displays this information when users select the stream type.
+- **`properties`**: Describes configurable parameter fields. In sources, properties are organized into configuration groups (such as `default`). Each group contains attribute metadata for UI input controls.
 
-Describe the basic information of the plugin, including plug-in author, help file, description, etc. All attributes support multi-language description. After the plugin is installed, when the stream type is selected on the stream management page of the management console, the information defined in the plugin metadata will be displayed. After the plugin is selected, a link to the help document defined by the metadata will be displayed on the interface.
+In the console, open the stream management interface and select **Source Configuration** to view and edit configuration groups:
 
-![plugin abouot](./resources/source_about.png)
+![Source Configuration Groups](./resources/source_confkey.png)
 
-**properties**
+Click a configuration group to edit its parameters:
 
-Describe the configurable attribute information of the plugin, including parameter information and how to display on the interface. The attribute information of Source is specified by the corresponding configuration file, and multiple configuration groups can be specified in the configuration file. For details, please refer to [Source Configuration Document](../../extension/native/develop/source.md#Deal-with-configuration). In the metadata file, there can be multiple configuration group names under `properties`, such as `default` in the example; each configuration group has multiple attribute metadata.
+![Source Configuration Form](./resources/source_conf.png)
 
-On the stream management page of the management console, click `Source Configuration` to expand any source, and all configuration groups of metadata can be displayed.
+### Sink Metadata
 
-![plugin conf group](./resources/source_confkey.png)
+Sink metadata defines action properties configured during rule creation. For schema details, refer to [Sink Metadata Specifications](../../extension/native/develop/overview.md#sink-metadata-file-format).
 
-Click any configuration group to view the configuration group parameters. Click the add icon to enter the parameter configuration page as shown below. The displayed name and control information of parameter configuration come from the definition of metadata JSON file.
+- **`about`**: Matches the source metadata format. The console displays these descriptions in the rule sink selection dialog.
+- **`properties`**: Defines form fields rendered in the rule editor when adding a sink action. Unlike sources, sinks do not use configuration groups.
 
-![source configure](./resources/source_conf.png)
+![Sink Configuration Dialog](./resources/sink_conf.png)
 
-**Sink**
+### Function Metadata
 
-Sink metadata configuration is basically the same as Source. For detailed configuration, please refer to [sink metadata configuration](../../extension/native/develop/overview.md#sink-metadata-file-format).
+Function metadata defines function signatures and code completion prompts for the SQL editor. Refer to [Function Metadata Specifications](../../extension/native/develop/overview.md#functions-metadata-file-format).
 
-The configuration parameters of Sink metadata mainly consist of two parts:
+![Function Prompts](./resources/function_about.png)
 
-**about**
+## Packaging Guidelines
 
-Describe the basic information of the plugin, including plugin author, help file, description, etc. All attributes support multi-language description. After the plugin is installed, on the rule creation page of the management console, click the `add` button in the action module, and click the drop-down box in the pop-up window to select sink. The information defined in the plugin metadata will be listed in the drop-down box.
+To register custom metadata in the management console:
 
-![sink about](./resources/sink_about.png)
+1. Name the metadata file to match the plugin name (for example: `mySource.json`).
+2. Store the metadata JSON file in the root directory of the plugin `.zip` archive.
 
-**properties**
+## Publishing to a Plugin Server (Legacy Compatibility)
 
-Describe the configurable attribute information of the plugin, including parameter information and how to display on the interface. Unlike Source, the attributes of Sink are not stored in the configuration file, but are configured when the rule is created. In the corresponding metadata configuration, it no longer has the concept of configuration group for Sink. On the rule creation page of the management console, in the pop-up window of adding action , after selecting the plugin, the help document link and the attributes defined in the metadata will be displayed. It is worth noting that Sink has some [common attributes](../../guide/sinks/overview.md#common-properties), which will be displayed in all sinks.
-
-![sink config](./resources/sink_conf.png)
-
-**Functions**
-
-For detailed configuration of Function metadata, please refer to [sink metadata configuration](../../extension/native/develop/overview.md#functions-metadata-file-format). Among them, the `about` part is exactly the same as Source and Sink. The `function` part is configured with the name, examples and prompt information of the function, which are used for code prompting in the SQL editor of the new rule.
-
-![function about](./resources/function_about.png)
-
-### Plugin compilation and packaging format
-
-For plugin development, compilation and packaging, please refer to [Plugin Development Tutorial](../../extension/native/develop/plugins_tutorial.md). To display custom plugins in the management console, the following principles need to be followed:
-
-1. The name of plugin metadata file should be the same as the plugin name, which should be a json file, such as `mySource.json`.
-2. The plugin metadata file should be placed in the root directory of the packaged zip file.
-
-### Release to web server
-
-In `etc/kuiper.yaml`, there is a `pluginHosts` configuration item, and users can configure the server list here. In addition to the official plugin releasing address, users can add their local plugin releasing address here. However, there are requirements for the structure and content of the directory when the plugin is released. The deployment service should be
+Configure hosting endpoints in `etc/kuiper.yaml` under `pluginHosts`. Published archive paths must follow this directory structure:
 
 ```text
 https://$host/$folder/$version/$os/$type/$plugin.zip
 ```
 
-Example:  https://127.0.0.1:9090/kuiper-plugins/1.7.1/debian/sinks/sql.zip
+Example URL:
 
-Among them:
+```text
+https://127.0.0.1:9090/kuiper-plugins/1.7.1/debian/sinks/sql.zip
+```
 
-1. $version: eKuiper version number used for plugin compilation
-2. $os: The operating system used for the plugin compilation. If the plugin is compiled in the default eKuiper Docker image, the value is debian.
-3. $type: plugin type, which can be `sources`, `sinks`, `functions`.
+URL path variables:
+- `$version`: The eKuiper compilation version string.
+- `$os`: The compilation target operating system (`debian`).
+- `$type`: The plugin category (`sources`, `sinks`, or `functions`).
 
-### Limitation
+## Compilation Constraints (Legacy)
 
-Due to the limitation of `Go` language plugin mechanism, the compilation environment of the plugin must be the same as the `eKuiper` environment. Therefore, it is recommended that the plugin be compiled in a `Docker` container of the same version as `eKuiper`. At the same time, because some libraries in the `alpine` environment are missing, it is not recommended to run plugins on it. Therefore, if you need to install and run the plugin, it is recommended to use the following container:
+Native Go plugins require an identical toolchain and dependency environment to the host engine binary:
 
-- eKuiper: Use slim image, such as `1.7.1-slim`
-- Plugin: compile with the default image of the corresponding version, such as `1.7.1-dev`
-
-### Summary
-
-eKuiper management console provides a display mechanism for custom plugins. User only needs to add the plugin metadata file in the custom plugin package. At the same time, users can customize the plugin  repository, so that plugins can be installed and used conveniently from the console.
+- **Runtime**: Run `slim` images (for example: `1.7.1-slim`).
+- **Compilation**: Compile plugins in matching development images (for example: `1.7.1-dev`).

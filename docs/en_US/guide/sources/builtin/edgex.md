@@ -3,20 +3,22 @@
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-rekuiper's EdgeX connector seamlessly integrates with EdgeX instances, allowing for efficient data ingestion and output. While it can function both as a source and a [sink connector](../../sinks/builtin/edgex.md), this section focuses on its role as a source connector.
+The EdgeX source connector subscribes to messages from the EdgeX message bus and routes them into the rekuiper stream processing engine.
 
-rekuiper's EdgeX source connector can subscribe to the message from [EdgeX message bus](https://github.com/edgexfoundry/go-mod-messaging) and feed into the eKuiper streaming process pipeline. rekuiper's EdgeX source connector is tailored to consume events directly from EdgeX, ensuring effective stream processing without any manual schema definitions, thanks to EdgeX's predefined data types in its reading objects.
+The connector processes events without manual schema definitions by using the predefined data types in EdgeX reading objects.
 
-## Configurations
+The EdgeX connector operates as both a source connector and a [sink connector](../../sinks/builtin/edgex.md). This document explains source connector configuration and usage.
 
-The connector in rekuiper can be configured with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md), or configuration file. This section focuses on configuring rekuiper connectors with the configuration file.
+## Configuration Overview
 
-rekuiper's default EdgeX source configuration resides at `$rekuiper/etc/sources/edgex.yaml`. This configuration serves as a base for all EdgeX connections. However, for specific use cases, you might need [custom configurations](#custom-configurations). rekuiper's [connector selector](../../connector.md#connection-selector) further enhances this by allowing connection reuse across configurations.
+Configure the connector using [environment variables](../../../configuration/configuration.md#environment-variable-syntax), the [REST API](../../../api/restapi/configKey.md), or the configuration file.
 
-See below for a demo configuration with the global configuration and a customized `demo1` section.
+The default configuration file is `$rekuiper/etc/sources/edgex.yaml`. Settings defined in the `default` section serve as global defaults. Custom configurations in separate sections override default values.
+
+Example configuration file:
 
 ```yaml
-#Global Edgex configurations
+# Global EdgeX configurations
 default:
   protocol: tcp
   server: localhost
@@ -28,75 +30,59 @@ default:
 #    Username: user1
 #    Password: password
 
-#Override the global configurations
-demo1: #Conf_key
+# Override global configurations
+demo1:
   protocol: tcp
   server: 10.211.55.6
   port: 5571
   topic: rules-events
 ```
 
-## Global Configuration
+## Global Configurations
 
-Users can specify the global EdgeX configurations here. The configuration items specified in `default` section will be taken as default configurations for all EdgeX connections.
+Properties in the `default` section apply to all EdgeX connections unless explicitly overridden.
 
-### Connection Configurations
+### Connection Parameters
 
-- `protocol`:  The protocol connects to EdgeX message bus, default value is `tcp`.
-- `server`: The server address of  EdgeX message bus, default value is `localhost`.
-- `port`: The port of EdgeX message bus, default value is `5573`.
+- `protocol`: Protocol used to connect to the EdgeX message bus. Default is `tcp`.
+- `server`: Server host address of the EdgeX message bus. Default is `localhost`.
+- `port`: Port number of the EdgeX message bus. Default is `5573`.
 
-### Connection Reusability
+### Connection Reuse
 
-- `connectionSelector`: Specify the stream to reuse the connection to EdgeX message bus. For example, `edgex.redisMsgBus` in the below example. Note: The connection profile is located in `connections/connection.yaml`. More details can be found at [Connection Selector](../../connector.md#connection-selector).
+- `connectionSelector`: Specifies a named connection profile from `connections/connection.yaml` (for example, `edgex.redisMsgBus`). For details, refer to [Connection Management](../../connections/overview.md).
 
-  ```yaml
-  #Global Edgex configurations
-  default:
+```yaml
+default:
   protocol: tcp
   server: localhost
   port: 5573
   connectionSelector: edgex.redisMsgBus
   topic: rules-events
   messageType: event
-  #  optional:
-  #    ClientId: client1
-  #    Username: user1
-  #    Password: password
-  ```
+```
 
-   ::: tip
+> [!NOTE]
+> When `connectionSelector` is specified, the engine ignores inline connection parameters (`protocol`, `server`, and `port`).
 
-   If a connectionSelector is specified in a configuration group, all connection-related parameters will be ignored. This includes `protocol`, `server`, and `port`. In this case, the values `protocol: tcp | server: localhost | port: 5573` will not be used.
+### Topic and Message Bus Parameters
 
-   :::
+- `topic`: EdgeX message bus topic name. Default is `rules-events`. Set `messageType` to match the target topic format.
+- `type`: Message bus backend type:
+  - `redis`: Uses Redis as the message bus. This is the default setting in EdgeX Docker Compose environments.
+  - `mqtt`: Uses an MQTT broker as the message bus. Configure parameters in `optional`.
+  - `zero`: Uses ZeroMQ as the message bus.
+  - `nats-jetstream`: Uses NATS JetStream.
+  - `nats-core`: Uses NATS Core.
+- `messageType`: EdgeX payload data model:
+  - `event`: Decodes payloads as `dtos.Event`. Use this setting when subscribing to EdgeX application service topics. This is the default setting.
+  - `request`: Decodes payloads as `requests.AddEventRequest`. Use this setting when subscribing directly to core-data or device-service buses.
 
-### Topic and Message
+### Optional Parameters for MQTT Message Bus
 
-- `topic`:  The topic name of EdgeX message bus, default value is `rules-events`. Users can subscribe to the topics of the message bus directly or subscribe to topics exported by EdgeX application service. Note that, the message types of the two types of topics are different, remember to set the appropriate messageType property.
-
-- `type`: The EdgeX message bus type. Currently, three types of message buses are supported. `Redis` is used by default if no other value is specified.
-
-  - `zero`: Use ZeroMQ as EdgeX message bus.
-  - `mqtt`: Use the MQTT broker as EdgeX message bus. See [Optional Configuration (Specifically for MQTT)](#optional-configuration-specifically-for-mqtt) for more MQTT-related configurations.
-  - `redis`: Use Redis as the EdgeX message bus. Redis is the default message bus when using EdgeX docker compose.
-
-  EdgeX Levski introduces two types of information message bus, rekuiper supports these two new types from 1.7.1, respectively:
-
-  - `nats-jetstream`
-  - `nats-core`
-
-- `messageType`: The EdgeX message model type.
-  
-  - `event`:  If connected to the topic of EdgeX application service, the message model is an "event". The message will be decoded as a `dtos.Event` type. This is the default.
-  - `request`: If connected to the topic of EdgeX message bus directly to receive the message from device service or core data, the message is a "request". The message will be decoded as a `requests.AddEventRequest` type.
-
-### Optional Configuration (Specifically for MQTT)
-
-If the MQTT message bus is used, additional optional configurations can be specified. Note that all optional values are strings, so configuration values should be enclosed in quotes. For example: `KeepAlive: "5000"`. The following optional MQTT configurations are supported. Refer to the MQTT specification for details on each option:
+When `type` is set to `mqtt`, configure connection settings under `optional`. Enclose all values in quotation marks:
 
 - `ClientId`
-
 - `Username`
 - `Password`
 - `Qos`
@@ -111,119 +97,81 @@ If the MQTT message bus is used, additional optional configurations can be speci
 
 ## Custom Configurations
 
-For scenarios where you need to consume messages from multiple topics or customize certain connection parameters, rekuiper allows the creation of custom configuration profiles. By doing this, you can have multiple sets of configurations, each tailored for a specific use case.
-
-Here's how to set up a custom configuration:
+Define custom configuration sections in `edgex.yaml` for specific topics or broker addresses:
 
 ```yaml
-#Override the global configurations
-demo1: #Conf_key
+demo1:
   protocol: tcp
   server: 10.211.55.6
   port: 5571
   topic: rules-events
 ```
 
-In the above example, a custom configuration named `demo1` is created. To utilize this configuration when creating a stream, use the `CONF_KEY` option and specify the configuration name. More details can be found at [Stream Statements](../../../sqls/streams.md).
-
-**Usage Example**
+Reference the configuration with `CONF_KEY="demo1"` in the stream DDL statement:
 
 ```sql
-create stream demo1() WITH (FORMAT="JSON", type="edgex", CONF_KEY="demo1");
+CREATE STREAM demo1 () WITH (FORMAT = "JSON", TYPE = "edgex", CONF_KEY = "demo1");
 ```
-
-Parameters defined in a custom configuration will override the corresponding parameters in the `default` configuration. Make sure to set values carefully to ensure the desired behavior.
 
 ## Create a Stream Source
 
-Having set up the EdgeX source connector, the subsequent step involves its integration into rekuiper rules. This integration facilitates the processing of streamed data from EdgeX.
+The EdgeX connector functions as a [stream source](../../streams/overview.md) or as a [scan table source](../../tables/scan.md).
 
-::: tip
+### Create Stream via REST API
 
-edgeX Source connector can function as a [stream source](../../streams/overview.md) or a [scan table](../../tables/scan.md) source. This section illustrates the integration using the EdgeX Source connector as a stream source example.
+Send a `POST` request to `/streams`:
 
-:::
-
-You can define the edgeX source as the data source either by REST API or CLI tool.
-
-### Use REST API
-
-The REST API offers a programmatic way to interact with rekuiper, perfect for those looking to automate tasks or integrate rekuiper operations into other systems.
-
-Example:
-
-```sql
-create stream demo1() WITH (FORMAT="JSON", type="edgex", CONF_KEY="demo1");
+```json
+{
+  "sql": "CREATE STREAM demo1 () WITH (FORMAT = \"JSON\", TYPE = \"edgex\", CONF_KEY = \"demo1\")"
+}
 ```
 
-More details can be found at [Streams Management with REST API](../../../api/restapi/streams.md).
+For REST API specifications, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
 
-### Use CLI
+### Create Stream via CLI
 
-For those who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
+Run the `kuiper create stream` command:
 
-1. Navigate to the rekuiper binary directory:
-
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to create a rule, specifying the EdgeX connector as its source, for example:
-
-   ```bash
-   bin/kuiper CREATE STREAM demo'() with(format="json", datasource="demo" type="edgex")'
-   ```
-
-More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).
-
-### Further Reading: Stream Definition for EdgeX
-
-When integrating eKuiper with EdgeX, it's recommended to use [schema-less stream](../../streams/overview.md#schema) definitions, as EdgeX has predefined data structures in its [reading objects](https://docs.edgexfoundry.org/2.0/microservices/core/data/Ch-CoreData/#events-and-readings).
-
-For example, to define a stream in rekuiper that consumes events from EdgeX:
-
-```shell
-# cd $rekuiper_base
-# bin/kuiper CREATE STREAM demo'() with(format="json", datasource="demo" type="edgex")'
+```bash
+bin/kuiper create stream demo '() WITH (FORMAT = "json", DATASOURCE = "demo", TYPE = "edgex")'
 ```
 
-### Automatic Data Type Conversion
+For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).
 
-When rekuiper processes events from EdgeX, it automatically manages data type conversions based on EdgeX's `ValueType` field.
+### Stream Definition for EdgeX
 
-**Data Conversion:**
+Define EdgeX streams as [schemaless streams](../../streams/overview.md#schemaless-streams) (`CREATE STREAM demo ()`). EdgeX readings include predefined type information in reading objects.
 
-- If rekuiper identifies a matching type in EdgeX's readings, it converts the data.
-- If no match is found, the original value remains unchanged.
-- If a conversion fails, the value is dropped, and a warning logs in the system.
+## Automatic Data Type Conversion
 
-#### Boolean
+rekuiper converts reading values automatically based on the EdgeX `ValueType` property:
 
-If `ValueType` value of the reading is `Bool`, then eKuiper tries to convert it to `boolean` type.
+- If the engine detects a matching data type, it converts the reading value.
+- If no match exists, the original value remains unchanged.
+- If type conversion fails, the engine drops the value and logs a warning.
 
-- Converted to `true`: "1", "t", "T", "true", "TRUE", "True"
-- Converted to `false`: "0", "f", "F", "false", "FALSE", "False"
+### Boolean
 
-#### Bigint
+When `ValueType` is `Bool`, rekuiper converts the value to a boolean:
 
-If `ValueType` value of the reading is `INT8`, `INT16`, `INT32`, `INT64`, `UINT`, `UINT8`, `UINT16`, `UINT32`, `UINT64` then eKuiper tries to convert to `Bigint` type.
+- Values converted to `true`: `"1"`, `"t"`, `"T"`, `"true"`, `"TRUE"`, `"True"`
+- Values converted to `false`: `"0"`, `"f"`, `"F"`, `"false"`, `"FALSE"`, `"False"`
 
-#### Float
+### Bigint
 
-If `ValueType` value of the reading is `FLOAT32`, `FLOAT64`, then eKuiper tries to convert to `Float` type.
+When `ValueType` is `INT8`, `INT16`, `INT32`, `INT64`, `UINT`, `UINT8`, `UINT16`, `UINT32`, or `UINT64`, rekuiper converts the value to `bigint`.
 
-#### String
+### Float
 
-If `ValueType` value of the reading is `String`, then eKuiper tries to convert it to `String` type.
+When `ValueType` is `FLOAT32` or `FLOAT64`, rekuiper converts the value to `float`.
 
-#### Boolean array
+### String
 
-`Bool` array type in EdgeX will be converted to `boolean` array.
+When `ValueType` is `String`, rekuiper converts the value to `string`.
 
-#### Bigint array
+### Array Types
 
-All of `INT8`, `INT16`, `INT32`, `INT64`, `UINT`, `UINT8`, `UINT16`, `UINT32`, `UINT64` array types in EdgeX will be converted to `Bigint` array.
-
-#### Float array
-
-All of `FLOAT32`, `FLOAT64` array types in EdgeX will be converted to `Float` array.
+- `Bool` arrays convert to `boolean` arrays.
+- `INT8`, `INT16`, `INT32`, `INT64`, `UINT`, `UINT8`, `UINT16`, `UINT32`, and `UINT64` arrays convert to `bigint` arrays.
+- `FLOAT32` and `FLOAT64` arrays convert to `float` arrays.

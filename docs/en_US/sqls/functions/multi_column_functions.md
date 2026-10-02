@@ -5,10 +5,9 @@
 > **Scorecard**: **1 Verified, 0 Unsupported, 0 Broken**:  
 > - **Verified (1)**: `changed_cols`.
 
-A multiple column function is a function that returns multiple columns. Contrast to normal scalar function, which
-returns a single column of a single row.
+A multiple-column function returns multiple columns in a single invocation. In contrast, standard scalar functions return a single column value for each input row.
 
-Multiple column function can only be used in the `SELECT` clause of a query.
+You can use multiple-column functions only in the `SELECT` clause of a query.
 
 ## CHANGED_COLS
 
@@ -16,5 +15,4 @@ Multiple column function can only be used in the `SELECT` clause of a query.
 changed_cols(prefix, ignoreNull, colA, colB)
 ```
 
-Return the changed columns whose name is prefixed. Check [changed_cols](./analytic_functions.md#changedcols-function)
-for detail.
+Returns columns whose values changed since the previous execution, with names prepended by `prefix`. Refer to [changed_cols](./analytic_functions.md#changed_cols) for complete reference details and examples.

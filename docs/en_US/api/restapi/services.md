@@ -1,97 +1,99 @@
-rekuiper REST API allows you to manage external services, such as registering, deleting and listing services, listing external functions.
+# Services Management
 
-## Register external services
+The rekuiper REST API manages external service integrations and their associated functions. You can register, list, describe, update, and delete external services.
 
-This API accepts JSON content to create new external services.
+## Register an External Service
 
-```shell
+Use this endpoint to register a new external service using a JSON specification:
+
+```http
 POST http://localhost:9081/services
 ```
 
-An example of a request for a file on an HTTP server:
+Request payload using a remote HTTP URL:
 
 ```json
 {
-  "name":"random",
-  "file":"http://127.0.0.1/services/sample.zip"
+  "name": "sample",
+  "file": "http://127.0.0.1/services/sample.zip"
 }
 ```
 
-An example of a request for a file on the rekuiper server:
+Request payload using a local filesystem URI:
 
 ```json
 {
-  "name":"random",
-  "file":"file:///var/services/sample.zip"
+  "name": "sample",
+  "file": "file:///var/services/sample.zip"
 }
 ```
 
-### parameter
+### Parameters
 
-1. name: The unique name of the external service, which must be exactly the same as the json file of service definition in the zip file.
-2. file: URL of external service file. URL supports http, https and file modes. When using the file mode, the file must be on the machine where the rekuiper server is located. It must be a zip file, which contains the service description json file with the same name as the service and any other auxiliary files. The schema file must be in the schema folder.
+- `name`: The unique identifier for the service. It must match the filename of the JSON service definition inside the `.zip` archive.
+- `file`: The URL or local filesystem URI pointing to the service `.zip` archive.
 
-### Service file format
+### Service Archive Structure
 
-A sample zip file of the source named sample.zip
+An example `sample.zip` archive contains:
+1. `sample.json`: Service definition metadata and interface mappings.
+2. `schema/`: A directory containing schema files used by the service (for example, `sample.proto`).
 
-1. sample.json
-2. Schema directory: it contains one or more schema files used by the service. For example, sample.proto.
+## Display External Services
 
-## Display external services
+Use this endpoint to list all registered external services:
 
-This API is used to display all external services defined in the server.
-
-```shell
+```http
 GET http://localhost:9081/services
 ```
 
-Response example:
+Response sample:
 
 ```json
-["sample","sample2"]
+["sample", "sample2"]
 ```
 
-## Describe external services
+## Describe an External Service
 
-This API is used to print detailed definitions of external services.
+Use this endpoint to display the definition of a specific external service:
 
-```shell
+```http
 GET http://localhost:9081/services/{name}
 ```
 
-The path parameter `name` is the name of the external service.
+The path parameter `name` specifies the service name.
 
-## Delete external services
+## Delete an External Service
 
-This API is used to delete external services, and all functions defined under the service will be deleted.
+Use this endpoint to delete an external service and unregister all its functions:
 
-```shell
+```http
 DELETE http://localhost:9081/services/{name}
 ```
 
-## Update external services
+## Update an External Service
 
-This API is used to update external services, and its parameters are the same as that of service registration.
+Use this endpoint to update an existing external service definition:
 
-```shell
+```http
 PUT http://localhost:9081/services/{name}
+Content-Type: application/json
 
 {
-  "name":"random",
-  "file":"http://127.0.0.1/services/sample.zip"
+  "name": "sample",
+  "file": "http://127.0.0.1/services/sample.zip"
 }
 ```
 
-## Display all external functions
+## Display All External Functions
 
-Each service can contain multiple functions. This API is used to display the names of all external functions that can be used in SQL.
+Use this endpoint to list all registered external functions available for use in SQL queries:
 
-```shell
+```http
 GET http://localhost:9081/services/functions
 ```
 
-Result example:
+Response sample:
 
 ```json
 [
@@ -105,15 +107,15 @@ Result example:
 ]
 ```
 
-### Describe external functions
+## Describe an External Function
 
-This API is used to display the name of the service that defines this external function.
+Use this endpoint to display service endpoint mappings for a specific function:
 
-```shell
+```http
 GET http://localhost:9081/services/functions/{name}
 ```
 
-Result example:
+Response sample:
 
 ```json
 {

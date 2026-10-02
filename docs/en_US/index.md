@@ -7,20 +7,20 @@
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](https://github.com/ankur-paan/rekuiper/blob/main/LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.504--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
-rekuiper is a stream processing engine for edge devices, written in Rust. It implements eKuiper's REST API, SQL dialect, rule format, and `kuiper` CLI, so existing eKuiper streams, rules, and tools (including [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager)) work against it without changes.
+rekuiper is a stream processing engine for edge devices, written in Rust. It implements the eKuiper REST API, SQL dialect, rule format, and `kuiper` CLI. Existing eKuiper streams, rules, and tools, including [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager), operate without modification.
 
-We built it for IIoT gateways, ESPHome fleets, vehicles, and EV chargers: small machines that take in MQTT, HTTP, or WebSocket telemetry and need to filter, aggregate, and forward it reliably on one or two cores.
+The engine is designed for Industrial Internet of Things (IIoT) gateways, ESPHome fleets, vehicles, and Electric Vehicle (EV) chargers. These small machines receive MQTT, HTTP, or WebSocket telemetry. The engine filters, aggregates, and transmits data reliably on one or two CPU cores.
 
 ---
 
 ## How It Works
 
-rekuiper processes live telemetry on the local machine before sending data upstream:
+rekuiper processes real-time telemetry on the local machine before it sends data upstream:
 ![How rekuiper Works](./public/diagrams/how_it_works.svg)
 
-1. **Ingest**: Read continuous sensor streams via standard protocols (MQTT, HTTP, WebSockets, Kafka, Files).
-2. **Process**: Filter noise, compute moving averages, and correlate events across time windows with SQL.
-3. **Route**: Forward clean anomalies, aggregated metrics, or control commands directly to local databases, brokers, or webhook endpoints.
+1. **Ingest**: Read continuous sensor streams through standard protocols (MQTT, HTTP, WebSockets, Kafka, Files).
+2. **Process**: Filter noise, calculate moving averages, and correlate events across time windows with SQL.
+3. **Route**: Send clean anomalies, aggregated metrics, or control commands directly to local databases, brokers, or webhook endpoints.
 
 ---
 
@@ -28,18 +28,18 @@ rekuiper processes live telemetry on the local machine before sending data upstr
 
 | Feature | rekuiper (Rust) | eKuiper (Go) | Details |
 | :--- | :--- | :--- | :--- |
-| **Throughput** | **150k to 200k msg/s** | 20k msg/s | 7.5x to 10x higher throughput on a single CPU core |
-| **Memory Footprint** | **4.4 to 6.4 MiB** | 15 to 536 MiB | Stays small under load, suitable for low-memory edge devices |
-| **Garbage Collection** | **Zero GC** | GC pauses (Go runtime) | Predictable execution without GC pauses or dropped packets |
-| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Single binary with no external runtime dependencies |
-| **Compatibility** | **Wire-compatible** | Reference implementation | Works with existing eKuiper REST API, SQL syntax, and CLI |
-| **AI Integration** | **Native MCP Server** | Not available | Allows AI assistants (Cursor, Claude, Antigravity) to query and manage rules |
+| **Throughput** | **150k to 200k msg/s** | 20k msg/s | Provides 7.5x to 10x higher throughput on a single CPU core |
+| **Memory Footprint** | **4.4 to 6.4 MiB** | 15 to 536 MiB | Maintains small memory usage under load. Suitable for low-memory edge devices |
+| **Garbage Collection** | **Zero GC** | GC pauses (Go runtime) | Provides predictable execution without GC pauses or dropped packets |
+| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Provides a single binary with no external runtime dependencies |
+| **Compatibility** | **Wire-compatible** | Reference implementation | Operates with existing eKuiper REST API, SQL syntax, and CLI |
+| **AI Integration** | **Native MCP Server** | Not available | Enables AI assistants (Cursor, Claude, Antigravity) to query and manage rules |
 
 ---
 
 ## Performance
 
-We benchmark rekuiper against eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 on five MQTT workloads. Each engine runs on one CPU core with 1 GiB memory against the same Mosquitto broker. Correctness is verified at the sink.
+This benchmark compares rekuiper against eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 on five MQTT workloads. Each engine runs on one CPU core with 1 GiB memory against the same Mosquitto broker. Tests verify data correctness at the sink.
 
 * **Highest tested rate with exact, loss-free results:**
   * Telemetry filter (1,000 devices): **150k msg/s** (eKuiper: 20k msg/s)
@@ -116,7 +116,7 @@ curl http://localhost:9081/rules/rule_temp_alert/status
   * **Sources**: MQTT, HTTP (Pull and Push), WebSockets, File, Memory, Redis, Kafka, Simulator, SQL.
   * **Sinks**: MQTT, HTTP/REST, Log, File, Memory, Redis, Kafka, WebSockets, Nop, SQL.
 * **Model Context Protocol (MCP)**: Native `rekuiper-mcp` server allows AI coding assistants to validate SQL queries offline, test rule events, and inspect streaming topologies.
-* **Web UI**: Compatible with [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager) for visual stream, rule, and connector setup.
+* **Web UI**: Operates with [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager) for visual stream, rule, and connector setup.
 
 ---
 

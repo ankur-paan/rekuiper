@@ -1,181 +1,168 @@
-# Python SDK for Portable Plugin
+# Python SDK for Portable Plugins
 
-By using Python SDK for portable plugins, user can develop portable plugins with python language. The Python SDK provides APIs for the source, sink and function interfaces. Additionally, it provides a plugin start function as the execution entry point to define the plugin and its symbols.
+The Python SDK allows developers to build portable plugins in Python. It provides interfaces for source, sink, and function extensions, as well as runtime entry points to manage the plugin lifecycle.
 
-To run python plugin, there are two prerequisites in the runtime environment:
+## Prerequisites
 
-1. Install Python 3.x environment.
-2. Install nng and ekuiper package by `pip install nng ekuiper`.
+- Python 3.x runtime.
+- Required packages: install with `pip install nng ekuiper`.
 
-By default, the eKuiper portable plugin runtime will run python script with `python userscript.py`. If users have multiple python instance or an alternative python executable command, they can specify the python command in [the configuration file](../../configuration/global_configurations.md#portable-plugin-configurations).
+By default, the engine executes Python plugins using the `python` command. You can specify a custom Python binary in the [configuration file](../../configuration/global_configurations.md#portable-plugin-configurations).
 
 ## Development
 
-The process is the same: develop the symbols and then develop the main program. Python SDK provides the similar source, sink and function interfaces in python language.
+Implement extension classes by subclassing the abstract base classes provided by the SDK.
 
-Source interface:
+### Source Interface
 
 ```python
-  class Source(object):
-    """abstract class for rekuiper source plugin"""
+from abc import abstractmethod
+from ekuiper import Context
+
+class Source(object):
+    """Abstract base class for rekuiper source extensions."""
 
     @abstractmethod
     def configure(self, datasource: str, conf: dict):
-        """configure with the string datasource and conf map and raise error if any"""
+        """Initializes configuration properties."""
         pass
 
     @abstractmethod
     def open(self, ctx: Context):
-        """run continuously and send out the data or error with ctx"""
+        """Starts continuous ingestion and emits data or errors."""
         pass
 
     @abstractmethod
     def close(self, ctx: Context):
-        """stop running and clean up"""
+        """Releases resources and stops ingestion."""
         pass
 ```
 
-Sink interface:
+### Sink Interface
 
 ```python
+from abc import abstractmethod
+from typing import Any
+from ekuiper import Context
+
 class Sink(object):
-    """abstract class for rekuiper sink plugin"""
+    """Abstract base class for rekuiper sink extensions."""
 
     @abstractmethod
     def configure(self, conf: dict):
-        """configure with conf map and raise error if any"""
+        """Initializes sink configuration properties."""
         pass
 
     @abstractmethod
     def open(self, ctx: Context):
-        """open connection and wait to receive data"""
+        """Establishes connections to target systems."""
         pass
 
     @abstractmethod
     def collect(self, ctx: Context, data: Any):
-        """callback to deal with received data"""
+        """Processes and forwards incoming records."""
         pass
 
     @abstractmethod
     def close(self, ctx: Context):
-        """stop running and clean up"""
+        """Closes connections and releases resources."""
         pass
 ```
 
-### Sink ack
+#### Sink Acknowledgments
 
-The default Portable plugin sink operates asynchronously. In versions 2.0 and later (requiring the use of the new pip
-eKuiper version), users can configure whether to wait for an acknowledgment before sending the next piece of data when
-defining a sink with a Portable plugin. For example, suppose the Portable plugin defines a sink of type `print`.
-When `requireAck` is enabled, the user's custom sink plugin **must** return an ack message for each piece of data.
+When `requireAck` is enabled in the rule action, the sink must acknowledge each message before receiving the next record:
 
 ```json
 {
-   "id": "rulePort1",
-   "sql": "SELECT * FROM mqttStream",
-   "actions": [
-      {
-         "print": {
-            "requireAck": true
-         }
+  "id": "rulePort1",
+  "sql": "SELECT * FROM mqttStream",
+  "actions": [
+    {
+      "print": {
+        "requireAck": true
       }
-   ]
+    }
+  ]
 }
 ```
 
-Sink implementation must call `ctx.ack_ok()` or `ctx.ack_error(msg)` to return acknowledge. In the following example , the
-collect function inside sink returns ack after handling the data.
+The sink implementation calls `ctx.ack_ok()` on success or `ctx.ack_error(msg)` on failure:
 
 ```python
 def collect(self, ctx: Context, data: Any):
-        print('receive: ', data)
-        # only add ack when using with requireAck in the rule
-        ctx.ack_ok()
+    print("Received:", data)
+    ctx.ack_ok()
 ```
 
-```python
-def collect(self, ctx: Context, data: Any):
-        print('receive: ', data)
-        # only add ack when using with requireAck in the rule
-        ctx.ack_error('error msg')
-```
-
-Function interface:
+### Function Interface
 
 ```python
+from abc import abstractmethod
+from typing import List, Any
+from ekuiper import Context
+
 class Function(object):
-    """abstract class for rekuiper function plugin"""
+    """Abstract base class for rekuiper function extensions."""
 
     @abstractmethod
     def validate(self, args: List[Any]):
-        """callback to validate against ast args, return a string error or empty string"""
+        """Validates arguments against expected signatures."""
         pass
 
     @abstractmethod
     def exec(self, args: List[Any], ctx: Context) -> Any:
-        """callback to do execution, return result"""
+        """Computes the function output."""
         pass
 
     @abstractmethod
-    def is_aggregate(self):
-        """callback to check if function is for aggregation, return bool"""
+    def is_aggregate(self) -> bool:
+        """Specifies whether the function is an aggregate function."""
         pass
 ```
 
-Users need to create their own source, sink and function by implement these abstract classes. Then create the main program and declare the instantiation functions for these extensions like below:
+### Main Entry Program
+
+Declare the plugin configuration and start the runtime:
 
 ```python
-if __name__ == '__main__':
-    c = PluginConfig("pysam", {"pyjson": lambda: PyJson()}, {"print": lambda: PrintSink()},
-                     {"revert": lambda: revertIns})
+from ekuiper import PluginConfig, plugin
+
+if __name__ == "__main__":
+    c = PluginConfig(
+        "pysam",
+        {"pyjson": lambda: PyJson()},
+        {"print": lambda: PrintSink()},
+        {"revert": lambda: revertIns}
+    )
     plugin.start(c)
 ```
 
-For the full example, please check
-the [python sdk example](https://github.com/lf-edge/ekuiper/tree/master/sdk/python/example/pysam).
+Refer to the [Python SDK PySam Example](https://github.com/lf-edge/ekuiper/tree/master/sdk/python/example/pysam) for complete sample code.
 
-## Package
+## Packaging and Deployment
 
-As python is an interpretive language, we don't need to build an executable for it. Just specify the main program python
-file in the plugin json file is ok. For detail, please check [packaging](./overview.md#package).
+Specify the main Python script file in the plugin JSON descriptor. Refer to [Packaging Portable Plugins](./overview.md#packaging) for details.
 
-## Deployment requirements
+### Virtual Environments (Conda)
 
-Running python script requires the python environment. Make sure python 3.x are installed in the target environment. If
-using docker image, we recommend to use tags like `lfedge/ekuiper:<tag>-slim-python` which have both eKuiper and python
-environment.
+To execute the plugin inside a Conda environment, configure the metadata descriptor:
 
-### Virtual Environment
-
-Virtual environments are a common and effective technique used in Python development which is useful for python
-dependency management. Anaconda or Miniconda are one of the most popular environment manager for Python.
-The [conda](https://conda.io/projects/conda/en/latest/index.html) package and environment manager is included in all
-versions of Anaconda®, Miniconda, and Anaconda Repository. rekuiper supports to run the Python plugin with conda
-environment.
-
-To use conda environment, the common steps are:
-
-1. Create and set up the conda environment.
-2. When packaging the plugin, make sure `virtualEnvType` is set to `conda` and `env` is set to the created virtual
-   environment. Below is an example.
-
-    ```json
-    {
-      "version": "v1.0.0",
-      "language": "python",
-      "executable": "pysam.py",
-      "virtualEnvType": "conda",
-      "env": "myenv",
-      "sources": [
-        "pyjson"
-      ],
-      "sinks": [
-        "print"
-      ],
-      "functions": [
-        "revert"
-      ]
-    }
-    ```
-
-3. If the plugin has installation script, make sure the script install the dependencies to the correct environment.
+```json
+{
+  "version": "v1.0.0",
+  "language": "python",
+  "executable": "pysam.py",
+  "virtualEnvType": "conda",
+  "env": "myenv",
+  "sources": [
+    "pyjson"
+  ],
+  "sinks": [
+    "print"
+  ],
+  "functions": [
+    "revert"
+  ]
+}
+```

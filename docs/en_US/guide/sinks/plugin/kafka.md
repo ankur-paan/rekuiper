@@ -1,32 +1,33 @@
 # Kafka Sink
 
-The sink will publish the result into a Kafka .
+The Kafka sink publishes output messages to an Apache Kafka topic.
 
-## Compile & deploy plugin
+## Compile and Deploy the Plugin
 
-### build in shell
+### Build in Shell
+
+Run the following commands to compile and install the plugin:
 
 ```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sinks/kafka.so extensions/sinks/kafka/kafka.go
-# zip kafka.zip plugins/sinks/kafka.so
-# cp kafka.zip /root/tomcat_path/webapps/ROOT/
-# bin/kuiper create plugin sink kafka -f /tmp/kafkaPlugin.txt
-# bin/kuiper create rule kafka -f /tmp/kafkaRule.txt
+cd $rekuiper_src
+go build -trimpath --buildmode=plugin -o plugins/sinks/kafka.so extensions/sinks/kafka/kafka.go
+zip kafka.zip plugins/sinks/kafka.so
+cp kafka.zip /root/tomcat_path/webapps/ROOT/
+bin/kuiper create plugin sink kafka -f /tmp/kafkaPlugin.txt
+bin/kuiper create rule kafka -f /tmp/kafkaRule.txt
 ```
 
-### build with image
+### Build with Docker Image
 
 ```shell
 docker build -t demo/plugins:v1 -f build/plugins/Dockerfile .
 docker run demo/plugins:v1
-docker cp  90eae15a7245:/workspace/_plugins/debian/sinks /tmp
+docker cp 90eae15a7245:/workspace/_plugins/debian/sinks /tmp
 ```
 
-Dockerfile like this：
+Example Dockerfile:
 
 ```dockerfile
-## plase check go version that kuiper used
 ARG GO_VERSION=1.25.4
 FROM ghcr.io/lf-edge/ekuiper/base:$GO_VERSION-debian AS builder
 WORKDIR /workspace
@@ -36,7 +37,7 @@ RUN make plugins_c
 CMD ["sleep","3600"]
 ```
 
-add this in Makefile：
+Add the following lines to your `Makefile`:
 
 ```dockerfile
 PLUGINS_CUSTOM := sinks/kafka
@@ -47,42 +48,40 @@ plugins_c: $(PLUGINS_CUSTOM)
 $(PLUGINS_CUSTOM): PLUGIN_TYPE = $(word 1, $(subst /, , $@))
 $(PLUGINS_CUSTOM): PLUGIN_NAME = $(word 2, $(subst /, , $@))
 $(PLUGINS_CUSTOM):
-  @$(CURDIR)/build-plugins.sh $(PLUGIN_TYPE) $(PLUGIN_NAME)
+	@$(CURDIR)/build-plugins.sh $(PLUGIN_TYPE) $(PLUGIN_NAME)
 ```
 
 Restart the rekuiper server to activate the plugin.
 
 ## Properties
 
-| Property name      | Optional | Description                                                                                                                                                                                       |
-|--------------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| connectionSelector | true     | Reuse the selected Kafka connection. When this property is set, Kafka connection-related properties such as `brokers`, SASL, and TLS settings are copied from the selected connection.             |
-| brokers            | true     | The broker address list, split with ",". Required when `connectionSelector` is not set.                                                                                                            |
-| topic              | false    | The topic of the Kafka                                                                                                                                                                            |
-| saslAuthType       | false    | The Kafka sasl authType, support none,plain,scram                                                                                                                                                 |
-| saslUserName       | true     | The sasl user name                                                                                                                                                                                |
-| password           | true     | The sasl password                                                                                                                                                                                 |
-| insecureSkipVerify | true     | whether to ignore SSL verification                                                                                                                                                                |
-| certificationPath  | true     | Kafka client ssl verification Cert file path                                                                                                                                                      |
-| privateKeyPath     | true     | Key file path for Kafka client SSL verification                                                                                                                                                   |
-| rootCaPath         | true     | Kafka client ssl verified CA certificate file path                                                                                                                                                |
-| certficationRaw    | true     | Kafka client ssl verified Cert base64 encoded original text, use `certificationPath` first if both defined                                                                                        |
-| privateKeyRaw      | true     | Kafka client ssl verified Key base64 encoded original text, use `privateKeyPath` first if both defined                                                                                            |
-| rootCARaw          | true     | Kafka client ssl verified CA base64 encoded original text, use `rootCaPath` first if both defined                                                                                                 |
-| maxAttempts        | true     | The number of retries the Kafka client sends messages to the server, the default is 1                                                                                                             |
-| requiredACKs       | true     | The mechanism for Kafka client to confirm messages, 1 means waiting for leader confirmation, -1 means waiting for confirmation from all replicas, 0 means not waiting for confirmation, default 1 |
-| key                | true     | Key information carried by the Kafka client in messages sent to the server                                                                                                                        |
-| headers            | true     | The header information carried by the Kafka client in the message sent to the server                                                                                                              |
-| compression        | true     | Whether to enable compression when the Kafka client sends messages to the server, only supports `gzip`, `snappy`, `lz4`, `zstd`                                                                   |
-| batchBytes         | true     | Set the maximum number of bytes for Kafka client to send batch messages to the server, default is 1048576         |
+| Property name | Optional | Description |
+|---|---|---|
+| connectionSelector | true | Reuses a configured Kafka connection. When set, rekuiper copies broker addresses, SASL credentials, and TLS settings from the selected connection. |
+| brokers | true | Comma-separated list of broker addresses. Required when `connectionSelector` is not configured. |
+| topic | false | The target Kafka topic name. |
+| saslAuthType | false | The SASL authentication mechanism: `none`, `plain`, or `scram`. |
+| saslUserName | true | The SASL authentication username. |
+| password | true | The SASL authentication password. |
+| insecureSkipVerify | true | Controls whether to skip SSL/TLS certificate verification. |
+| certificationPath | true | The client certificate file path for TLS verification. |
+| privateKeyPath | true | The client private key file path for TLS verification. |
+| rootCaPath | true | The root CA certificate file path for TLS verification. |
+| certficationRaw | true | Base64-encoded raw text of the client certificate. rekuiper uses `certificationPath` first if you define both. |
+| privateKeyRaw | true | Base64-encoded raw text of the private key. rekuiper uses `privateKeyPath` first if you define both. |
+| rootCARaw | true | Base64-encoded raw text of the root CA certificate. rekuiper uses `rootCaPath` first if you define both. |
+| maxAttempts | true | Number of retry attempts when sending messages to the broker. Default: `1`. |
+| requiredACKs | true | Producer acknowledgment mode: `1` waits for leader confirmation, `-1` waits for all replicas, `0` does not wait for confirmation. Default: `1`. |
+| key | true | Key metadata attached to messages sent to Kafka. |
+| headers | true | Header metadata attached to messages sent to Kafka. |
+| compression | true | Compression codec for published messages: `gzip`, `snappy`, `lz4`, or `zstd`. |
+| batchBytes | true | Maximum batch size in bytes for message publication. Default: `1048576`. |
 
-You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
+You can verify the connectivity of the sink endpoint before rule execution by using the REST API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check).
 
 ### Connection Reuse
 
-You can create a Kafka connection and reuse its connection-related properties in Kafka sinks through
-`connectionSelector`. The Kafka connection is used to ping the configured brokers and manage connection status. The
-Kafka sink copies the selected connection's configuration and creates its own Kafka producer for publishing messages.
+You can create a reusable Kafka connection and reference it in sinks by using `connectionSelector`. The connection manages broker health checks and status reporting. The Kafka sink copies settings from the connection and creates a dedicated producer:
 
 Create a Kafka connection:
 
@@ -98,7 +97,7 @@ POST http://localhost:9081/connections
 }
 ```
 
-Use the connection in a Kafka sink:
+Reference the connection in the sink configuration:
 
 ```json
 {
@@ -115,36 +114,35 @@ Use the connection in a Kafka sink:
 }
 ```
 
-When `connectionSelector` is set, the sink ignores connection-related properties configured directly in the sink action,
-including `brokers`, `saslAuthType`, `saslUserName`, `password`, `insecureSkipVerify`, and TLS certificate properties.
+When `connectionSelector` is configured, the sink ignores locally specified connection settings including `brokers`, `saslAuthType`, `saslUserName`, `password`, `insecureSkipVerify`, and TLS certificate properties.
 
-### Setting Kafka Key and Headers
+### Set Kafka Key and Headers
 
-Set the metadata when the Kafka client sends messages through keys and headers:
-
-```json
-{
-    "key": "keyValue",
-    "headers": {
-        "headerKey1": "headerValue1",
-        "headerKey2": "headerValue2"
-    }
-}
-```
-
-Through the template template, dynamically set the metadata when the Kafka client sends a message:
+Configure static metadata on published messages:
 
 ```json
 {
-    "key": "{{.data.key}}",
-    "headers": {
-        "headerKey1": "{{.data.col1}}",
-        "headerKey2": "{{.data.col2}}"
-    }
+  "key": "keyValue",
+  "headers": {
+    "headerKey1": "headerValue1",
+    "headerKey2": "headerValue2"
+  }
 }
 ```
 
-Set the key metadata of the map structure in the Kafka client:
+Configure dynamic metadata using template syntax:
+
+```json
+{
+  "key": "{{.data.key}}",
+  "headers": {
+    "headerKey1": "{{.data.col1}}",
+    "headerKey2": "{{.data.col2}}"
+  }
+}
+```
+
+Configure a JSON map structure for the message key:
 
 ```json
 {
@@ -152,11 +150,11 @@ Set the key metadata of the map structure in the Kafka client:
 }
 ```
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-## Sample usage
+## Sample Usage
 
-Below is a sample for selecting temperature great than 50 degree, and some profiles only for your reference.
+The following sample rule filters records where temperature exceeds 50 and publishes results to Kafka:
 
 ### /tmp/kafkaRule.txt
 
@@ -169,7 +167,7 @@ Below is a sample for selecting temperature great than 50 degree, and some profi
       "log": {}
     },
     {
-      "kafka":{
+      "kafka": {
         "brokers": "127.0.0.1:9092,127.0.0.2:9092",
         "topic": "test_topic",
         "saslAuthType": "none"
@@ -183,39 +181,40 @@ Below is a sample for selecting temperature great than 50 degree, and some profi
 
 ```json
 {
-   "file":"http://localhost:8080/kafka.zip"
- }
+  "file": "http://localhost:8080/kafka.zip"
+}
 ```
 
-## Notice
+## Docker Configuration Note
 
-If ekuiper and kafka are deployed in the same container network through docker compose, you can configure the brokers address through the kafka hostname in ekuiper.
-But kafka needs special attention `` KAFKA_CFG_ADVERTISED_LISTENERS `` needs to be configured as the host IP address, as shown below
+When rekuiper and Kafka run in the same Docker network, configure broker addresses using the Kafka container hostname.
+
+In Kafka, configure `KAFKA_CFG_ADVERTISED_LISTENERS` to the host IP address:
 
 ```yaml
-    zookeeper:
-     image: docker.io/bitnami/zookeeper:3.8
-     hostname: zookeeper
-     container_name: zookeeper
-     ports:
-      - "2181:2181"
-     volumes:
-      - "zookeeper_data:/bitnami"
-     environment:
-       - ALLOW_ANONYMOUS_LOGIN=yes
-    kafka:
-     image: docker.io/soldevelo/kafka:3.4
-     hostname: kafka
-     container_name: kafka
-     ports:
-      - "9092:9092"
-     volumes:
-      - "kafka_data:/bitnami"
-     environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://<YOUR_HOST_IP>:9092
-     depends_on:
-      - zookeeper
+zookeeper:
+  image: docker.io/bitnami/zookeeper:3.8
+  hostname: zookeeper
+  container_name: zookeeper
+  ports:
+    - "2181:2181"
+  volumes:
+    - "zookeeper_data:/bitnami"
+  environment:
+    - ALLOW_ANONYMOUS_LOGIN=yes
+kafka:
+  image: docker.io/soldevelo/kafka:3.4
+  hostname: kafka
+  container_name: kafka
+  ports:
+    - "9092:9092"
+  volumes:
+    - "kafka_data:/bitnami"
+  environment:
+    - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+    - ALLOW_PLAINTEXT_LISTENER=yes
+    - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+    - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://<YOUR_HOST_IP>:9092
+  depends_on:
+    - zookeeper
 ```

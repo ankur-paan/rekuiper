@@ -1,36 +1,35 @@
-# External Function
+# External Functions
 
-## Background
+## Overview
 
-In some scenarios, we hope that rekuiper can create some internal SQL functions through hot reload, and map it as an external service, so that it can directly call the external service. Currently, rekuiper provides the configuration method to map an existing external service to an SQL function of eKuiper. When running a rule that uses an external function, the data input and output can be converted and the corresponding external service can be called.
+rekuiper can map external services to SQL functions through configuration. When a rule executes an external function, rekuiper converts incoming SQL arguments, invokes the external endpoint, and returns the response into the stream pipeline.
 
-External functions can be categorized into two types: schema-based and schemaless. The difference between these two types lies in the way they are configured. Schema-based external functions require a schema file to describe the API interface of the service, while schemaless external functions are suitable for simpler scenarios that use the REST protocol and have less complex message.
+External functions belong to two categories:
+- **Schema-Based**: Uses a schema file to describe service APIs, method signatures, parameter types, and return types. Recommended for gRPC and complex REST services.
+- **Schemaless**: Uses only a JSON configuration file without a schema definition. Recommended for simple REST services.
 
 ## Configuration
 
-### Schema-based External Function
+### Schema-Based External Functions
 
-The configuration file of the external function is in json format, which usually consists of two parts:
+A schema-based external function requires two configuration files:
+- **JSON File**: Defines service metadata, interface addresses, protocols, and function aliases. The file name defines the service name in rekuiper.
+- **Schema File**: Defines API methods and parameter types. rekuiper supports [Protobuf](https://developers.google.com/protocol-buffers) schema files.
 
-- JSON file, used to describes the information of the service. The file will be saved as the name of the service in rekuiper.
-- Schema file, used to  describes the service API interface, including the name of the API included in the service,, input and output parameter type. Currently only [protobuf type](https://developers.google.com/protocol-buffers) is supported.
+The JSON configuration file contains these sections:
 
-The json configuration file includes the following two parts:
+- `about`: Contains service metadata, including author, description, and documentation URLs.
+- `interfaces`: Defines a group of service interfaces sharing a common address. Each interface contains these properties:
+  - `protocol`: Transport protocol. Supported values are `"grpc"` and `"rest"`. You can also enable `"msgpack-rpc"` by compiling with the `msgpack` build tag. Refer to [Feature Compilation](../../installation.md#compile-with-selected-features).
+  - `address`: Target URL of the service (for example, `"tcp://localhost:50051"` or `"http://localhost:8090"`).
+  - `schemaType`: Type of schema description. rekuiper supports `"protobuf"`.
+  - `schemaFile`: Name of the `.proto` file in the schemas directory.
+  - `functions`: Array of function aliases mapping Protobuf RPC methods to SQL function names. For example, `{"name":"helloFromMsgpack","serviceName":"SayHello"}` maps RPC `SayHello` to SQL function `helloFromMsgpack`. Unmapped RPC methods keep their original names.
+  - `options`: Interface options. For REST services, options include:
+    - `headers`: Map of HTTP headers.
+    - `insecureSkipVerify`: Boolean flag to skip HTTPS TLS certificate verification.
 
-- about: Used to describe the Meta-information of service, including author, detailed description, help document url, etc. For detailed usage, please refer to the example below.
-- interfaces: Used to define a set of service interfaces. Services provided by the same server often have the same service address and can be used as a service interface. Each service interface contains the following attributes:
-  - protocol: The protocol used by the service. "grpc", "rest" are supported currently. The "msgpack-rpc" is not built
-    by default, you need to build it with build tag "msgpack" by yourself. Please refer
-    to [feature compilation](../../installation.md#compile-with-selected-features) for detail.
-  - address: Service address, which must be url. For example, typical rpc service address: "tcp://localhost:50000" or http service address "https://localhost:8000".
-  - schemaType: The type of service description file. Only "protobuf" is supported currently .
-  - schemaFile: service description file, currently only proto file is supported. The rest and msgpack services also need to be described in proto.
-  - functions: function mapping array, used to map the services defined in the schema to SQL functions. It is mainly used to provide function aliases. For example,`{"name":"helloFromMsgpack","serviceName":"SayHello"}` can map the SayHello service in the service definition to the SQL function helloFromMsgpack. For unmapped functions, the defined service uses the original name as the SQL function name.
-  - options: Service interface options. Different service types have different options. Among them, the configurable options of rest service include:
-    - headers: configure HTTP headers
-    - insecureSkipVerify: whether to skip the HTTPS security check
-
-Assuming we have a service named 'sample', we can define a service definition file named sample.json as follows:
+Example configuration file `sample.json`:
 
 ```json
 {
@@ -46,7 +45,7 @@ Assuming we have a service named 'sample', we can define a service definition fi
       "zh_CN": "https://github.com/lf-edge/ekuiper/blob/master/docs/zh_CN/plugins/functions/functions.md"
     },
     "description": {
-      "en_US": "Sample external services for test only",
+      "en_US": "Sample external services for testing",
       "zh_CN": "示例外部函数配置，仅供测试"
     }
   },
@@ -95,19 +94,13 @@ Assuming we have a service named 'sample', we can define a service definition fi
 }
 ```
 
-This file defines the sample service, which contains the call information of 3 service interfaces:
-
-- trueno: grpc service
-- tsrest: rest service
-- tsrpc: msgpack-rpc service (not built by default)
-
-The service provided by each service interface is defined by its corresponding schema file. Taking tsrest as an example, its schema file is tsrest.proto, which is defined as follows:
+The schema file `tsrest.proto` defines the interface methods:
 
 ```protobuf
 syntax = "proto3";
 package ts;
 
-service TSRest { // The proto service name is indifferent
+service TSRest {
   rpc object_detection(ObjectDetectionRequest) returns(ObjectDetectionResponse) {}
 }
 
@@ -125,15 +118,11 @@ message ObjectDetectionResponse {
 }
 ```
 
-This file defines the tsrest service interface to provide a service object_detection, and its input and output formats are also defined by the protobuf format. It is recommended to only have one service section in the proto file.
+#### HTTP Transcoding Options
 
-Protobuf uses proto3 format. Please refer to [proto3-spec](https://developers.google.com/protocol-buffers/docs/reference/proto3-spec) for detailed format.
+To configure HTTP request methods, URL paths, query parameters, and request bodies in REST services, add `google.api.http` annotations to the `.proto` file.
 
-#### HTTP Options
-
-In order to support detail configuration of the REST service, such as the http method, the url template, the params and the body, an additional mapping annotations based on grpc transcoding specification provided by *google.api.http* annotation. Users can specify a http rule for each rpc method to define the mapping of the rpc method to the http method, URL path, URL query parameters, and HTTP request body.
-
-Below is a portion of the revised tsrest.proto file in which a http rule is added. The rule specifies the http method to be *post*, and the mapping url to */v1/computation/object_detection* to override the default url */object_detection*. It also specifies the body to be a wildcard which means the whole input parameter of *ObjectDetectionRequest* will be the body.
+This example sets the HTTP method to `POST`, sets the endpoint to `/v1/computation/object_detection`, and sets the request body to all input parameters (`body: "*"`):
 
 ```protobuf
 service TSRest {
@@ -146,7 +135,7 @@ service TSRest {
 }
 ```
 
-If the object_detection rest service provides different url for different command, users can specify the url mapping with parameters as below. By this way, the input *ObjectDetectionRequest* parameter's *cmd* field is assigned to the url, and the *base64_img* field is processed as the body.
+To bind a field to a URL path variable, specify path parameters in braces:
 
 ```protobuf
 service TSRest {
@@ -159,7 +148,7 @@ service TSRest {
 }
 ```
 
-Another typical scenario is the REST services to search a list. The search parameters are usually appended to the url as the query parameters.
+To map parameters to HTTP query strings for GET requests, omit the `body` field:
 
 ```protobuf
 service TSRest {
@@ -176,13 +165,9 @@ message MessageRequest {
 }
 ```
 
-In this example, there is no *body* specified thus all parameter fields are mapped to the query parameter. When calling `SearchMessage({"author":"Author","title":"Message1"})` in rekuiper SQL, it will be mapped to `GET /v1/messages?author=Author&title=Message1`.
+Invoking `SearchMessage({"author":"Author","title":"Message1"})` in SQL generates `GET /v1/messages?author=Author&title=Message1`.
 
-For more detail about the mapping syntax for protobuf, please check [adding transcoding mapping](https://cloud.google.com/endpoints/docs/grpc/transcoding#adding_transcoding_mappings) and [httprule](https://cloud.google.com/endpoints/docs/grpc-service-config/reference/rpc/google.api#httprule).
-
-##### Usage
-
-To use the http options, the google api package must be imported in the proto file.
+To use HTTP annotations, import `google/api/annotations.proto` in your `.proto` file:
 
 ```protobuf
 syntax = "proto3";
@@ -192,41 +177,32 @@ package yourpackage;
 import "google/api/annotations.proto";
 ```
 
-Thus, the google api proto files must be in the imported path. eKuiper already ship those proto files in `etc/services/schemas/google`. Users do not need to add this to the packaged customized service.
+rekuiper bundles these proto files under `etc/services/schemas/google`.
 
-#### Mapping
+#### Three-Layer Mapping Architecture
 
-In the external service configuration, there are 1 json file and at least 1 schema file(.proto) to define the function mapping. This will define a 3 layer mappings.
+Schema-based services use a three-layer mapping model:
 
-1. eKuiper external service layer: it is defined by the file name of the json. It will be used as a key for the external service in the [REST API](../../api/restapi/services.md) for the describe, delete and update of the service as a whole.
-2. Interface layer: it is defined in the `interfaces` section of the json file. This is a virtual layer to group functions with the same schemas so that the shared properties such as address, schema file can be specified only once.
-3. eKuiper function layer: it is defined in the proto file as `rpc`. Notice that, the proto rpcs must be defined under a service section in protobuf. There is no restriction for the name of proto service. The function name is the same as the rpc name in the proto by default. But the user can override the mapping name in the json files's interfaces -> functions section.
+1. **Service Layer**: Defined by the JSON file name (for example, `sample.json`). Identifies the service in the [REST API](../../api/restapi/services.md).
+2. **Interface Layer**: Defined in the `interfaces` section of the JSON file. Groups methods sharing common network endpoints, protocols, and schema files.
+3. **Function Layer**: Defined as RPC methods in the `.proto` file. By default, the SQL function name matches the RPC name unless overridden in the `functions` mapping array.
 
-In this sample, if a user call `objectDetection` function in rekuiper SQL, the mapping steps are:
+In REST invocations, rekuiper serializes parameters to JSON. Field names convert to `lowerCamelCase` keys by default. To preserve exact field names, specify the `json_name` field option in the `.proto` definition.
 
-1. Found a function mapping in json file, interfaces *tsrest* functions section: `{"name": "objectDetect","serviceName": "object_detection"}`. This maps SQL function `objectDetect` to rpc named `object_detection`.
-2. In the schema file `tsrest.proto`, rpc `object_detection` is defined and the parameter and return type will be parsed. The `tsrest` interface properties such as address, protocol will be used to issue the request in runtime.
+#### Protocol Constraints
 
-Notice that, in REST call the parameters will be parsed to json.  Proto message field names are **converted** to lowerCamelCase and become JSON object keys. If the object keys of the REST API is not lowerCamelCase, the user must specify the json_name field option to avoid the conversion.
+- **REST Services**:
+  - Default HTTP method is `POST` unless configured in HTTP options.
+  - If HTTP options are omitted, the input parameter must be a Protobuf `Message` or `google.protobuf.StringValue`.
+  - 64-bit integers (`int64`) serialize to JSON strings.
+- **msgpack-rpc Services**:
+  - Function input cannot be empty.
 
-#### Notification
+### Schemaless External Functions
 
-Since REST and msgpack-rpc are not natively defined by protobuf, there are some limitations when using them.
+Schemaless external functions require only a JSON file without a `.proto` schema file.
 
-The REST service is **POST** by default currently, and the transmission format is json. The user can change the default method through [http options](#http-options) in the defined protobuf. There are some restricitons in rest service:
-
-- If http options are not specified, the input type must be **Message** or *google.protobuf.StringValue*. If the type is *google.protobuf.StringValue*, the parameter must be an encoded json string like `"{\"name\":\"name1\",\"size\":1}"`.
-- The marshalled json for int64 type will be string
-
-The msgpack-rpc service has the following limitation:
-
-- Input can not be empty
-
-### Schemaless External Function
-
-Schemaless external functions do not require a schema file for configuration. Instead, they only need a json file. The definition and content of this json file are the same as the json file used in Schema external functions, so we won't repeat them here.
-
-Let's assume we have a service named 'sample'.  We can define a service definition file called 'sample.json' with the following content:
+Example configuration file `sample.json`:
 
 ```json
 {
@@ -242,8 +218,8 @@ Let's assume we have a service named 'sample'.  We can define a service definiti
       "zh_CN": "https://github.com/lf-edge/ekuiper/blob/master/docs/zh_CN/plugins/functions/functions.md"
     },
     "description": {
-      "en_US": "Sample external services for test only",
-      "zh_CN": "示例外部函数配置，仅供测试"
+      "en_US": "Sample schemaless external service",
+      "zh_CN": "示例无模式外部服务"
     }
   },
   "interfaces": {
@@ -262,73 +238,58 @@ Let's assume we have a service named 'sample'.  We can define a service definiti
 }
 ```
 
-This file defines the sample service, which contains the call information of 1 service interface:
-
-- tsschemaless: schemaless service
-
-#### Mapping
-
-Unlike schema-based external services, schemaless external services only require one json file. Therefore, the configuration involves mapping at two levels:
-
-1. eKuiper external service layer: it is defined by the file name of the json. It will be used as a key for the external service in the [REST API](../../api/restapi/services.md) for the describe, delete and update of the service as a whole.
-2. Interface layer: it is defined in the `interfaces` section of the json file. For schemaless external functions, this layer contains only one service, with the same name as the interface. Within this interface, you can define properties of the service, such as the access address and request headers.
-
-#### Notification
-
-In this example, if a user calls this schemaless external service in rekuiper SQL:
-
-1. The name of the external function, external service, and interface are the same. Since the tsschemaless interface is defined in the json file, you would call the tsschemaless function here.
-2. Currently, schemaless external functions only support the REST protocol.
+In schemaless mode:
+- The SQL function name matches the interface name (`tsschemaless`).
+- Schemaless functions support only the `rest` protocol.
 
 ## Registration and Management
 
-External functions need to be registered before being used. There are two ways to register:
+You can register external services through two methods:
 
-- Placed in the configuration folder
-- Dynamic registration via REST API.
+### File-Based Registration
 
-When rekuiper is started, it will read and register the external service configuration file in the configuration folder *etc/services*. Before starting, users can put the configuration file into the configuration folder according to the following rules:
+Place service files in the `etc/services` directory before starting rekuiper:
 
-1. The file name must be *$service name$.json*. For example, *sample.json* will be registered as a sample service.
+- Service definitions: `etc/services/{serviceName}.json`
+- Schema definitions: `etc/services/schemas/{schemaName}.proto`
 
-2. The Schema file used must be placed in the schemas folder. The directory structure is similar to:
+Directory layout:
 
-   ```text
-   etc
-     services
-       schemas
-         sample.proto
-         random.proto
-         ...
-       sample.json
-       other.json
-       ...
-   ```
-
-   Note: After rekuiper is started, it **cannot** automatically load the system by modifying the configuration file. If you need to update dynamically, please use the REST service.
-
-For dynamic registration and management of services, please refer to [External Service Management API](../../api/restapi/services.md).
-
-## Usage
-
-### Schema-based External Function
-
-After the service is registered, all functions defined in it can be used in rules. Taking the rest service function object_detection defined in sample.json above as an example, it is mapped to the objectDetection function in functions. Therefore, the SQL to call this function is:
-
-```SQL
-SELECT objectDetection(cmd, img) from comandStream
+```text
+etc
+  services
+    schemas
+      sample.proto
+      random.proto
+    sample.json
+    other.json
 ```
 
-Before calling the function, you need to make sure that the REST service is running on *http://localhost:8090* and there is an API *http://localhost:8090/object_detection* in it.
+::: tip
+rekuiper reads `etc/services` during startup. Modifying these files after startup does not reload services automatically. Use the REST API for dynamic updates.
+:::
 
-#### Parameter Expansion
+### Dynamic REST API Registration
 
-In the ptoto file, the general parameters are in message type. When being mapped to rekuiper, its parameters can be received in two situations:
+Refer to the [External Services REST API](../../api/restapi/services.md) to register, update, describe, and delete external services at runtime.
 
-1. If the parameters are not expanded, they must be in struct type when being passed in.
-2. If the parameters are expanded, multiple parameters can be passed in according to the order defined in the message.
+## Usage in SQL Rules
 
-In the above example, objectDetection receives a message parameter.
+### Schema-Based Function Invocation
+
+After registering the service, invoke the mapped function in SQL rules:
+
+```sql
+SELECT objectDetection(cmd, img) FROM commandStream;
+```
+
+Ensure that the target service runs at `http://localhost:8090` and handles the `/object_detection` path.
+
+#### Parameter Passing
+
+You can pass arguments to schema-based functions in two ways:
+1. **Single Struct Parameter**: Pass the entire object containing all request fields.
+2. **Expanded Parameters**: Pass arguments as individual columns in the order defined by the Protobuf message:
 
 ```protobuf
 message ObjectDetectionRequest {
@@ -337,22 +298,16 @@ message ObjectDetectionRequest {
 }
 ```
 
-In eKuiper, users can pass in the entire struct as a parameter, or pass in two string parameters as cmd and base64_img respectively.
+In SQL, pass either a single struct or two individual string arguments (`cmd`, `base64_img`).
 
-### Schemaless External Function
+### Schemaless Function Invocation
 
-Once the service registration is complete, all the functions defined within it can be used in rules. Taking the schemaless service function 'tsschemaless' defined in the example, the name of the external function, service, and interface are the same. Therefore, the SQL statement to call this function is as follows:
+Invoke schemaless functions by specifying the HTTP method, endpoint path, and payload parameters:
 
-```SQL
-SELECT tsschemaless("post", "/object_detection", *) from schemalessStream
+```sql
+SELECT tsschemaless("post", "/object_detection", *) FROM schemalessStream;
 ```
 
-Before calling the function, you need to make sure that the REST service is running on *http://localhost:8090* and there is an API *http://localhost:8090/object_detection* in it.
-
-#### Parameter Expansion
-
-When calling a schemaless type external function, it can have three or more parameters. The first two parameters are related to the configuration of the REST service, while the remaining parameters will be converted to JSON as the request body:
-
-- The first parameter is a string type that specifies the HTTP method, such as post, get, etc.
-- The second parameter is a string type that specifies the URL for HTTP mapping. In the example above, the parameter is "/object_detection", and the request URL for the method will be the concatenation of the address defined in the interface and this URL. For this example, the request URL will be `http://localhost:8090/object_detection`.
-- The remaining parameters will be converted to JSON and used as the content of the HTTP request body. If there is only one parameter, the converted data will be a JSON object. If there are two or more parameters, the converted data will be a JSON array.
+- Parameter 1: HTTP method string (such as `"post"` or `"get"`).
+- Parameter 2: Relative URL path (appended to the interface base address).
+- Remaining Parameters: Serialized to JSON as the request body. If you provide one remaining parameter, it serializes as a JSON object. If you provide two or more parameters, they serialize as a JSON array.

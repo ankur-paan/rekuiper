@@ -1,13 +1,18 @@
 # Sinks
 
-Sinks are used to write data to an external system. Sinks can be used to write control data to trigger an action. Sinks can also be used to write status data and save in an external storage.
+Sinks transmit data to external systems. Sinks can transmit control commands to trigger actions. Sinks can also write status data to external storage.
 
-In a rule, the sink type are used as an action. A rule can have more than one actions and the differenct actions can be the same sink type.
+In a rule definition, sink types are configured as actions. A rule can specify multiple actions, and different actions can use the same sink type.
 
 ## Result Encoding
 
-The sink result is a string as always. It will be encoded into json string by default. Users can change the format by setting `dataTemplate` which leverage the go template syntax to format the result into a string. For even detail control of the result format, users can develop a sink extension.
+Sink output is transmitted as text. By default, rekuiper encodes output records into JSON strings.
 
-## More Readings
+You can customize output formatting with the `dataTemplate` property. This property uses template syntax to format records into strings.
+
+For custom output formatting requirements, you can develop a sink extension.
+
+## Further Reading
 
 - [Sink Reference](../guide/sinks/overview.md)
+

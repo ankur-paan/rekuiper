@@ -1,28 +1,29 @@
-# Scripts management
+# Scripts Management
 
-The command line tools allows you to manage UDFs aka. scripts, such as create, show, drop, describe scripts. Currently, only JavaScript function is supported.
+The rekuiper script CLI manages JavaScript user-defined functions (UDFs). You can register, list, describe, and drop scripts.
 
-## Register a script
+## Register a Script
 
-The command is used for creating a JavaScript function. The function's definition is specified with JSON format
+Use this command to register a JavaScript function using JSON format:
 
 ```shell
 create script $script_json
 ```
 
-Example：
+Example command:
 
 ```shell
 # bin/kuiper create script "{\"id\": \"area\",\"description\": \"calculate the area\",\"script\": \"function area(x, y) { return x * y; }\",\"isAgg\": false}"
 ```
 
-This command creates a JavaScript function named area. The JSON object is with the following fields:
-- id: A unique name for the function. This name must also be defined as a function in the script field.
-- description: A brief description of the function.
-- script: The function implementation in JavaScript.
-- isAgg: A boolean indicating whether the function is an aggregate function.
+### JSON Fields
 
-Here's an example:
+- `id`: The unique identifier for the function. The script code must define a function with this matching name.
+- `description`: An explanation of function behavior.
+- `script`: The JavaScript source code containing the function implementation.
+- `isAgg`: A boolean indicating whether the function operates as an aggregate function.
+
+Example JSON definition:
 
 ```json
 {
@@ -35,30 +36,31 @@ Here's an example:
 
 ## Show All Scripts
 
-The command is used for describing all JavaScript functions defined in the server.
+Use this command to display all registered JavaScript functions:
+
+```shell
+show scripts
+```
+
+Example command and output:
 
 ```shell
 # bin/kuiper show scripts
-```
-
-The response will be a list of function names. For example:
-
-```json
 ["area"]
 ```
 
 ## Describe a Script
 
-The command prints the detailed definition of a JavaScript function.
+Use this command to display the definition of a JavaScript function:
 
 ```shell
 describe script $script_name
 ```
 
-Example：
+Example command and output:
 
 ```shell
-# bin/kuiper describe area
+# bin/kuiper describe script area
 {
    "id": "area",
    "description": "calculate area",
@@ -69,13 +71,13 @@ Example：
 
 ## Delete a Script
 
-The command drops the JavaScript function.
+Use this command to delete a JavaScript function:
 
 ```shell
-drop service $script_name
+drop script $script_name
 ```
 
-Example：
+Example command:
 
 ```shell
 # bin/kuiper drop script area

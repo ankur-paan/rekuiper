@@ -1,18 +1,21 @@
-# Timely Stream Processing
+# Time in Stream Processing
 
-Streaming data is a sequence of data over time, in which time is a intrinsic attribute of the data. In timely stream processing, time plays an important role of the computing. For example, when doing aggregations based on certain time periods (typically called windows), to define the time is significant.
+Streaming data forms a time-sequenced series. Time is an intrinsic attribute of streaming data. Time attributes determine how window aggregations group and process records.
 
-## Notion of time
+## Time Domains
 
-There are typically two domains of time we care about:
+rekuiper supports two time domains:
 
-- Event time, which is the time at which events actually occurred. Usually, the event should have a timestamp field to indicate its produced time.
-- Processing time, which is the time at which events are observed in the system.
+- **Event Time**: The timestamp when the event occurred on the source device. Records typically include a timestamp field that indicates production time.
+- **Processing Time**: The timestamp when the rekuiper engine receives and processes the event.
 
-In rekuiper, both notions of time are supported.
+## Event Time and Watermarks
 
-## Event time and watermark
+Stream processors require a mechanism to measure event time progress. For example, an hourly window operator must determine when event time passes the hour boundary to close the window.
 
-A stream processor that supports event time needs a way to measure the progress of event time. For example, a window operator that builds hourly windows needs to be notified when event time has passed beyond the end of an hour, so that the operator can close the window in progress.
+rekuiper uses watermarks to track event time progress. Watermarks flow through the data stream and carry a timestamp `t`.
 
-The mechanism in rekuiper to measure progress in event time is watermarks. Watermarks flow as part of the data stream and carry a timestamp t. A Watermark(t) declares that event time has reached time t in that stream, meaning that there should be no more elements from the stream with a timestamp t' <= t (i.e. events with timestamps older or equal to the watermark). In eKuiper, watermark is in rule level, meaning when reading data from multiple streams, the watermark will flow for all input streams.
+A watermark `Watermark(t)` declares that event time reached timestamp `t`. Subsequent records in that stream must not have timestamps `t' <= t`.
+
+In rekuiper, watermarks operate at the rule level. When a rule consumes multiple streams, the watermark tracks time progress across all input streams.
+

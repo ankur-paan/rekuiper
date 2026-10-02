@@ -1,12 +1,12 @@
-# 5-Minute Quick Start with Docker
+# Quick Start with Docker
 
-This guide walks you through running **rekuiper** in Docker and deploying your first real-time streaming rule in under five minutes.
+This document describes how to run **rekuiper** in Docker. It also describes how to deploy your first real-time streaming rule.
 
 ---
 
 ## 1. Start rekuiper
 
-Launch rekuiper with all standard network ports exposed:
+Start rekuiper with all standard network ports exposed:
 
 ```shell
 docker run -d \
@@ -17,7 +17,7 @@ docker run -d \
   ankurkrp/rekuiper:0.504-beta
 ```
 
-Verify that the engine is running and responding:
+Verify that the engine operates and responds:
 
 ```shell
 curl http://localhost:9081/ping
@@ -32,7 +32,7 @@ pong
 
 ## 2. Create a Data Stream
 
-A **Stream** defines your incoming data schema and protocol source. Let's create an in-memory stream named `demo`:
+A **Stream** defines the incoming data schema and the protocol source. Create an in-memory stream named `demo`:
 
 ```shell
 curl -X POST http://localhost:9081/streams \
@@ -51,9 +51,9 @@ Stream demo is created.
 
 ## 3. Deploy a Streaming Rule
 
-A **Rule** defines continuous SQL logic that processes incoming events and routes results to target actions (sinks).
+A **Rule** defines continuous SQL logic. The rule processes incoming events and sends results to target actions (sinks).
 
-Create a rule named `rule_high_temp` that triggers whenever the `temperature` exceeds `30.0`°C and writes matches to the engine log:
+Create a rule named `rule_high_temp`. This rule triggers when `temperature` is greater than `30.0`°C and writes results to the engine log:
 
 ```shell
 curl -X POST http://localhost:9081/rules \
@@ -78,15 +78,15 @@ Rule rule_high_temp was created
 
 ## 4. Send Test Telemetry
 
-Inject test sensor readings directly using rekuiper's HTTP push endpoint:
+Send test sensor readings through the rekuiper HTTP push endpoint:
 
 ```shell
-# 1. Send an event below threshold (temperature = 22.0) - Should be filtered out
+# 1. Send an event below the threshold (temperature = 22.0) - The engine filters this out
 curl -X POST http://localhost:9081/streams/demo/data \
   -H "Content-Type: application/json" \
   -d '{"temperature": 22.0, "humidity": 45}'
 
-# 2. Send an event above threshold (temperature = 34.8) - Should trigger the rule!
+# 2. Send an event above the threshold (temperature = 34.8) - The engine triggers the rule
 curl -X POST http://localhost:9081/streams/demo/data \
   -H "Content-Type: application/json" \
   -d '{"temperature": 34.8, "humidity": 55}'
@@ -96,7 +96,7 @@ curl -X POST http://localhost:9081/streams/demo/data \
 
 ## 5. Verify the Execution
 
-Check the live metrics of your rule:
+Check the real-time metrics of the rule:
 
 ```shell
 curl http://localhost:9081/rules/rule_high_temp/status
@@ -116,12 +116,12 @@ curl http://localhost:9081/rules/rule_high_temp/status
 }
 ```
 
-Notice:
-- `source_demo_0_records_in_total`: `2` (both events were received).
-- `op_filter_0_records_out_total`: `1` (the cold event was dropped; the hot event passed).
-- `sink_log_0_records_out_total`: `1` (the alert was logged).
+Interpretation of metrics:
+- `source_demo_0_records_in_total`: `2` (the stream received two events).
+- `op_filter_0_records_out_total`: `1` (the filter rejected the lower temperature and accepted the higher temperature).
+- `sink_log_0_records_out_total`: `1` (the sink recorded the alert).
 
-Inspect the container logs to view the output:
+Read the container logs to view the output:
 
 ```shell
 docker logs rekuiper | grep "LOG SINK"
@@ -129,9 +129,11 @@ docker logs rekuiper | grep "LOG SINK"
 
 ---
 
-## 6. Optional: Visual Management with rekuiper Manager
+## 6. Optional: Visual Management with eKuiper Manager
 
-If you prefer a web-based dashboard for building rules and visual topologies:
+You can use a web-based dashboard to configure rules and monitor visual topologies.
+
+Start eKuiper Manager:
 
 ```shell
 docker run -d \
@@ -141,13 +143,14 @@ docker run -d \
   ankur-paan/ekuiper-manager:latest
 ```
 
-Open `http://localhost:9082` in your browser to inspect streams, edit rules visually, and monitor real-time execution graphs.
+Open `http://localhost:9082` in your browser. From this interface, you can inspect streams, edit rules visually, and monitor real-time execution graphs.
 
 ---
 
 ## Next Steps
 
-- Explore [Core Architecture & Design](../concepts/rekuiper.md)
-- Learn about [Windowing Functions](../sqls/windows.md) (Tumbling, Hopping, Sliding, Session)
-- Configure [Production Deployments](../installation.md)
-- Connect external [MQTT Brokers](../guide/sources/builtin/mqtt.md)
+- Read [Core Architecture and Design](../concepts/rekuiper.md).
+- Read about [Windowing Functions](../sqls/windows.md) (Tumbling, Hopping, Sliding, Session).
+- Configure [Production Deployments](../installation.md).
+- Connect external [MQTT Brokers](../guide/sources/builtin/mqtt.md).
+

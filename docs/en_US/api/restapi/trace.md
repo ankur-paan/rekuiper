@@ -1,38 +1,53 @@
-# Data tracing management
+# Data Tracing Management
 
-rekuiper supports viewing recent tracing data of rules through API.
+The rekuiper REST API provides OpenTelemetry-compatible tracing for pipeline events. You can start, stop, and inspect distributed trace spans across rule operators.
 
-## Start trace the data of specific rule
+## Start Data Tracing for a Rule
 
-Turn on the data tracing of the rules. The strategy supports `always` and `head`. `always` means that each message is always traced, and `head` means that only upstream messages containing trace context will be traced.
+Use this endpoint to enable tracing for a specific rule. The `strategy` parameter supports `always` (trace all messages) and `head` (trace only messages containing upstream trace context headers):
 
-```shell
+```http
 POST http://localhost:9081/rules/{ruleID}/trace/start
+Content-Type: application/json
 
 {
     "strategy": "head"
 }
 ```
 
-## Stop trace the data of specific rule
+## Stop Data Tracing for a Rule
 
-```shell
+Use this endpoint to stop tracing for a specific rule:
+
+```http
 POST http://localhost:9081/rules/{ruleID}/trace/stop
 ```
 
-## View the latest Trace ID based on the rule ID
+## View Recent Trace IDs for a Rule
 
-```shell
-GET http://localhost:9081/trace/rule/{ruleID}"
+Use this endpoint to retrieve the most recent trace IDs captured for a rule:
 
+```http
+GET http://localhost:9081/trace/rule/{ruleID}
+```
+
+Response sample:
+
+```json
 ["747743cbf1fc6d10f732d17e5626021a"]
 ```
 
-## View detailed tracing data based on Trace ID
+## View Trace Span Details
 
-```shell
+Use this endpoint to retrieve the span hierarchy and operator execution latency for a specific trace ID:
+
+```http
 GET http://localhost:9081/trace/{id}
+```
 
+Response sample:
+
+```json
 {
     "Name": "demo",
     "TraceID": "747743cbf1fc6d10f732d17e5626021a",

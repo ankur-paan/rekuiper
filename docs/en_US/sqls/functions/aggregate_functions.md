@@ -1,15 +1,14 @@
 # Aggregate Functions
 
 > [!NOTE]
-> **Verification Status**: Tested and Verified against `rekuiper` engine with live streaming window load on **2026-10-01 16:34:28 UTC**.  
+> **Verification Status**: Tested and verified against the `rekuiper` runtime with streaming window workloads on **2026-10-01 16:34:28 UTC**.  
 > **Scorecard**: **18 / 18 Aggregate Functions Fully Verified with Live Data (100% Parity)**:  
 > `avg`, `count`, `count(*)`, `max`, `min`, `sum`, `collect`, `last_value`, `merge_agg`, `deduplicate`, `median`, `stddev`, `stddevs`, `var`, `vars`, `percentile`, `percentile_disc`, `last_agg_hit_count`, `last_agg_hit_time`.
 
-Aggregate functions perform a calculation on a set of values and return a single value. Aggregate functions can be used
-as expressions only in the following:
+Aggregate functions compute summary values across sets of records. Use aggregate functions in:
 
-* The select list of a SELECT statement (either a sub-query or an outer query).
-* A HAVING clause.
+- The `SELECT` list of an outer query or subquery.
+- The `HAVING` clause.
 
 ## AVG
 
@@ -17,7 +16,7 @@ as expressions only in the following:
 avg(col)
 ```
 
-The average of the values in a group. The null values will be ignored. Supports incremental calculations.
+Returns the arithmetic average of numeric values in a group. Ignores `null` values. Supports incremental computation.
 
 ## COUNT
 
@@ -26,7 +25,7 @@ count(*)
 count(col)
 ```
 
-The number of items in a group. The null values will be ignored. Supports incremental calculations.
+Returns the total count of rows or non-null values in a group. Supports incremental computation.
 
 ## MAX
 
@@ -34,7 +33,7 @@ The number of items in a group. The null values will be ignored. Supports increm
 max(col)
 ```
 
-The maximum value in a group. The null values will be ignored. Supports incremental calculations.
+Returns the maximum value in a group. Ignores `null` values. Supports incremental computation.
 
 ## MIN
 
@@ -42,7 +41,7 @@ The maximum value in a group. The null values will be ignored. Supports incremen
 min(col)
 ```
 
-The minimum value in a group. The null values will be ignored. Supports incremental calculations.
+Returns the minimum value in a group. Ignores `null` values. Supports incremental computation.
 
 ## SUM
 
@@ -50,7 +49,7 @@ The minimum value in a group. The null values will be ignored. Supports incremen
 sum(col)
 ```
 
-The sum of all the values in a group. The null values will be ignored. Supports incremental calculations.
+Returns the sum of all numeric values in a group. Ignores `null` values. Supports incremental computation.
 
 ## COLLECT
 
@@ -59,29 +58,30 @@ collect(*)
 collect(col)
 ```
 
-Returns an array with all columns or the whole record (when the parameter is *) values from the group. Supports incremental calculations.
+Returns an array containing all column values or complete records (`*`) from the window group. Supports incremental computation.
 
 ### Examples
 
-* Get an array of column `a` of the current window. Assume the column `a` is of an int type, the result will be
-  like: `[{"r1":[32, 45]}]`
+Extract an array of integers from column `a`:
 
-    ```sql
-    SELECT collect(a) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT collect(a) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: [{"r1": [32, 45]}]
+```
 
-* Get the whole array of the current window. The result will be
-  like: `[{"r1":[{"a":32, "b":"hello"}, {"a":45, "b":"world"}]}]`
+Collect all records across the current window:
 
-    ```sql
-    SELECT collect(*) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT collect(*) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: [{"r1": [{"a": 32, "b": "hello"}, {"a": 45, "b": "world"}]}]
+```
 
-* Get the second element's column 'a' value within the current window. The result will be like: `[{"r1":32}]`
+Select attribute `a` from the second element in the window:
 
-    ```sql
-    SELECT collect(*)[1]->a as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT collect(*)[1]->a AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: [{"r1": 45}]
+```
 
 ## LAST_VALUE
 
@@ -90,7 +90,10 @@ last_value(*, true)
 last_value(col, false)
 ```
 
-The last_value function is used to retrieve the value of the last row in a group for the specified column(s) or the entire message. It has two parameters, the first of which specifies the column(s) or the entire message, and the second of which specifies whether to ignore null values. If the second parameter is true, the function will only return the last non-null value. If there are no non-null values, the function will return null. If the second parameter is false, the function will return the last value, regardless of whether it is null or not. Supports incremental calculations.
+Retrieves the value of the last row in a group for specified columns or complete records.
+
+- The first parameter specifies the column or `*`.
+- The second parameter specifies whether to ignore `null` values. When `true`, returns the last non-null value, or `null` if none exist. When `false`, returns the last value even if `null`. Supports incremental computation.
 
 ## MERGE_AGG
 
@@ -99,88 +102,66 @@ merge_agg(*)
 merge_agg(col)
 ```
 
-Supports incremental calculations.
-Concatenate values from the group into a single value.
-It concatenates multiple objects by generating an object containing the union of their keys,
-taking the second object's value when there are duplicate keys.
-It does not operate recursively; only the top-level object structure is merged.
+Merges objects in a group into a single composite object. If duplicate keys occur across records, values from later records overwrite earlier values. Merging operates on the top-level object structure only. Supports incremental computation.
 
-If the parameter is a column,
-the result will be an object containing the union of the keys of all the objects in the column.
-If the column contains only non-object values, the result will be an empty object.
+If the argument is a column containing non-object values, `merge_agg` returns an empty object `{}`.
 
 ### Examples
 
-Given the following values in the group:
+Given incoming group records:
 
-```json lines
-{
-  "a": {
-    "a": 2
-  },
-  "b": 2,
-  "c": 3
-}
-{
-  "a": {
-    "b": 2
-  },
-  "b": 5,
-  "d": 6
-}
-{
-  "a": {
-    "a": 3
-  },
-  "b": 8
-}
+```json
+{"a": {"a": 2}, "b": 2, "c": 3}
+{"a": {"b": 2}, "b": 5, "d": 6}
+{"a": {"a": 3}, "b": 8}
 ```
 
-* Concat wildcard, the result will be: `{"a": {"a": 3}, "b": 8, "c": 3, "d": 6}`
+Merge all records:
 
-    ```sql
-    SELECT merge_agg(*) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT merge_agg(*) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: {"a": {"a": 3}, "b": 8, "c": 3, "d": 6}
+```
 
-* Concat a specified object column, the result will be: `{"a": 3, "b": 2}`
+Merge object column `a`:
 
-    ```sql
-    SELECT merge_agg(a) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT merge_agg(a) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: {"a": 3, "b": 2}
+```
 
-* Concat a specified non-object column, the result will be: `{}`
+Merge non-object column `b`:
 
-    ```sql
-    SELECT merge_agg(b) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+```sql
+SELECT merge_agg(b) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: {}
+```
 
 ## DEDUPLICATE
 
 ```text
-deduplicate(col, false)
+deduplicate(col, all_items_bool)
 ```
 
-Returns the deduplicate results in the group, usually a window. The first argument is the column as the key to
-deduplicate; the second argument is whether to return all items or just the latest item which is not duplicate. If the
-latest item is a duplicate, the sink will receive an empty map. Set the sink
-property [omitIfEmpty](../../guide/sinks/overview.md#common-properties) to the sink to not triggering the action.
+Removes duplicate values from a window group based on the specified column.
 
-Examples:
+- `col`: Key column for deduplication.
+- `all_items_bool`: If `true`, returns all unique records. If `false`, returns only the latest non-duplicate record. If the latest record is a duplicate, the sink receives an empty map `{}`. Configure the sink property [`omitIfEmpty`](../../guide/sinks/overview.md#common-properties) to suppress empty payload emission.
 
-* Get the whole array of the current window which is deduplicated by column `a`. The result will be
-  like: `[{"r1":{"a":32, "b":"hello"}, {"a":45, "b":"world"}}]`
+### Examples
 
-    ```sql
-    SELECT deduplicate(a, true) as r1 FROM test GROUP BY TumblingWindow(ss, 10)
-    ```
+Deduplicate full records by column `a`:
 
-* Get the column `a` value which is not duplicate during the last hour. The result will be
-  like: `[{"r1":32}]`, `[{"r1":45}]` and `[{}]` if a duplicate value arrives. Use the omitIfEmpty sink property to
-  filter out those empty results.
+```sql
+SELECT deduplicate(a, true) AS r1 FROM test GROUP BY TumblingWindow(ss, 10);
+-- Output: [{"r1": [{"a": 32, "b": "hello"}, {"a": 45, "b": "world"}]}]
+```
 
-     ```sql
-     SELECT deduplicate(a, false)->a as r1 FROM demo GROUP BY SlidingWindow(hh, 1)
-     ```
+Return only new values of column `a` in a sliding hour window:
+
+```sql
+SELECT deduplicate(a, false)->a AS r1 FROM demo GROUP BY SlidingWindow(hh, 1);
+```
 
 ## MEDIAN
 
@@ -188,7 +169,7 @@ Examples:
 median(col)
 ```
 
-Returns the median value of expression in the group.
+Returns the median numeric value of the column in the group.
 
 ## STDDEV
 
@@ -196,8 +177,7 @@ Returns the median value of expression in the group.
 stddev(col)
 ```
 
-Returns the population standard deviation of expression in the group, usually a window. The argument is the column as
-the key to stddev.
+Returns the population standard deviation of numeric values in the group.
 
 ## STDDEVS
 
@@ -205,8 +185,7 @@ the key to stddev.
 stddevs(col)
 ```
 
-Returns the sample standard deviation of expression in the group, usually a window. The argument is the column as the
-key to stddevs.
+Returns the sample standard deviation of numeric values in the group.
 
 ## VAR
 
@@ -214,8 +193,7 @@ key to stddevs.
 var(col)
 ```
 
-Returns the population variance (square of the population standard deviation) of expression in the group, usually a
-window. The argument is the column as the key to var.
+Returns the population variance (square of the population standard deviation) for numeric values in the group.
 
 ## VARS
 
@@ -223,28 +201,23 @@ window. The argument is the column as the key to var.
 vars(col)
 ```
 
-Returns the sample variance (square of the sample standard deviation) of expression in the group, usually a window. The
-argument is the column as the key to vars.
+Returns the sample variance (square of the sample standard deviation) for numeric values in the group.
 
 ## PERCENTILE
 
 ```text
-percentile(col, percentile)
+percentile(col, percentile_num)
 ```
 
-Returns the percentile value based on a continuous distribution of expression in the group, usually a window. The first
-argument is the column as the key to percentile. The second argument is the percentile of the value that you want to
-find. The percentile must be a constant between 0.0 and 1.0.
+Calculates the continuous distribution percentile value for a column in the group. The percentile argument must be a constant between `0.0` and `1.0`.
 
 ## PERCENTILE_DISC
 
 ```text
-percentile_disc(col, percentile)
+percentile_disc(col, percentile_num)
 ```
 
-Returns the percentile value based on a discrete distribution of expression in the group, usually a window. The first
-argument is the column as the key to percentile_disc. The second argument is the percentile of the value that you want
-to find. The percentile must be a constant between 0.0 and 1.0.
+Calculates the discrete distribution percentile value for a column in the group. The percentile argument must be a constant between `0.0` and `1.0`.
 
 ## LAST_AGG_HIT_COUNT
 
@@ -252,12 +225,9 @@ to find. The percentile must be a constant between 0.0 and 1.0.
 last_agg_hit_count()
 ```
 
-Returns the number of times the function had been called and passed.
-The function is usually used to get the accumulated trigger count of an aggregate rule.
-If the function is used in `HAVING` clause, it will only update the count when the condition is true.
+Returns the total number of times the aggregate rule condition evaluated to `true`. When invoked in a `HAVING` clause, the counter increments only when the `HAVING` condition is satisfied.
 
-To use the similar functionality in a non-aggregate rule,
-use the [last_hit_count](./other_functions.md#last_hit_count) function.
+For non-aggregate rules, use [last_hit_count](./other_functions.md#last_hit_count).
 
 ## LAST_AGG_HIT_TIME
 
@@ -265,9 +235,6 @@ use the [last_hit_count](./other_functions.md#last_hit_count) function.
 last_agg_hit_time()
 ```
 
-Returns the int64 timestamp of the last **event** time the function had been called and passed.
-The function is usually used to get the last trigger time of an aggregate rule.
-If the function is used in `HAVING` clause, it will only update the timestamp when the condition is true.
+Returns the 64-bit integer millisecond timestamp of the last event that triggered the aggregate rule. When invoked in a `HAVING` clause, the timestamp updates only when the `HAVING` condition is satisfied.
 
-To use the similar functionality in a non-aggregate rule,
-use the [last_hit_time](./other_functions.md#last_hit_time) function.
+For non-aggregate rules, use [last_hit_time](./other_functions.md#last_hit_time).

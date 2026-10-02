@@ -1,30 +1,22 @@
 # Management Web UI
 
-## Overview
-
-The web management console provides a browser-based dashboard to manage rekuiper nodes, streams, rules, and plugins. This guide walks through setting up the console, connecting to a rekuiper instance, and creating an end-to-end streaming rule.
-
-The walkthrough covers:
-- Connecting the web console to a rekuiper node
-- Creating a stream that ingests data from an MQTT topic:
-  - Address: `tcp://127.0.0.1:1883`
-  - Topic: `devices/device_001/messages`
-  - Sample payload: `{"temperature": 40, "humidity": 20}`
-- Creating a SQL rule to filter sensor readings and write them to a file destination
+The web management console provides a browser-based user interface to monitor and configure rekuiper instances, streams, rules, and plugins. This guide explains how to install the console, connect to a rekuiper instance, and create an end-to-end streaming rule.
 
 ## Architecture
 
-- **Web Browser UI**: Visual interface for rules, streams, schemas, and metrics.
-- **kuiper-manager**: Lightweight HTTP reverse proxy providing user authentication and node management. Can run on the edge gateway or in the cloud.
-- **rekuiper instance**: Stream processing engine exposing its REST API on port `9081`.
+The visual management architecture comprises three layers:
 
-![construct](./resources/arch.png)
+- **Web Browser UI**: Displays interactive dashboards for stream creation, rule execution graphs, and throughput metrics.
+- **kuiper-manager**: A lightweight reverse proxy service providing authentication and node management.
+- **rekuiper Daemon**: The core stream processing engine exposing REST APIs on port `9081`.
+
+![Management Architecture](./resources/arch.png)
 
 ## Installation
 
-### 1. Run rekuiper
+### 1. Start rekuiper in Docker
 
-Run rekuiper in Docker with ports `9081` (REST API), `20498` (NanoIPC), and `20499` (RPC/Prometheus) exposed:
+Start the rekuiper engine exposing ports `9081` (REST API), `20498` (NanoIPC), and `20499` (Prometheus metrics):
 
 ```shell
 docker run -d \
@@ -35,16 +27,15 @@ docker run -d \
   ankurkrp/rekuiper:0.504-beta
 ```
 
-Verify that rekuiper is running:
+Verify engine reachability:
 
 ```shell
 curl http://localhost:9081/ping
-# Output: pong
 ```
 
-### 2. Run the Management Console
+### 2. Start the Management Console
 
-Pull and start the open-source management console container:
+Run the management console container on port `9082`:
 
 ```shell
 docker run -d \
@@ -54,77 +45,72 @@ docker run -d \
   ankur-paan/ekuiper-manager:latest
 ```
 
-## Getting started
+## Getting Started
 
-### Login to ekuiper-manager
+### 1. Log In to the Console
 
-You need to provide the address, username, and password of kuiper-manager when logging in, which is shown below:
+Navigate to `http://localhost:9082` in your browser. Enter the default credentials:
 
-- Address: `http://$yourhost:9082`
+- **Username**: `admin`
+- **Password**: `public`
 
-- User name: `admin`
+![Login Interface](./resources/login.png)
 
-- Password: public
+### 2. Register a rekuiper Service
 
-  ![login](./resources/login.png)
+Configure a node connection:
 
-### Create a rekuiper service
+- **Service Type**: Select `Direct Connect service`.
+- **Service Name**: Enter an identifier (for example: `example`).
+- **Endpoint URL**: Enter `http://localhost:9081` or container IP `http://<IP>:9081`.
 
-When creating a eKuiper service, you need to fill in the "service type", "service name" and "endpoint URL".
+Inspect container IP:
 
-- Service Type: Select `Direct Connect service` (`Huawei IEF service` is dedicated to Huawei users).
+```shell
+docker inspect rekuiper | grep IPAddress
+```
 
-  name: self-made, this example uses `example`.
+![Add Service](./resources/add_service.png)
 
-- Endpoint URL: `http://$IP:9081`, the IP acquisition command is as follows:
-
-  ```shell
-  docker inspect rekuiper | grep IPAddress
-  ```
-
-The example of creating a service is shown below. If port `9081` is exposed to the host, you can also use `http://localhost:9081`.
-
-![addNode](./resources/add_service.png)
-
-### Create a stream
+### 3. Create a Stream
 
 Create a stream named `demoStream`:
 
-- Ingest from MQTT broker at `tcp://127.0.0.1:1883`
-- Topic: `devices/device_001/messages`
-- Stream schema fields:
-  - `temperature`: bigint
-  - `humidity`: bigint
+- **Data Source**: MQTT broker at `tcp://127.0.0.1:1883`.
+- **Topic**: `devices/device_001/messages`.
+- **Schema Fields**:
+  - `temperature`: `bigint`
+  - `humidity`: `bigint`
 
-![newStream](./resources/new_stream.png)
+![Create Stream](./resources/new_stream.png)
 
-### Create a rule
+### 4. Create a Rule
 
-Create a rule named `demoRule` to filter out records where `temperature > 30`. The SQL editor provides syntax highlighting and completion.
+Define a rule named `demoRule` with SQL filtering:
 
-![newRule](./resources/new_rule.png)
+```sql
+SELECT * FROM demoStream WHERE temperature > 30
+```
 
-Click the "Add" button to configure an action destination, such as writing results to `/tmp/demoFile`. For details on the file destination, refer to the [File sink guide](../../guide/sinks/builtin/file.md).
+![Create Rule](./resources/new_rule.png)
 
-![sinkConf](./resources/sink_conf.png)
+Add an action destination to write filtered events to `/tmp/demoFile`. Refer to the [File Sink Guide](../../guide/sinks/builtin/file.md).
 
-### View execution results
+![Configure Sink](./resources/sink_conf.png)
 
-Publish test sensor data using `mosquitto_pub`:
+### 5. Ingest Telemetry and Inspect Metrics
+
+Publish test telemetry records using `mosquitto_pub`:
 
 ```shell
 mosquitto_pub -h 127.0.0.1 -m '{"temperature": 40, "humidity": 20}' -t devices/device_001/messages
 ```
 
-Inspect the rule running status, metrics, and logs in the console:
+Open the rule dashboard to monitor real-time throughput metrics, pause or restart execution, and inspect logs:
 
-- View rule status and throughput counters
-- Start, stop, or edit active rules
-- Export or delete rule configurations
+![Rule Dashboard](./resources/rule_op.png)
 
-![ruleOp](./resources/rule_op.png)
-
-## Further Reading
+## Cross References
 
 - [Rule Processing Guide](../../guide/rules/overview.md)
 - [REST API Reference](../../api/restapi/overview.md)

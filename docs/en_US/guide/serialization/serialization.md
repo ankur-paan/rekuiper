@@ -1,13 +1,14 @@
 # Serialization
 
-The rekuiper uses a map based data structure internally during computation, so source/sink connections to external systems usually require codecs to convert the format. In source/sink, you can specify the codec scheme to be used by configuring the parameters `format` and `schemaId`.
+rekuiper uses an internal map-based data structure during stream computation. Source and sink connectors communicating with external systems require codecs to convert data formats. Specify the encoding and decoding configuration by setting `format` and `schemaId` in source or sink parameters.
 
-## Format
+## Formats
 
-There are two types of formats for codecs: schema and schema-less formats. The formats currently supported by rekuiper
-are `json`, `binary`, `delimiter`, `protobuf` and `custom`. Among them, `protobuf` is the schema format.
-The schema format requires registering the schema first, and then setting the referenced schema along with the format.
-For example, when using mqtt sink, the format and schema can be configured as follows
+rekuiper supports schema-based and schema-less serialization formats: `json`, `binary`, `delimited`, `protobuf`, and `custom`.
+
+`protobuf` is a schema-based format. You must register the schema before referencing it in a rule.
+
+The following configuration specifies Protobuf serialization for an MQTT sink:
 
 ```json
 {
@@ -20,138 +21,127 @@ For example, when using mqtt sink, the format and schema can be configured as fo
 }
 ```
 
-All formats provide the ability to codec and, optionally, the definition of schema. The codec computation can be built-in, such as JSON parsing; dynamic parsing schema for codecs, such as Protobuf parsing `*.proto` files; or user-defined static plug-ins (`*.so`) can be used for parsing. Among them, static parsing has the best performance, but it requires writing additional code and compiling into a plugin, which is more difficult to change. Dynamic parsing is more flexible.
+rekuiper supports three codec implementations:
 
-All currently supported formats, their supported codec methods and modes are shown in the following table.
+1. **Built-in Codecs**: Executed internally without external dependencies (for example, JSON parsing).
+2. **Dynamic Schema Codecs**: Parse schema files at runtime (for example, Protobuf reading `*.proto` files).
+3. **Static Plugin Codecs**: Use compiled shared libraries (`*.so`) for maximum parsing performance.
 
-| Format    | Codec                               | Custom Codec           | Schema                 |
-|-----------|-------------------------------------|------------------------|------------------------|
-| json      | Built-in                            | Unsupported            | Unsupported            |
-| binary    | Built-in                            | Unsupported            | Unsupported            |
-| delimiter | Built-in, need to specify delimiter | Unsupported            | Unsupported            |
-| protobuf  | Built-in                            | Supported              | Supported and required |
-| custom    | Not Built-in                        | Supported and required | Supported and optional |
+The following table summarizes supported formats and their capabilities:
 
-### Format Extension
+| Format | Codec | Custom Codec | Schema |
+|---|---|---|---|
+| `json` | Built-in | Unsupported | Unsupported |
+| `binary` | Built-in | Unsupported | Unsupported |
+| `delimited` | Built-in (specify delimiter) | Unsupported | Unsupported |
+| `protobuf` | Built-in | Supported | Supported and required |
+| `custom` | Not built-in | Supported and required | Supported and optional |
 
-When using `custom` format or `protobuf` format, the user can customize the codec and schema in the form of a go language plugin. Among them, `protobuf` only supports custom codecs, and the schema needs to be defined by `*.proto` file. The steps for customizing the format are as follows:
+### Format Extensions
 
-1. Implement codec-related interfaces. The Encode function encodes the incoming data (currently always `map[string]interface{}`) into a byte array. The Decode function, on the other hand, decodes the byte array into `map[string]interface{}`. The decode function is called in source, while the encode function will be called in sink.
+You can implement custom codecs and schemas for `custom` and `protobuf` formats by creating Go plugins:
 
-    ```go
-    // Converter converts bytes & map or []map according to the schema
-    type Converter interface {
-        Encode(d interface{}) ([]byte, error)
-        Decode(b []byte) (interface{}, error)
-    }
-    ```
+1. Implement the `Converter` interface. The `Encode` method serializes data into a byte array for sinks. The `Decode` method deserializes bytes into map structures for sources:
 
-2. Implements the schema description interface. If the custom format is strongly typed, then this interface can be implemented. The interface returns a JSON schema-like string for use by source. The returned data structure will be used as a physical schema to help eKuiper implement capabilities such as SQL validation and optimization during the parse and load phase.
+   ```go
+   // Converter converts bytes & map or []map according to the schema
+   type Converter interface {
+       Encode(d interface{}) ([]byte, error)
+       Decode(b []byte) (interface{}, error)
+   }
+   ```
 
-    ```go
-    type SchemaProvider interface {
-      GetSchemaJson() string
-    }
-    ```
+2. Implement the `SchemaProvider` interface if the format is strongly typed. The method returns a JSON-schema representation used for SQL validation and optimization:
 
-3. Compile as a plugin so file. Usually, format extensions do not need to depend on the main rekuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to [deploy to the official docker](#build-format-plugin-with-docker), you can use the corresponding docker image for compilation.
+   ```go
+   type SchemaProvider interface {
+     GetSchemaJson() string
+   }
+   ```
 
-    ```shell
-    go build -trimpath --buildmode=plugin -o data/test/myFormat.so internal/converter/custom/test/*.go
-    ```
+3. Compile the code into a shared object plugin:
 
-4. Register the schema by REST API.
+   ```shell
+   go build -trimpath --buildmode=plugin -o data/test/myFormat.so internal/converter/custom/test/*.go
+   ```
 
-    ```shell
-    ###
-    POST http://{{host}}/schemas/custom
-    Content-Type: application/json
-  
-    {
-      "name": "custom1",
-       "soFile": "file:///tmp/custom1.so"
-    }
-    ```
+4. Register the schema by using the REST API:
 
-5. Use custom format in source or sink with `format` and `schemaId` parameters.
+   ```http
+   POST http://localhost:9081/schemas/custom
+   Content-Type: application/json
 
-The complete custom format can be found in [myFormat.go](https://github.com/lf-edge/ekuiper/blob/master/internal/converter/custom/test/myformat.go). This file defines a simple custom format where the codec actually only calls JSON for serialization. It returns a data structure that can be used to infer the data structure of the rekuiper source.
+   {
+     "name": "custom1",
+     "soFile": "file:///tmp/custom1.so"
+   }
+   ```
 
-#### Build Format Plugin with Docker
+5. Reference the format in sources or sinks by setting `format="custom"` and `schemaId="custom1"`.
 
-Due to go plugin limitations, it is better to build the format plugin in the same environment as the eKuiper build environment. The official eKuiper docker image and binaries are built in two os: debian and alpine. Except the default docker image like `1.8.0` and `1.8.0-apline`, other images and binaries are using debian.
+Refer to [myFormat.go](https://github.com/lf-edge/ekuiper/blob/master/internal/converter/custom/test/myformat.go) for a complete sample implementation.
 
-To build for debian environment, please use the corresponding dev image to build. For example, to build format plugin for 1.8.0, use `1.8.0-dev` image.
+#### Build Format Plugins with Docker
 
-To build for alpine environment, we can use the golang alpine image as the base environment. The steps are as below:
+Compile format plugins in an environment matching the target rekuiper binary. Official release images use Debian or Alpine Linux.
 
-1. In your plugin project, create a Makefile and make sure the plugin can be built by `make` command. Check the [sample project](https://github.com/lf-edge/ekuiper/tree/master/internal/converter/custom/test) for reference.
-2. Check the golang version of your eKuiper. Check the `GO_VERSION` arg in
-   the [docker file](https://github.com/lf-edge/ekuiper/blob/master/deploy/docker/Dockerfile) of the corresponding
-   eKuiper version. For example, if the version is `1.25.4`, use `golang:1.25.4-alpine` docker image for build.
-3. Switch to your project location then start the golang docker container with your project, install dependencies then execute `make`, make sure build is successful.
+- **Debian**: Use the corresponding developer image (for example, `1.8.0-dev`).
+- **Alpine**: Use the official Go Alpine image matching the engine version:
+
+1. Create a `Makefile` in your plugin repository. Refer to the [sample project](https://github.com/lf-edge/ekuiper/tree/master/internal/converter/custom/test).
+2. Check the `GO_VERSION` argument in the [Docker build file](https://github.com/lf-edge/ekuiper/blob/master/deploy/docker/Dockerfile) (for example, `1.25.4`).
+3. Compile the plugin inside the Alpine container:
 
    ```shell
    cd ${yourProjectLoc}
    docker run --rm -it -v "$PWD":/usr/src/myapp -w /usr/src/myapp golang:1.25.4-alpine sh
-   ### inside docker container
-   /usr/src/myapp # apk add gcc make libc-dev
-   /usr/src/myapp # make
+   # Inside the container:
+   apk add gcc make libc-dev
+   make
    ```
 
-4. You should find the built *.so file (test.so in this example) for you plugin in your project. Use that to register the format plugin.
+4. Locate the compiled `.so` file and register it through the schema registry API.
 
 ### Static Protobuf
 
-When using the Protobuf format, we support both dynamic and static parsing. With dynamic parsing, the user only needs to
-specify the proto file during registration mode. For more demanding parsing performance, you can use static parsing.
-Static parsing requires the development of a parsing plug-in, which proceeds as follows.
+For high-throughput requirements, compile static Protobuf plugins instead of using dynamic schema parsing:
 
-1. Assume we have a proto file helloworld.proto. Use official protoc tool to generate go code. Check [Protocol Buffer Doc](https://developers.google.com/protocol-buffers/docs/reference/go-generated) for detail.
+1. Generate Go code from your `.proto` definition by using `protoc`:
 
    ```shell
    protoc --go_opt=Mhelloworld.proto=com.main --go_out=. helloworld.proto
    ```
 
-2. Move the generated code helloworld.pb.go to the go language project and rename the package to main.
-3. Create the wrapper struct for each message type. Implement 3 methods `Encode`, `Decode`, `GetXXX`. The main purpose of encoding and decoding is to convert the struct and map types of messages. Note that to ensure performance, do not use reflection.
-4. Compile as a plugin so file. Usually, format extensions do not need to depend on the main rekuiper project. Due to the limitations of the Go language plugin system, the compilation of the plugin still needs to be done in the same compilation environment as the main eKuiper application, including the same operations, Go language version, etc. If you need to deploy to the official docker, you can use the corresponding docker image for compilation.
+2. Move the generated `helloworld.pb.go` file into your plugin project and set package name to `main`.
+3. Create a wrapper struct for each message type. Implement `Encode`, `Decode`, and accessor methods without reflection.
+4. Compile the plugin:
 
    ```shell
-    go build -trimpath --buildmode=plugin -o data/test/helloworld.so internal/converter/protobuf/test/*.go
+   go build -trimpath --buildmode=plugin -o data/test/helloworld.so internal/converter/protobuf/test/*.go
    ```
 
-5. Register the schema by REST API. Notice that, the proto file and the so file are needed.
+5. Register the schema by providing both the `.proto` definition and the `.so` binary:
 
-    ```shell
-    ###
-    POST http://{{host}}/schemas/protobuf
-    Content-Type: application/json
-  
-    {
-      "name": "helloworld",
-      "file": "file:///tmp/helloworld.proto",
-       "soFile": "file:///tmp/helloworld.so"
-    }
-    ```
+   ```http
+   POST http://localhost:9081/schemas/protobuf
+   Content-Type: application/json
 
-6. Use custom format in source or sink with `format` and `schemaId` parameters.
+   {
+     "name": "helloworld",
+     "file": "file:///tmp/helloworld.proto",
+     "soFile": "file:///tmp/helloworld.so"
+   }
+   ```
 
-The complete static protobuf plugin can be found in [helloworld protobuf](https://github.com/lf-edge/ekuiper/tree/master/internal/converter/protobuf/test).
+6. Reference the registered schema in stream and action definitions.
 
-## Schema
+Refer to the [helloworld protobuf sample](https://github.com/lf-edge/ekuiper/tree/master/internal/converter/protobuf/test) for a full implementation.
 
-A schema is a set of metadata that defines the data structure. For example, the .proto file is used in the Protobuf format as the data format for schema definition transfers. Currently, rekuiper supports schema types protobuf and custom.
+## Schema Registry
 
-### Schema Registry
+Schemas define structured record formats. rekuiper stores schema files in `data/schemas/${type}` (for example, `data/schemas/protobuf`).
 
-Schemas are stored as files. The user can register the schema through the configuration file or the API. The schema is stored in `data/schemas/${type}`. For example, a schema file in protobuf format should be placed in `data/schemas/protobuf`.
+During startup, rekuiper scans the schema directory and registers all definitions automatically. Manage schemas at runtime through the Schema Registry API:
 
-When rekuiper starts, it will scan this configuration folder and automatically register the schemas inside. If you need to register or manage schemas on the fly, this can be done through the schema registry API, which acts on the file system.
-
-### Schema Registry API
-
-Users can use the schema registry API to add, delete, and check schemas at runtime. For more information, please refer to.
-
-- [schema registry REST API](../../api/restapi/schemas.md)
-- [schema registry CLI](../../api/cli/schemas.md)
+- [Schema Registry REST API](../../api/restapi/schemas.md)
+- [Schema Registry CLI](../../api/cli/schemas.md)

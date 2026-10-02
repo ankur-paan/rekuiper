@@ -1,40 +1,42 @@
-# TABLE Statements
+# Table Statements
 
-SQL statements are defined to create and manage tables.
+SQL Data Definition Language (DDL) statements create and manage reference tables.
 
-## Create TABLE
+## CREATE TABLE
 
-`CREATE TABLE` defines a table that is persisted in durable storage and can be joined with streams.
+The `CREATE TABLE` statement registers a table backed by durable storage that can be joined with streams:
 
 ```sql
-CREATE TABLE
-    table_name
-( column_name <data_type> [ ,...n ] )
-WITH ( property_name = expression [, ...] );
+CREATE TABLE table_name
+    ( column_name <data_type> [ ,...n ] )
+    WITH ( property_name = expression [, ...] );
 ```
 
-For the detail table spec, please check [table](../guide/tables/overview.md).
+For detailed table configurations, refer to the [Table Overview Guide](../guide/tables/overview.md).
 
-## Describe Table
+## DESCRIBE TABLE
 
-A statement to get the table definition.
+The `DESCRIBE TABLE` statement returns the schema and configuration of a registered table:
 
-```SQL
-DESCRIBE TABLE table_name
+```sql
+DESCRIBE TABLE table_name;
 ```
 
-## Drop Table
+## DROP TABLE
 
-Delete a table. Please make sure all the rules which refer to the table are deleted.
+The `DROP TABLE` statement removes a registered table definition:
 
-```SQL
-DROP TABLE stream_name
+```sql
+DROP TABLE table_name;
 ```
 
-## Show Tables
+> [!CAUTION]
+> Delete all rules that reference the table before running `DROP TABLE`.
 
-Display all the tables defined.
+## SHOW TABLES
 
-```SQL
-SHOW TABLES
+The `SHOW TABLES` statement lists all tables currently registered in the database:
+
+```sql
+SHOW TABLES;
 ```

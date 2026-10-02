@@ -1,29 +1,31 @@
 # JSON Expressions
 
-**Sample data**
+rekuiper provides dot, arrow, indexing, and slicing operators to access nested attributes in JSON objects and arrays.
+
+The following sample record illustrates expression syntax:
 
 ```json
 {
   "name": {"first": "Tom", "last": "Anderson"},
-  "age":37,
-  "children": ["Sara","Alex","Jack"],
+  "age": 37,
+  "children": ["Sara", "Alex", "Jack"],
   "fav.movie": "Deer Hunter",
   "friends": [
     {"first": "Dale", "last": "Murphy", "age": 44},
     {"first": "Roger", "last": "Craig", "age": 68},
     {"first": "Jane", "last": "Murphy", "age": 47}
   ],
-    "followers": {
-        "Group1": [
-            {"first": "John", "last": "Shavor", "age": 22},
-            {"first": "Ken", "last": "Miller", "age": 33}
-        ],
-        "Group2": [
-            {"first": "Alice", "last": "Murphy", "age": 33},
-            {"first": "Brian", "last": "Craig", "age": 44}
-        ]
-    },
-   "ops": {
+  "followers": {
+    "Group1": [
+      {"first": "John", "last": "Shavor", "age": 22},
+      {"first": "Ken", "last": "Miller", "age": 33}
+    ],
+    "Group2": [
+      {"first": "Alice", "last": "Murphy", "age": 33},
+      {"first": "Brian", "last": "Craig", "age": 44}
+    ]
+  },
+  "ops": {
     "functionA": {"numArgs": 2},
     "functionB": {"numArgs": 3},
     "functionC": {"variadic": true}
@@ -33,241 +35,136 @@
 }
 ```
 
-## Basic expressions
+## Basic Expressions
 
-### Identifier
+### Property Access
 
-The source dereference operator `.` can be used to specify columns by dereferencing the source stream or table, or to select a key in a nested JSON object. The `->` dereference selects a key in a nested JSON object.
+Use the dot (`.`) or arrow (`->`) operator to access nested attributes in a struct or JSON object:
 
 ```sql
-SELECT demo.age FROM demo
-{"age" : 37}
+SELECT demo.age FROM demo;
+-- Output: {"age": 37}
+
+SELECT demo.name->first FROM demo;
+-- Output: {"first": "Tom"}
+
+SELECT demo.name.first FROM demo;
+-- Output: {"first": "Tom"}
+
+SELECT name.first AS fname FROM demo;
+-- Output: {"fname": "Tom"}
+
+SELECT name->first AS fname FROM demo;
+-- Output: {"fname": "Tom"}
+
+SELECT ops->functionA.numArgs AS num FROM demo;
+-- Output: {"num": 2}
 ```
 
+### Index Expressions
+
+Use bracket notation (`[index]`) to retrieve specific elements from an array. Indices are zero-based. Negative indices count backward from the end of the array (`-1` represents the last item):
+
 ```sql
-SELECT demo.name->first FROM demo
-{"first" : "Tom"}
+SELECT children FROM demo;
+-- Output: {"children": ["Sara", "Alex", "Jack"]}
+
+SELECT children[0] FROM demo;
+-- Output: {"children": "Sara"}
+
+SELECT children[1] FROM demo;
+-- Output: {"children": "Alex"}
+
+SELECT children[-1] FROM demo;
+-- Output: {"children": "Jack"}
+
+SELECT children[-2] FROM demo;
+-- Output: {"children": "Alex"}
+
+SELECT d.friends[0]->last FROM demo AS d;
+-- Output: {"last": "Murphy"}
 ```
 
+### Slicing Expressions
+
+Use slice notation (`[start:end]`) to extract contiguous elements from an array. The interval includes `start` and excludes `end` (`[start, end)`):
+
+- If `start` is omitted, slicing begins at the first element.
+- If `end` is omitted, slicing continues to the end of the array.
+
 ```sql
-SELECT demo.name.first FROM demo
-{"first" : "Tom"}
+SELECT children[0:1] FROM demo;
+-- Output: {"children": ["Sara"]}
+
+SELECT children[1:-1] FROM demo;
+-- Output: {"children": ["Alex"]}
+
+SELECT children[0:-1] FROM demo;
+-- Output: {"children": ["Sara", "Alex"]}
+
+SELECT children[:] FROM demo;
+-- Output: {"children": ["Sara", "Alex", "Jack"]}
+
+SELECT children[:2] FROM demo;
+-- Output: {"children": ["Sara", "Alex"]}
+
+SELECT children[x:y] FROM demo;
+-- Output: {"children": ["Sara", "Alex", "Jack"]}
+
+SELECT children[x+1:y] FROM demo;
+-- Output: {"children": ["Alex", "Jack"]}
+
+SELECT followers->Group1[:1]->first FROM demo;
+-- Output: {"first": ["John"]}
 ```
 
+## JSONPath Functions
+
+rekuiper provides built-in functions to query complex struct and array columns by using JSONPath expressions:
+
+- `json_path_exists(col, jsonpath)`: Returns `true` if the path matches content.
+- `json_path_query(col, jsonpath)`: Returns an array of matched values.
+- `json_path_query_first(col, jsonpath)`: Returns the first matching element.
+
+Refer to the [JSON Functions Reference](./functions/json_functions.md) for detailed descriptions.
+
+### JSONPath Syntax
+
+- `.` navigates down the object hierarchy.
+- `[]` accesses array items or map fields.
+- `$` represents the root document.
+- `@` represents the current evaluation node.
+
+Using the sample data:
+
+- `$.age` resolves to `37`.
+- `$.friends.first` resolves to `"Dale"`.
+- `$.friends` resolves to the entire array.
+- `$.friends[0]` selects the first friend in the list.
+- `$.friends[0]['last']` selects the `last` attribute of the first friend.
+- `$.friends[? @.age > 60].first` selects first names where age exceeds 60.
+
+> [!NOTE]
+> Include a space after the `?` character in JSONPath filter expressions.
+
+### Example Queries
+
+Extract the last names of all followers in `Group1`:
+
 ```sql
-SELECT name.first AS fname FROM demo
-{"fname": "Tom"}
+SELECT json_path_query(followers, "$.Group1[*].last") FROM demo;
+-- Output: ["Shavor", "Miller"]
 ```
 
+Filter records where any follower in `Group1` is older than 30:
+
 ```sql
-SELECT name->first AS fname FROM demo
-{"fname": "Tom"}
+SELECT name->last FROM demo WHERE json_path_exists(followers, "$.Group1[? @.age > 30]");
+-- Output: {"last": "Anderson"}
 ```
 
-```sql
-SELECT ops->functionA.numArgs AS num FROM demo
-{"num": 2}
-```
-
-### Index expression
-
-Index Expressions allow you to select a specific element in a list. It should look similar to array access in common programming languages.The index value starts with 0, -1 is the starting position from the end, and so on.
+Access attributes containing special characters or periods:
 
 ```sql
-SELECT children FROM demo
-
-{
-    "children": ["Sara","Alex","Jack"]
-}
-```
-
-```sql
-SELECT children[0] FROM demo
-
-{
-    "children": "Sara"
-}
-
-SELECT children[1] FROM demo
-
-{
-    "children": "Alex"
-}
-
-SELECT children[-1] FROM demo
-
-{
-    "children": "Jack"
-}
-
-SELECT children[-2] FROM demo
-
-{
-    "children": "Alex"
-}
-
-SELECT d.friends[0]->last FROM demo AS d
-
-{
-    "last" : "Murphy"
-}
-```
-
-### Slicing
-
-Slices allow you to select a contiguous subset of an array.
-
-`field[from:to)`is the interval before closing and opening, excluding to. If from is not specified, then it means start
-from the 1st element of an array; If to is not specified, then it means end with the last element of array.
-
-```sql
-SELECT children[0:1] FROM demo
-
-{
-    "children": ["Sara"]
-}
-
-SELECT children[1:-1] FROM demo
-
-{
-    "children": ["Alex"]
-}
-
-SELECT children[0:-1] FROM demo
-
-{
-    "children": ["Sara","Alex"]
-}
-```
-
-```sql
-SELECT children[:] FROM demo == SELECT children FROM demo
-
-{
-    "children": ["Sara","Alex","Jack"]
-}
-```
-
-```sql
-SELECT children[:2] FROM demo
-
-{
-    "children": ["Sara","Alex"]
-}
-```
-
-```sql
-SELECT children[x:y] FROM demo
-
-{
-    "children": ["Sara","Alex","Jack"],
-}
-
-SELECT children[x+1:y] FROM demo
-
-{
-    "children": ["Alex","Jack"],
-}
-```
-
-```sql
-SELECT followers->Group1[:1]->first FROM demo
-
-{
-    "first": ["John"]
-}
-```
-
-## Json Path functions
-
-rekuiper provides a list of functions to allow executing json path over struct or array columns or values. The functions
-are:
-
-```sql
-json_path_exists(col, jsonpath)
-json_path_query(col, jsonpath)
-json_path_query_first(col, jsonpath)
-```
-
-Please refer to [json functions](./functions/json_functions.md) for detail.
-
-All these functions share the same parameter signatures, among which the second parameter is a jsonpath string. The
-jsonpath grammar used by rekuiper is based on [JsonPath](https://goessner.net/articles/JsonPath/).
-
-The basic grammar of those expressions is to use the keys part of the JSON objects combined with some elements:
-
-- Dots `.` to move into a tree
-- Brackets `[]` for access to a given array member coupled with a position. It can also access to a map field.
-- Variables, with `$` representing a JSON text and `@` for result path evaluations.
-
-So, for example, when applied to the previous JSON data sample, we can reach the following parts of the tree with these
-expressions:
-
-- `$.age` refers to 37.
-- `$.friends.first` refers to “dale”.
-- `$.friends` refers to the full array of friends.
-- `$.friends[0]` refers to the first friend listed in the previous array (contrary to arrays members are zero-based).
-- `$.friends[0][lastname]` refers to the lastname of the first friend listed. Use bracket if [there are reserved words](./lexical_elements.md) or special characters (such as space ' ', '.' and Chinese etc) in the field key.
-- `$.friends[? @.age>60].first` or `$.friends[? (@.age>60)].first` refers to the first name of the friends whose age is bigger than 60. Notice that the space between ? and the condition is required even the condition is with braces.
-
-Developers can use the json functions in the SQL statement. Here are some examples.
-
-- Select the lastname of group1 followers
-
-```sql
-SELECT json_path_query(followers, "$.Group1[*].last") FROM demo
-
-["Shavor","Miller"]
-```
-
-- Select the lastname if any of the group1 followers is older than 60
-
-```sql
-SELECT name->last FROM demo where json_path_exists(followers, "$.Group1[? @.age>30]")
-
-"Anderson"
-```
-
-- Select the follower's lastname from group1 whose age is bigger than 30
-
-```sql
-SELECT json_path_exists(followers, "$.Group1[? @.age>30].last") FROM demo
-
-["Miller"]
-```
-
-- Assume there is a field in follows with reserved words or chars like dot `my.follower`, use bracket to access it.
-
-```sql
-SELECT json_path_exists(followers, "$[\"my.follower\"]") FROM demo
-
-["Miller"]
-```
-
-### *Projections* - *NOT SUPPORT YET*
-
-#### List & Slice projections
-
-A wildcard expression creates a list projection, which is a projection over a JSON array.
-
-```sql
-SELECT demo.friends[*]->first FROM demo
-{
-    "first": ["Dale", "Roger", "Jane"]
-}
-```
-
-```sql
-SELECT friends[:1]->first FROM demo
-{
-    "first": ["Dale", "Roger"]
-}
-```
-
-#### Object projections
-
-```sql
-SELECT ops->*->numArgs FROM demo
-
-{ "numArgs" : [2, 3] }
+SELECT json_path_exists(followers, "$[\"my.follower\"]") FROM demo;
 ```

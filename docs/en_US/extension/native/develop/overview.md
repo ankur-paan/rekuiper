@@ -1,28 +1,23 @@
 # Native Plugin Development
 
-> **Notice**: Go native `.so` plugin compilation is unsupported in the current version of rekuiper and in the near future. rekuiper is built in Rust and is targeting portable plugin architectures through [WebAssembly (Wasm)](../../wasm/overview.md) and [External Services](../../external/external_func.md). The documentation below is retained as a reference for upstream eKuiper compatibility.
+::: tip Notice
+Go native `.so` dynamic plugin compilation is unsupported in the current version of rekuiper. rekuiper is implemented in Rust and uses portable plugin architectures through [WebAssembly (Wasm)](../../wasm/overview.md) and [External Services](../../external/external_func.md). This documentation is preserved as a technical reference for legacy eKuiper compatibility.
+:::
 
-Users can utilize the Go language native plugin system to write Source, Sink, and function implementations using Go.
-Regardless of the type of plugin being developed, the following steps are required:
+In legacy eKuiper, developers used the Go plugin mechanism to build Source, Sink, and Function extensions:
 
 1. Create a plugin project.
-2. Write the plugin's implementation logic according to the type of extension.
-3. Build the plugin so.
-4. Package the plugin so and any dependent files such as metadata/configuration files into a plugin zip package.
+2. Implement the interface methods for the extension type.
+3. Build the plugin into a `.so` shared object.
+4. Package the `.so` binary, metadata JSON, and configuration YAML into a zip archive.
 
-## Setup the plugin developing environment
+## Set Up the Development Environment
 
-It is required to build the plugin with exactly the same version of dependencies
-especially `github.com/lf-edge/ekuiper/contract/v2`. Users can manage the plugin project independently, ensuring that
-the Go language version in `go.mod` and the versions of the dependent modules are consistent with those of the main
-project.
+You must compile plugins with the exact dependency versions of the target eKuiper binary, particularly `github.com/lf-edge/ekuiper/contract/v2`. Ensure that the Go compiler version and module dependencies in `go.mod` match the main project.
 
-For example, when developing a plugin for the eKuiper v2.0.0 version, you need to first check the `go.mod` file
-corresponding to the eKuiper version. Ensure that the Go version and the contract mod version in the plugin project are
-consistent. For instance, in the following plugin `go.mod`, the contract mod v2.0.0 version and Go 1.25.0 version are
-used.
+Example `go.mod`:
 
-```go.mod
+```text
 module mycompany.com/myplugin
 
 require github.com/lf-edge/ekuiper/contract/v2 v2.0.0
@@ -30,76 +25,57 @@ require github.com/lf-edge/ekuiper/contract/v2 v2.0.0
 go 1.25.4
 ```
 
-### Plugin development
+### Implement Plugin Symbols
 
-The development of plugins is to implement a specific interface according to the plugin type and export the
-implementation with a specific name. There are two types of exported symbol supported:
+A plugin implements a specific interface and exports symbols by name. Two symbol export patterns are supported:
 
-1. Export a constructor function: Kuiper will use the constructor function to create a new instance of the plugin
-   implementation for each load. So each rule will have one instance of the plugin, and each instance will be isolated
-   from others. This is the recommended way.
+1. **Export a Constructor Function (Recommended)**: The engine invokes the constructor function to create an isolated instance for each rule:
 
-    ```go
-    func Random() api.Source {
-        return random.GetSource()
-    }
-    ```
+   ```go
+   func Random() api.Source {
+       return random.GetSource()
+   }
+   ```
 
-2. Export an instance: rekuiper will use the instance as singleton for all plugin loads. So all rules will share the same
-   instance. For such implementation, the developer will need to handle the shared states to avoid any potential
-   multi-thread problems. This mode is recommended where there are no shared states and the performance is critical.
-   Especially, a function extension is usually functional without internal state which is suitable for this mode.
+2. **Export an Instance (Singleton)**: All rules share the exported singleton instance. The plugin implementation must handle thread safety and shared state:
 
-    ```go
-      var Random = random.GetSource()
-    ```
+   ```go
+   var Random = random.GetSource()
+   ```
 
-Implementing extensions for data sources (source), data sinks (sink), and functions (function) requires different
-interfaces. For more details, please refer to:
-
+For detailed interface specifications, refer to:
 - [Source Interface](./source.md)
 - [Sink Interface](./sink.md)
 - [Function Interface](./function.md)
 
-## State storage
+## State Storage
 
-eKuiper extension exposes a key value state storage interface through the context parameter, which can be used for all
-types of extensions, including Source/Sink/Function extensions.
+eKuiper extensions access key-value state storage through the context object. State storage is available for Source, Sink, and Function extensions.
 
-States are key-value pairs, where the key is a string, and the value is arbitrary data. Keys are scoped to the current
-extended instance.
+Keys are scoped to the current instance. Available state methods include `putState`, `getState`, `incrCounter`, `getCounter`, and `deleteState`.
 
-Users can access the state storage through the context object. State-related methods include putState, getState,
-incrCounter, getCounter and deleteState.
-
-Below is an example of a function extension to access states. This function will count the number of words passed in and
-save the cumulative number in the state.
+Example state usage in a function extension:
 
 ```go
 func (f *accumulateWordCountFunc) Exec(args []interface{}, ctx api.FunctionContext) (interface{}, bool) {
-logger := ctx.GetLogger()
-err := ctx.IncrCounter("allwordcount", len(strings.Split(args[0], args[1])))
-if err != nil {
-return err, false
-}
-if c, err := ctx.GetCounter("allwordcount"); err != nil   {
-return err, false
-} else {
-return c, true
-}
+    logger := ctx.GetLogger()
+    err := ctx.IncrCounter("allwordcount", len(strings.Split(args[0].(string), args[1].(string))))
+    if err != nil {
+        return err, false
+    }
+    if c, err := ctx.GetCounter("allwordcount"); err != nil {
+        return err, false
+    } else {
+        return c, true
+    }
 }
 ```
 
-## Runtime dependencies
+## Runtime Dependencies
 
-Some plugins may need to access dependencies in the file system. Those files are put under
-<span v-pre>{{rekuiperPath}}/etc/{{pluginType}}/{{pluginName}}</span> directory. When packaging the plugin, put those
-files
-in [etc directory](../../../api/restapi/plugins.md#plugin-file-format). After installation, they will be moved to the
-recommended place.
+Plugins can store runtime files under <span v-pre>`{{rekuiperPath}}/etc/{{pluginType}}/{{pluginName}}`</span>. Place these files in the `etc` directory when packaging the archive.
 
-In the plugin source code, developers can access the dependencies of file system by getting the rekuiper root path from
-the context:
+Retrieve the root installation path in code:
 
 ```go
 ctx.GetRootPath()
@@ -107,56 +83,29 @@ ctx.GetRootPath()
 
 ## Plugin Compilation
 
-After completing the plugin code, users need to use the Go language compilation tool to compile the plugin so file for
-the corresponding environment. **Note** that the plugin must be compiled using the same compilation environment as the
-main project eKuiper.
-
-- User-compiled eKuiper main program: The plugin can be compiled in the main program's compilation environment. This
-  scenario is common during plugin development.
-- Precompiled eKuiper binary or default Docker image: These versions of eKuiper are compiled using the alpine docker
-  image. The specific version can be checked by viewing the corresponding version's Dockerfile source code (
-  deploy/docker/Dockerfile). The plugin should be compiled using the same version of the docker image.
-- eKuiper -slim or -slim-python Docker image: These versions of eKuiper are compiled using the debian docker image. The
-  specific version can be checked by viewing the corresponding version's Dockerfile source code (
-  deploy/docker/Dockerfile-slim). The plugin should be compiled using the same version of the docker image.
-
-After preparing the environment, the following compilation command can be used:
+Compile the `.so` shared object by using the exact compiler environment of the target binary:
 
 ```bash
 go build -trimpath --buildmode=plugin -o plugins/sources/MySource.so plugins/sources/my_source.go
 ```
 
-### Naming
+### Symbol and File Naming
 
-We recommend plugin name to be camel case. Notice that there are some restrictions for the names:
+- The exported symbol must use CamelCase with an uppercase first letter (for example, plugin `file` exports symbol `File`).
+- The `.so` filename must match the export symbol or the plugin name (for example, `MySource.so` or `mySink.so`).
 
-1. The name of the export symbol of the plugin should be camel case with an **upper case first letter**. It must be the
-   same as the plugin name except the first letter. For example, plugin name _file_ must export an export symbol name
-   _File_ .
-2. The name of _.so_ file must be the same as the export symbol name or the plugin name. For example, _MySource.so_ or
-   _mySink.so_.
+### Version Identifiers
 
-### Version
+You can append a version string after an `@` symbol in the `.so` file name:
+- `MySource@v1.0.0.so`
+- `MySource@20200331.so`
 
-The user can **optionally** add a version string to the name of _.so_ to help identify the version of the plugin. The
-version can be then retrieved through describe CLI command or REST API. The naming convention is to add a version string
-to the name after _@_. The version can be any string. If the version string starts with "v", the "v" will be ignored in
-the return result. Below are some typical examples.
-
-- _MySource@v1.0.0.so_ : version is 1.0.0
-- _MySource@20200331.so_:  version is 20200331
-
-If multiple versions of plugins with the same name in place, only the latest version(ordered by the version string) will
-be taken effect.
+When multiple versions exist, the engine loads the highest version string.
 
 ## Plugin Packaging
 
-After the plugin is compiled, the resulting so file, the default configuration file xx.yaml (required for source
-plugins), the plugin description file xx.json, and any other files that the plugin depends on must all be packaged into
-a zip file. There are no special requirements for the zip file name; users can name it themselves. **Note**: All files
-must be at the root directory of the zip, and there should be no additional folders.
+Package the compiled `.so` file, configuration YAML (for sources), and metadata JSON into the root of a `.zip` archive without subdirectories.
 
-## Further Reading
+## Related Resources
 
-The process of developing and packaging plugins can be cumbersome. You can follow
-the [Plugin Tutorial](./plugins_tutorial.md) step by step to complete the plugin writing and deployment.
+Refer to the [Plugin Tutorial](./plugins_tutorial.md) for a complete walkthrough of building and deploying plugins.

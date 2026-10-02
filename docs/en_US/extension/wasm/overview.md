@@ -1,65 +1,49 @@
-# Wasm Plugin (beta)
+# WebAssembly (Wasm) Plugins
 
-As a complement to the native plugins Wasm plugins are designed to provide the same functionality while allowing to run in a more generic environment and be created by more languages.
+WebAssembly (Wasm) plugins provide sandboxed, high-performance function extensions. You can write extensions in languages that compile to WebAssembly bytecode, including Rust, C, C++, and Go.
 
-The steps to create a plugin are as follows.
+Development workflow:
+1. Implement the function logic in your chosen programming language.
+2. Compile the source code into a `.wasm` binary module.
+3. Package the binary and register the plugin in rekuiper.
 
-1. develop the plugin
-2. build or package the plugin according to the programming language
-3. register the plugin via eKuiper files/REST/CLI
+## Prerequisites and Tooling
 
-## Installation Tools
+This guide uses TinyGo to compile Go source code into WebAssembly modules running on the WasmEdge runtime.
 
-In Wasm plugin mode, implement the function in the language of your choice and compile it into a Wasm file. Any language supported by WebAssembly will do, such as go, rust, etc.
-We use the tinygo tool to compile the go file into a Wasm file.
+1. Verify the Go compiler installation:
 
-To check if go is installed, run the following command
+   ```shell
+   go version
+   ```
 
-```shell
-go version
-```
+2. Verify the [TinyGo](https://github.com/tinygo-org/tinygo/releases) compiler:
 
-To check if tinygo is installed, run the following command.
+   ```shell
+   tinygo version
+   ```
 
-```shell
-tinygo version
-```
+3. Verify the [WasmEdge](https://wasmedge.org/book/en/quick_start/install.html) runtime:
 
-tinygo download address: https://github.com/tinygo-org/tinygo/releases
+   ```shell
+   wasmedge -v
+   ```
 
-To check whether wasmedge is installed, please run the following command.
+   To install WasmEdge on Linux or macOS:
 
-```shell
-wasmedge -v
-```
+   ```shell
+   curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
+   source $HOME/.wasmedge/env
+   ```
 
-wasmedge download location: https://wasmedge.org/book/en/quick_start/install.html
+## Function Implementation
 
-Download command:
-
-```shell
-//The easiest way to install WasmEdge is to run the following command. Your system should have git and curl as prerequisites.
-
-curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash
-
-//Run the following command to make the installed binary available in the current session.
-
-source $HOME/.wasmedge/env
-```
-
-## Develop Functions
-
-Official tutorial (https://wasmedge.org/book/en/write_wasm/go.html)
-
-Develop fibonacci plugin:
-
-fibonacci.go
+Create `fibonacci.go`:
 
 ```go
 package main
 
-func main() {
-}
+func main() {}
 
 //export fib
 func fibArray(n int32) int32 {
@@ -76,29 +60,27 @@ func fibArray(n int32) int32 {
 }
 ```
 
-Next, compile fibonacci.go into a fibonacci.wasm file
+Compile the source code to a WASI bytecode target:
 
 ```shell
 tinygo build -o fibonacci.wasm -target wasi fibonacci.go
 ```
 
-Run and get the result, check if it meets the expectation.
+Verify execution with WasmEdge:
 
 ```shell
-$ wasmedge --reactor fibonacci.wasm fib 10
-34
+wasmedge --reactor fibonacci.wasm fib 10
 ```
 
-## Package
+Expected output: `34`.
 
-After development is complete, we need to package the results into a zip for installation. In the zip file, the file structure must follow the following conventions and use the correct naming.
+## Packaging
 
-- {pluginName}.json: The file name must be the same as the plugin name defined in the main plugin program and REST/CLI commands.
-- {pluginName}.wasm: the file name must be the same as the plugin name defined in the plugin main program and REST/CLI commands.
+Package the plugin files into a `.zip` archive containing:
+- `fibonacci.json`: Plugin descriptor matching the plugin name.
+- `fibonacci.wasm`: Compiled bytecode module matching the plugin name.
 
-In the json file, we need to describe the metadata of this plugin. This information must match the definition in the main plugin program. The following is an example.
-
-fibonacci.json
+Example descriptor `fibonacci.json`:
 
 ```json
 {
@@ -110,56 +92,53 @@ fibonacci.json
 }
 ```
 
-## Build rekuiper
+## Compilation and Installation
 
-The official released eKuiper do not have wasm support, users need build rekuiper by himself
+To enable Wasm support when building from source:
 
 ```shell
 make build_with_wasm
 ```
 
-Install the plugin:
+Install the packaged plugin using the CLI:
 
-```go
-bin/kuiper create plugin wasm fibonacci "{\"file\":\"file:///$HOME/ekuiper/internal/plugin/testzips/wasm/fibonacci.zip\"}"
+```shell
+bin/kuiper create plugin wasm fibonacci '{"file":"file:///$HOME/ekuiper/internal/plugin/testzips/wasm/fibonacci.zip"}'
 ```
 
-Check plugin installation.
+Verify the plugin installation:
 
 ```shell
 bin/kuiper describe plugin wasm fibonacci
 ```
 
-## Run
+## Query Execution
 
-1. Create a stream
+1. Create a stream and start a query:
 
-    ```shell
-    bin/kuiper create stream demo_fib '(num float) WITH (FORMAT="JSON", DATASOURCE="demo_fib")'
-    bin/kuiper query
-    select fib(num) from demo_fib
-    ```
+   ```shell
+   bin/kuiper create stream demo_fib '(num float) WITH (FORMAT="JSON", DATASOURCE="demo_fib")'
+   bin/kuiper query
+   SELECT fib(num) FROM demo_fib;
+   ```
 
-2. Send test data to the stream:
+2. Send test telemetry using HTTP push:
 
-    Using the HTTP push endpoint:
+   ```shell
+   curl -X POST http://localhost:9081/streams/demo_fib/data \
+     -H "Content-Type: application/json" \
+     -d '{"num": 25}'
+   ```
 
-    ```shell
-    curl -X POST http://localhost:9081/streams/demo_fib/data \
-      -H "Content-Type: application/json" \
-      -d '{"num": 25}'
-    ```
+   Or publish using MQTT:
 
-    Or using a standard MQTT publisher:
+   ```shell
+   mosquitto_pub -h 127.0.0.1 -t demo_fib -m '{"num": 25}'
+   ```
 
-    ```shell
-    mosquitto_pub -h 127.0.0.1 -t demo_fib -m '{"num": 25}'
-    ```
-
-3. Once the message is received, the query calculates the Fibonacci value and outputs the result.
+3. The query invokes the Wasm function and returns the computed Fibonacci result.
 
 ## Management
 
-By placing the content (json, Wasm files) in `plugins/wasm/${pluginName}`, portable plugins can be loaded automatically at startup.
-
-To manage plugin in runtime, we can use [REST](../../api/restapi/plugins.md) or [CLI](../../api/cli/plugins.md)
+- **File System Autoload**: Place uncompressed plugin directories under `plugins/wasm/{pluginName}` to load modules at engine startup.
+- **Dynamic API**: Manage Wasm plugins at runtime through the [REST API](../../api/restapi/plugins.md) or the [CLI](../../api/cli/plugins.md).

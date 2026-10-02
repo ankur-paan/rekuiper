@@ -1,59 +1,58 @@
-# EdgeX Message Bus action
+# EdgeX Message Bus Action
 
-The action is used for publishing output message into EdgeX message bus.
+The EdgeX action publishes output messages to the EdgeX message bus.
 
-**Please notice that, if you're using the ZeorMQ message bus, the action will create a NEW EdgeX message bus (with the address where running rekuiper service), but not by leveraging the original message bus (normally it's the address & port exposed by application service).**
+> [!NOTE]
+> When you use ZeroMQ as the message bus, the action creates a new EdgeX message bus on the rekuiper host. It does not use the original message bus exposed by the application service.
+> Expose the port number on the host server before running the rekuiper server if other hosts need access to the service.
 
-**Also, you need to expose the port number to host server before running the rekuiper server if you want to have the service available to other hosts.**
+## Properties
 
-| Property name      | Optional | Description                                                                                                                                                                                                                                                                                |
-|--------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| type               | true     | The message bus type, three types of message buses are supported, `zero`, `mqtt` and `redis`, and `redis` is the default value.                                                                                                                                                            |
-| protocol           | true     | The protocol. If it's not specified, then use default value `redis`.                                                                                                                                                                                                                       |
-| host               | true     | The host of message bus. If not specified, then use default value `localhost`.                                                                                                                                                                                                             |
-| port               | true     | The port of message bus. If not specified, then use default value `6379`.                                                                                                                                                                                                                  |
-| connectionSelector | true     | reuse the connection to EdgeX message bus. [more info](../../sources/builtin/edgex.md#connectionselector)                                                                                                                                                                                  |
-| topic              | true     | The topic to be published. The topic is static across all messages. To use dynamic topic, leave this empty and specify the topicPrefix property. Only one of the topic and topicPrefix properties can be specified. If both are not specified, then use default topic value `application`. |
-| topicPrefix        | true     | The prefix of a dynamic topic to be published. The topic will become a concatenation of `$topicPrefix/$profileName/$deviceName/$sourceName`.                                                                                                                                               |
-| contentType        | true     | The content type of message to be published. If not specified, then use the default value `application/json`.                                                                                                                                                                              |
-| messageType        | true     | The EdgeX message model type. To publish the message as an event like EdgeX application service, use `event`. Otherwise, to publish the message as an event request like EdgeX device service or core data service, use `request`. If not specified, then use the default value `event`.   |
-| metadata           | true     | The property is a field name that allows user to specify a field name of SQL  select clause,  the field name should use `meta(*) AS xxx`  to select all of EdgeX metadata from message.                                                                                                    |
-| profileName        | true     | Allows user to specify the profile name in the event structure that are sent from rekuiper. The profileName in the meta take precedence if specified.                                                                                                                                       |
-| deviceName         | true     | Allows user to specify the device name in the event structure that are sent from rekuiper. The deviceName in the meta take precedence if specified.                                                                                                                                         |
-| sourceName         | true     | Allows user to specify the source name in the event structure that are sent from rekuiper. The sourceName in the meta take precedence if specified.                                                                                                                                         |
-| optional           | true     | If `mqtt` message bus type is specified, then some optional values can be specified. Please refer to below for supported optional supported configurations.                                                                                                                                |
+| Property name | Optional | Description |
+|---|---|---|
+| type | true | The message bus type: `zero`, `mqtt`, or `redis`. Default: `redis`. |
+| protocol | true | The protocol name. Default: `redis`. |
+| host | true | The message bus host address. Default: `localhost`. |
+| port | true | The message bus port number. Default: `6379`. |
+| connectionSelector | true | Reuses a shared EdgeX message bus connection. Refer to [Connection selector](../../sources/builtin/edgex.md#connectionselector). |
+| topic | true | The static publish topic. To use dynamic topics, leave this property empty and specify `topicPrefix`. Configure only one of `topic` or `topicPrefix`. Default: `application`. |
+| topicPrefix | true | The prefix for dynamic topic generation. The final topic uses the format `$topicPrefix/$profileName/$deviceName/$sourceName`. |
+| contentType | true | The MIME content type of published messages. Default: `application/json`. |
+| messageType | true | The EdgeX message model type. To publish messages as application events, use `event`. To publish messages as event requests like device or core data services, use `request`. Default: `event`. |
+| metadata | true | The field name in the SQL query that contains EdgeX metadata. Use `meta(*) AS field_name` in the SQL SELECT clause to capture all metadata. |
+| profileName | true | The profile name in the EdgeX event structure. Values from `metadata` take precedence if present. |
+| deviceName | true | The device name in the EdgeX event structure. Values from `metadata` take precedence if present. |
+| sourceName | true | The source name in the EdgeX event structure. Values from `metadata` take precedence if present. |
+| optional | true | Optional parameters for the `mqtt` message bus type. Refer to the list below. |
 
-Below optional configurations are supported, please check MQTT specification for the detailed information.
+When `type` is set to `mqtt`, the following optional settings are supported:
 
-- optional
-  - ClientId
-  - Username
-  - Password
-  - Qos
-  - KeepAlive
-  - Retained
-  - ConnectionPayload
-  - CertFile
-  - KeyFile
-  - CertPEMBlock
-  - KeyPEMBlock
-  - SkipCertVerify
+- `ClientId`
+- `Username`
+- `Password`
+- `Qos`
+- `KeepAlive`
+- `Retained`
+- `ConnectionPayload`
+- `CertFile`
+- `KeyFile`
+- `CertPEMBlock`
+- `KeyPEMBlock`
+- `SkipCertVerify`
 
 ::: v-pre
-Notice that, the edgex action can support data templates to vary the result format, but the result of the data template
-must be in the object form of a JSON string, e.g. <code v-pre>"{\"key\":\"{{.key}}\"}"</code>. JSON strings in the form
-of arrays or non-JSON strings are not supported.
+The EdgeX action supports data templates to format results. The output of the data template must be a JSON object string (for example, <code v-pre>"{\"key\":\"{{.key}}\"}"</code>). JSON array strings and plain text strings are not supported.
 :::
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-## Send to various targets
+## Send to Various Targets
 
-By setting the combination of the properties, we can send the result to various EdgeX message bus settings.
+Combine properties to publish messages to different EdgeX message bus targets.
 
-### Publish to redis message bus like application service
+### Publish to Redis Message Bus as Application Service
 
-With the default setting, the EdgeX sink will publish to the default redis message bus as application events. In EdgeX, those messages can be consumed like events emitted by application service.
+With default settings, the EdgeX sink publishes to Redis as application events:
 
 ```json
 {
@@ -67,7 +66,7 @@ With the default setting, the EdgeX sink will publish to the default redis messa
         "port": 6379,
         "topic": "application",
         "profileName": "ekuiperProfile",
-        "deviceName": "ekuiper",      
+        "deviceName": "ekuiper",
         "contentType": "application/json"
       }
     }
@@ -75,9 +74,9 @@ With the default setting, the EdgeX sink will publish to the default redis messa
 }
 ```
 
-### Publish to redis message bus like device service
+### Publish to Redis Message Bus as Device Service
 
-By changing the `topicPrefix` and `messageType` properties, we can let EdgeX sink simulates a device. The topic name for device in EdgeX is like `edgex/events/device/$profileName/$deviceName/$sourceName` so we set the `topicPrefix` to `edgex/events/device` to make sure the messages are routing to device events. And by specifying the `metadata` property, we can have a dynamic topic to simulate multiple devices. Check the next section [dynamic metadata](#dynamic-metadata) for details.
+Set `topicPrefix` and `messageType` to simulate an EdgeX device service:
 
 ```json
 {
@@ -99,9 +98,9 @@ By changing the `topicPrefix` and `messageType` properties, we can let EdgeX sin
 }
 ```
 
-## Publish to MQTT message bus
+## Publish to MQTT Message Bus
 
-Below is a rule that send analysis result to MQTT message bus, please notice how to specify `ClientId` in `optional` configuration.
+The following rule publishes query results to an MQTT message bus:
 
 ```json
 {
@@ -126,9 +125,9 @@ Below is a rule that send analysis result to MQTT message bus, please notice how
 }
 ```
 
-## Publish to zeromq message bus
+## Publish to ZeroMQ Message Bus
 
-Below is a rule that send analysis result to zeromq message bus.
+The following rule publishes query results to a ZeroMQ message bus:
 
 ```json
 {
@@ -142,7 +141,7 @@ Below is a rule that send analysis result to zeromq message bus.
         "port": 5571,
         "topic": "application",
         "profileName": "myprofile",
-        "deviceName": "mydevice",      
+        "deviceName": "mydevice",
         "contentType": "application/json"
       }
     }
@@ -150,10 +149,9 @@ Below is a rule that send analysis result to zeromq message bus.
 }
 ```
 
-## Connection reuse publish example
+## Connection Reuse Example
 
-Below is an example for how to use connection reuse feature. We just need remove the connection related parameters and
-use the `connectionSelector` to specify the connection to reuse. [more info](../../sources/builtin/edgex.md#connectionselector)
+To reuse an existing connection, omit connection properties and configure `connectionSelector`. Refer to [Connection selector](../../sources/builtin/edgex.md#connectionselector).
 
 ```json
 {
@@ -165,7 +163,7 @@ use the `connectionSelector` to specify the connection to reuse. [more info](../
         "connectionSelector": "edgex.redisMsgBus",
         "topic": "application",
         "profileName": "myprofile",
-        "deviceName": "mydevice",      
+        "deviceName": "mydevice",
         "contentType": "application/json"
       }
     }
@@ -173,26 +171,25 @@ use the `connectionSelector` to specify the connection to reuse. [more info](../
 }
 ```
 
-## Dynamic metadata
+## Dynamic Metadata
 
-### Publish result to a new EdgeX message bus without keeping original metadata
+### Publish Results Without Original Metadata
 
-In this case, the original metadata value (such as `id, profileName, deviceName, sourceName, origin, tags` in `Events` structure, and `id, profileName, deviceName, origin, valueType` in `Reading` structure will not be kept). eKuiper acts as another EdgeX micro service here, and it has own `device name` and `profile name`. `deviceName` and `profileName` properties are provided, and allows user to specify the device name of eKuiper. The `SourceName` will be default to the `topic` property. Below is one example,
+In this mode, original metadata values (such as `id`, `profileName`, `deviceName`, `sourceName`, `origin`, and `tags` in `Events`, and `id`, `profileName`, `deviceName`, `origin`, and `valueType` in `Reading`) are not retained. rekuiper functions as an EdgeX service with its own device name and profile name.
 
-1. Data received from EdgeX message bus `events` topic,
+1. Incoming message received on EdgeX `events` topic:
 
    ```json
    {
-     "DeviceName": "demo", "Origin": 000, …
-     "readings":
-     [
-        {"ResourceName": "Temperature", value: "30", "Origin":123 …},
-        {"ResourceName": "Humidity", value: "20", "Origin":456 …}
+     "DeviceName": "demo", "Origin": 0,
+     "readings": [
+       {"ResourceName": "Temperature", "value": "30", "Origin": 123},
+       {"ResourceName": "Humidity", "value": "20", "Origin": 456}
      ]
    }
    ```
 
-2. Use following rule,  and specify `deviceName` with `kuiper` and `profileName` with `kuiperProfile` in `edgex` action.
+2. Rule configuration:
 
    ```json
    {
@@ -211,44 +208,38 @@ In this case, the original metadata value (such as `id, profileName, deviceName,
    }
    ```
 
-3. The data sent to EdgeX message bus.
+3. Data sent to EdgeX message bus:
 
    ```json
    {
-     "DeviceName": "kuiper", "ProfileName": "kuiperProfile",  "Origin": 0, …
-     "readings":
-     [
-        {"ResourceName": "t1", value: "90", "Origin": 0 …},
-        {"ResourceName": "humidity", value: "20" , "Origin": 0 …}
+     "DeviceName": "kuiper", "ProfileName": "kuiperProfile", "Origin": 0,
+     "readings": [
+       {"ResourceName": "t1", "value": "90", "Origin": 0},
+       {"ResourceName": "humidity", "value": "20", "Origin": 0}
      ]
    }
    ```
 
-Please notice that,
+- The device name changes to `kuiper`, and the profile name changes to `kuiperProfile`.
+- All metadata fields are updated with new values generated by rekuiper.
 
-- The device name of `Event` structure is changed to `kuiper` and the profile name is changed to `kuiperProfile`.
-- All metadata for `Events and Readings` structure will be updated with new value. `Origin` field is updated to another value generated by rekuiper (here is `0``).
+### Publish Results Retaining Original Metadata
 
-### Publish result to a new EdgeX message bus keeping original metadata
+In this mode, rekuiper functions as a filter that preserves original metadata:
 
-But for some scenarios, you may want to keep some of original metadata. Such as keep the device name as original value that published to rekuiper (`demo` in the sample), and also other metadata of readings arrays. In such case, rekuiper is acting as a filter - to filter NOT concerned messages, but still keep original data.
-
-Below is an example,
-
-1. Data received from EdgeX message bus `events` topic,
+1. Incoming message received on EdgeX `events` topic:
 
    ```json
    {
-     "DeviceName": "demo", "Origin": 000, …
-     "readings":
-     [
-        {"ResourceName": "Temperature", value: "30", "Origin":123 …},
-        {"ResourceName": "Humidity", value: "20", "Origin":456 …}
+     "DeviceName": "demo", "Origin": 0,
+     "readings": [
+       {"ResourceName": "Temperature", "value": "30", "Origin": 123},
+       {"ResourceName": "Humidity", "value": "20", "Origin": 456}
      ]
    }
    ```
 
-2. Use following rule,  and specify `metadata` with `edgex_meta`  in `edgex` action.
+2. Rule configuration specifying `metadata`:
 
    ```json
    {
@@ -266,27 +257,19 @@ Below is an example,
    }
    ```
 
-   Please notice that,
-   - User need to add `meta(*) AS edgex_meta` in the SQL clause, the `meta(*)` returns all of metadata.
-   - In `edgex` action, value `edgex_meta`  is specified for `metadata` property. This property specifies which field contains metadata of message.
-
-3. The data sent to EdgeX message bus.
+3. Data sent to EdgeX message bus:
 
    ```json
    {
-     "DeviceName": "demo", "Origin": 000, …
-     "readings":
-     [
-        {"ResourceName": "t1", value: "90" , "Origin": 0 …},
-        {"ResourceName": "humidity", value: "20", "Origin":456 …}
+     "DeviceName": "demo", "Origin": 0,
+     "readings": [
+       {"ResourceName": "t1", "value": "90", "Origin": 0},
+       {"ResourceName": "humidity", "value": "20", "Origin": 456}
      ]
    }
    ```
 
-   Please notice that
-   - The metadata of `Events` structure is still kept, such as `DeviceName` & `Origin`.
-   - For the reading that can be found in original message, the metadata will be kept. Such as `humidity` metadata will be the `old values` received from EdgeX message bus.
-   - For the reading that can NOT be found in original message,  the metadata will not be set.  Such as metadata of `t1` in the sample will fill with default value that generated by rekuiper.
-   - If your SQL has aggregated function, then it does not make sense to keep these metadata, but rekuiper will still fill with metadata from a particular message in the time window. For example, with following SQL,
-   ```SELECT avg(temperature) AS temperature, meta(*) AS edgex_meta FROM ... GROUP BY TUMBLINGWINDOW(ss, 10)```.
-   In this case, there are possibly several messages in the window, the metadata value for `temperature` will be filled with value from 1st message that received from bus.
+- The metadata of the `Event` structure (`DeviceName` and `Origin`) is retained.
+- Readings present in the original message retain their original metadata (such as `humidity`).
+- Computed readings (such as `t1`) receive default metadata generated by rekuiper.
+- If the SQL query contains aggregation functions, rekuiper uses metadata from the first message in the window.

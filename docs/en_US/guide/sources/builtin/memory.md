@@ -4,75 +4,64 @@
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">lookup table source</span>
 
-The Memory source connector enables rekuiper to retrieve data from in-memory sources, primarily the [memory sink](../../sinks/builtin/memory.md). This connector plays an essential role in scenarios that require swift data retrieval without the overhead of disk or external service reads.
+The Memory source connector consumes events from internal in-memory topics published by the [Memory sink](../../sinks/builtin/memory.md).
 
-There's no need for additional configurations when integrating the Memory Source Connector with an rekuiper rule. Moreover, this connector is versatile, performing roles like a stream source, scan table source, or lookup table source.
+This connector enables low-latency inter-rule communication without disk I/O or network serialization overhead. The memory connector requires no external configuration files.
+
+The connector operates as a stream source, a scan table source, or a lookup table source.
 
 ## Create a Stream Source
 
-As a [stream source](../../streams/overview.md), the connector continuously fetches data from a designated in-memory topic, making it ideal for real-time data processing.
-
-Example:
+As a [stream source](../../streams/overview.md), the connector subscribes to an in-memory topic and consumes streaming events in real time.
 
 ```sql
 CREATE STREAM stream1 (
     name STRING,
     size BIGINT,
     id BIGINT
-) WITH (DATASOURCE="devices/result", FORMAT="json", TYPE="memory");
+) WITH (DATASOURCE = "devices/result", FORMAT = "json", TYPE = "memory");
 ```
 
-In this example, a memory stream source is defined to continuously pull data from the `devices/result` in-memory topic.
+This stream consumes records published to the in-memory topic `devices/result`.
 
 ## Create a Scan Table Source
 
-For querying or analyzing more static datasets, the Memory Source Connector can act as a [scan table source](../../tables/scan.md).
-
-Example:
+As a [scan table source](../../tables/scan.md), the connector retains historical in-memory records for join queries:
 
 ```sql
-CREATE TABLE memoryTableDemo () WITH (DATASOURCE="topicB", FORMAT="JSON", TYPE="memory");
+CREATE TABLE memoryTableDemo () WITH (DATASOURCE = "topicB", FORMAT = "JSON", TYPE = "memory");
 ```
-
-In this example, table `memoryTableDemo` allows for querying JSON-formatted data from the `topicB` in-memory topic.
 
 ## Create a Lookup Table Source
 
-This mode allows the Memory Source Connector to serve as a lookup table source, enhancing data enrichment during stream processing.
-
-Example：
+As a lookup table source, the connector supports on-demand key lookups for data enrichment during stream execution:
 
 ```sql
-CREATE TABLE memoryLookupTableDemo () WITH (DATASOURCE="topicC", FORMAT="JSON", TYPE="memory");
+CREATE TABLE memoryLookupTableDemo () WITH (DATASOURCE = "topicC", FORMAT = "JSON", KEY = "id", TYPE = "memory");
 ```
 
-Besides specifying a `DATASOURCE`, which corresponds to a memory topic, you also need to specify the `KEY` property, which serves as the primary key for the virtual table, ensuring efficient data access.
+Specify the `KEY` property to define the primary key column for the in-memory index.
 
-Once set up, the memory lookup table will begin accumulating data from the specified memory topic. This data is indexed by the key field, allowing for rapid retrieval.
+### Characteristics of Memory Lookup Tables
 
-### **Key Features**
+- **Rule Independence**: Memory lookup tables exist independently of rule lifecycles. Modifying or deleting rules does not clear table state.
+- **Shared Memory State**: Multiple rules that query the same topic and key pair access identical in-memory datasets.
+- **Updatable Sink Integration**: Upstream rules update the lookup table dynamically using an [Updatable Memory Sink](../../sinks/builtin/memory.md#updatable-sink).
+- **Inter-Rule Pipelining**: Upstream rules store intermediate state in memory topics, while downstream rules join with that state to make real-time decisions.
 
-- **Independence**: The memory lookup table operates independently of any rules. This means that even if rules are modified or deleted, the data within the memory lookup table remains unaffected.
-- **Data Sharing**: If multiple rules reference the same table or if there are multiple memory tables with identical topic/key pairs, they all share the same data set. This ensures consistency across different rules and streamlines data access.
-- **Integration with Memory Sink**: The memory lookup table can be updated by integrating with an [updatable memory sink](../../sinks/builtin/memory.md#updatable-sink). This allows the table content to be refreshed as new data becomes available.
-- **Rule Pipelining**: The memory lookup table can act as a bridge between multiple rules, akin to the rule pipeline concept. It enables one stream to store historical data in memory, which other streams can then access and utilize. This can be particularly useful for scenarios where historical data needs to be juxtaposed with real-time data for more informed decision-making.
+## Memory Topics and Wildcards
 
-## Topics in Memory Source
+The `DATASOURCE` property defines the target in-memory topic path.
 
-"Topic" in the Memory Source Connector signifies different in-memory data channels. Using the `DATASOURCE` property when defining a stream or table, users can pinpoint the memory topic they wish to access.
+Memory topics support MQTT-style wildcards:
 
-### Topic Wildcards
+- `+` (Single-level wildcard): Matches exactly one topic level.
+  - Example: `home/device1/+/sensor1` matches `home/device1/roomA/sensor1`, but does not match `home/device1/roomA/sub/sensor1`.
+- `#` (Multi-level wildcard): Matches multiple topic levels. Place this wildcard only at the end of the topic string.
+  - Example: `home/device1/#` matches `home/device1/temp` and `home/device1/roomA/sensor1`.
 
-Similar to MQTT topics, wildcards are available:
+## Rule Pipelines with Memory Connectors
 
-- **+** : This is a single-level wildcard that replaces one topic level.
-- **#** : This is a multi-level wildcard that can cover multiple topic levels. It's essential to note that this wildcard can only be used at the end of a topic.
+Use memory sources and sinks to assemble [Rule Pipelines](../../rules/rule_pipeline.md). Pipelines chain rules together: the output of one rule serves as the input to a subsequent rule.
 
-**Examples**:
-
-1. Subscribing to `home/device1/+/sensor1` would mean you're interested in messages from any device's `sensor1` located directly under `home/device1/`.
-2. Subscribing to `home/device1/#` would mean you're interested in messages from `device1` and any of its sub-devices or sensors under the `home` directory.
-
-## Rule Pipeline with Memory Source
-
-The Memory Source Connector can be instrumental in constructing [rule pipelines](../../rules/rule_pipeline.md). These pipelines enable multiple rules to be chained, where one rule's output can be another's input. The internal format ensures data transfer efficiency, eliminating encoding or decoding needs. It's noteworthy that in this scenario, the `format` attribute of the memory source is ignored, ensuring optimal performance.
+When chaining rules through memory topics, the engine transfers data objects in memory without serializing to bytes. In this pipeline mode, the engine ignores the `FORMAT` property to optimize execution speed.

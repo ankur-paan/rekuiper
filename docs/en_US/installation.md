@@ -1,12 +1,12 @@
-# Installation & Deployment
+# Installation and Deployment
 
-rekuiper deploys across edge architectures, from single-board computers (Raspberry Pi, BeagleBone) to industrial PCs and edge servers.
+rekuiper operates on diverse edge architectures. Supported platforms include single-board computers (Raspberry Pi, BeagleBone), industrial PCs, and edge servers.
 
 ---
 
 ## 1. Network Ports Reference
 
-rekuiper exposes the following standard network ports:
+rekuiper uses these standard network ports:
 
 | Port | Protocol | Service / Purpose | Default Accessibility |
 | :--- | :--- | :--- | :--- |
@@ -16,11 +16,13 @@ rekuiper exposes the following standard network ports:
 
 ---
 
-## 2. Running with Docker
+## 2. Run with Docker
 
-Docker is the quickest and most consistent deployment method for edge gateways.
+Docker provides a consistent deployment method for edge gateways.
 
 ### Quick Run
+
+Start the container:
 
 ```shell
 docker run -d \
@@ -31,9 +33,9 @@ docker run -d \
   ankurkrp/rekuiper:0.504-beta
 ```
 
-### Production Run with Persistent Storage
+### Production Deployment with Persistent Storage
 
-For production deployments, mount persistent host directories for stream schemas, rule definitions, and state databases:
+For production environments, mount host directories for stream schemas, rule definitions, and state databases:
 
 ```shell
 docker run -d \
@@ -61,7 +63,7 @@ curl http://localhost:9081/ping
 
 ## 3. Production Deployment with Docker Compose
 
-To deploy rekuiper together with an MQTT broker (Eclipse Mosquitto) and the web management dashboard ([eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager)):
+You can deploy rekuiper with an MQTT broker (Eclipse Mosquitto) and the web management dashboard ([eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager)).
 
 Create a `docker-compose.yml` file:
 
@@ -122,12 +124,13 @@ networks:
     driver: bridge
 ```
 
-Start the stack:
+Start the containers:
 
 ```shell
 docker compose up -d
 ```
 
+Service endpoints:
 - **rekuiper REST API**: `http://localhost:9081`
 - **eKuiper Manager Web UI**: `http://localhost:9082`
 - **MQTT Broker**: `localhost:1883`
@@ -136,11 +139,11 @@ docker compose up -d
 
 ## 4. Standalone Binary Installation
 
-For bare-metal Linux gateways, OpenWrt, or systems without container runtimes, rekuiper can run directly as a single native binary.
+On bare-metal Linux gateways, OpenWrt devices, or systems without container runtimes, rekuiper can run as a single native binary.
 
-### Downloading Prebuilt Binaries
+### Download Prebuilt Binaries
 
-Prebuilt binaries are published for every release on [GitHub Releases](https://github.com/ankur-paan/rekuiper/releases):
+Prebuilt binaries are available on [GitHub Releases](https://github.com/ankur-paan/rekuiper/releases):
 
 ```shell
 # Example for Linux x86_64 (replace with desired release tag)
@@ -152,11 +155,11 @@ cd rekuiper
 ./bin/kuiperd
 ```
 
-### Compiling from Source
+### Compile from Source
 
-To compile rekuiper with maximum CPU architecture optimizations:
+To compile rekuiper with specific CPU architecture optimizations:
 
-**Prerequisites:** Rust 1.80+ and Cargo.
+**Prerequisites:** Rust 1.80 or later, and Cargo.
 
 ```shell
 # Clone the repository
@@ -172,7 +175,7 @@ cargo build --release
 # target/release/rekuiper-mcp (MCP AI server)
 ```
 
-Run the compiled daemon:
+Start the compiled daemon:
 
 ```shell
 ./target/release/kuiperd --etc etc --data data --log log
@@ -182,7 +185,7 @@ Run the compiled daemon:
 
 ## 5. Configuration Reference
 
-rekuiper reads configuration from `etc/kuiper.yaml` and supports environment variable overrides using the double-underscore (`__`) delimiter syntax:
+rekuiper reads configuration from `etc/kuiper.yaml`. The engine supports environment variable overrides that use a double-underscore (`__`) delimiter:
 
 | Environment Variable | Config Equivalent | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -225,3 +228,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now rekuiper
 sudo systemctl status rekuiper
 ```
+

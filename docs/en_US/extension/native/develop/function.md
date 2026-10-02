@@ -1,113 +1,93 @@
 # Function Extension
 
-> [!NOTE]
-> Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run via [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved for legacy eKuiper installations.
+::: tip Note
+Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run through [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved as a technical reference for legacy eKuiper installations.
+:::
 
-In the rekuiper SQL syntax, [many built-in functions](../../../sqls/functions/overview.md) are provided to server for
-various reusable business logic. However, the users still likely need various reusable business logic which is not
-covered by the built ins. The function extension is presented to customize the functions.
+rekuiper provides [built-in functions](../../../sqls/functions/overview.md) for data processing. You can create custom function extensions to implement domain-specific business logic.
 
-## Developing
+## Development
 
-### Develop a customized function
+### Develop a Custom Function
 
-To develop a function for rekuiper is to
-implement [api.Function](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) interface and export it as a
-golang plugin.
+To create a custom function, implement the [api.Function](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) interface and export it from a Go plugin.
 
-Before starting the development, you
-must [set up the environment for golang plugin](../overview.md#setup-the-plugin-developing-environment).
+Before developing, [configure the plugin development environment](../overview.md#setup-the-plugin-developing-environment).
 
-To develop a function, the _Validate_ method is firstly to be implemented. This method will be called during SQL
-validation. In this method, a slice of [xsql.Expr](https://github.com/lf-edge/ekuiper/blob/master/pkg/ast/expr.go) is
-passed as the parameter that contains the arguments for this function in the runtime. The developer can do a validation
-against it to check the argument count and type etc. If validation is successful, return nil. Otherwise, return an error
-object.
+1. Implement `Validate`:
 
-```go
-//The argument is a list of xsql.Expr
-Validate(args []interface{}) error
-```
+   ```go
+   Validate(args []interface{}) error
+   ```
 
-There are 2 types of functions: aggregate function and common function. For aggregate function, if the argument is a column, the received value will always be a slice of the column values in a group. The extended function must distinguish the function type by implement _IsAggregate_ method.
+   The engine calls `Validate` during SQL plan verification. The parameter is a slice of AST expressions. Check argument counts and types. Return `nil` if validation succeeds; otherwise, return an error.
 
-```go
-//If this function is an aggregate function. Each parameter of an aggregate function will be a slice
-IsAggregate() bool
-```
+2. Implement `IsAggregate`:
 
-The main task for a Function is to implement _exec_ method. The method will be leveraged to calculate the result of the
-function in the SQL. The argument is a slice of the values for the function parameters. You can use them to do the
-calculation. If the calculation is successful, return the result and true; otherwise, return nil and false.
+   ```go
+   IsAggregate() bool
+   ```
 
-```go
-//Execute the function, return the result and if execution is successful.If execution fails, return the error and false.
-Exec(args []interface{}) (interface{}, bool)
-```
+   Return `true` if the function operates as an aggregate function over grouped window slices; otherwise, return `false`.
 
-As the function itself is a plugin, it must be in the main package. Given the function struct name is myFunction. At last of the file, the source must be exported as a symbol as below. There are [2 types of exported symbol supported](../overview.md#plugin-development). For function extension, if there is no internal state, it is recommended to export a singleton instance.
+3. Implement `Exec`:
 
-```go
-var MyFunction myFunction
-```
+   ```go
+   Exec(args []interface{}) (interface{}, bool)
+   ```
 
-The [Echo Function](https://github.com/lf-edge/ekuiper/blob/master/extensions/functions/echo/echo.go) is a good example.
+   The engine calls `Exec` to compute the function result. The `args` parameter contains the runtime argument values. Return the result and `true` on success, or return `nil` and `false` on failure.
 
-### Export multiple functions
+4. Export the Symbol:
 
-In one plugin, developers can export multiple functions. Each function must implement [api.Function](https://github.com/lf-edge/ekuiper/blob/master/pkg/api/stream.go) as described at [Develop a customized function](#develop-a-customized-function) section. Make sure all functions are exported like:
+   The plugin must reside in the `main` package. Export the function as a variable symbol:
+
+   ```go
+   var MyFunction myFunction
+   ```
+
+Refer to the [Echo Function](https://github.com/lf-edge/ekuiper/blob/master/extensions/functions/echo/echo.go) implementation for a complete reference.
+
+### Export Multiple Functions
+
+A single plugin can export multiple functions:
 
 ```go
-var(
+var (
     Function1 function1
     Function2 function2
-    Functionn functionn
+    FunctionN functionN
 )
 ```
 
-It is the best practice to combine all related functions in a plugin to simplify the build and deployment of functions.
+Combining related functions into one plugin simplifies distribution and deployment.
 
-### Package the source
+### Package the Plugin
 
-Build the implemented function as a go plugin and make sure the output so file resides in the plugins/functions folder.
+Compile the function into a Go plugin `.so` file in the `plugins/functions` directory:
 
 ```bash
 go build -trimpath --buildmode=plugin -o plugins/functions/MyFunction.so extensions/functions/my_function.go
 ```
 
-### Register multiple functions
+### Register Functions
 
-rekuiper will load plugins in the plugin folders automatically. The autoload function plugin assumes there is a function
-named the same as the plugin name. If multiple functions are exported, users need to explicitly register them to make
-them available. There are two ways to register the functions.
+The engine automatically loads plugins in the plugin directory. If a plugin exports multiple functions, register them explicitly:
 
-1. In development environment, we recommend to build plugin .so file directly into the plugin folder so that rekuiper can
-   autoload it. Then call [CLI register functions command](../../../api/cli/plugins.md#register-functions)
-   or [REST register functions API](../../../api/restapi/plugins.md#register-functions).
-2. In production environment, [package the plugin into zip file](plugins_tutorial.md#deployment), then
-   call [CLI function plugin create command](../../../api/cli/plugins.md#create-a-plugin)
-   or [REST function plugin create API](../../../api/restapi/plugins.md#create-a-plugin) with the function list
-   specified.
+1. **Development**: Place the compiled `.so` file into `plugins/functions`, then invoke the [CLI register command](../../../api/cli/plugins.md#register-functions) or the [REST register API](../../../api/restapi/plugins.md#register-functions).
+2. **Production**: [Package the plugin into a zip archive](plugins_tutorial.md#deployment), then invoke the [CLI create command](../../../api/cli/plugins.md#create-a-plugin) or the [REST create API](../../../api/restapi/plugins.md#create-a-plugin) with the function list.
 
-## Usage
+## Usage in SQL Rules
 
-The customized function can be directly used in the SQL of a rule if it follows the below convention.
-
-If you have developed a function implementation MyFunction, you should have:
-
-1. In the plugin file, symbol MyFunction is exported.
-2. The compiled MyFunction.so file is located inside _plugins/functions_
-
-To use it, just call it in the SQL inside a rule definition:
+Invoke the custom function directly in SQL:
 
 ```json
 {
   "id": "rule1",
-  "sql": "SELECT myFunction(name) from demo",
+  "sql": "SELECT myFunction(name) FROM demo",
   "actions": [
     {
-      "log": {
-      }
+      "log": {}
     }
   ]
 }

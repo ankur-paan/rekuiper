@@ -1,64 +1,57 @@
-## RedisSub Source Connector
+# RedisSub Source Connector
 
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-rekuiper has built-in support for Redis data sources, allowing data querying and channel subscription within Redis.Please note that the RedisSub source can be used as both a streaming and scanning table data source,while the [Redis source](./redis.md) can be used as a [lookup table](../../tables/lookup.md).
+The RedisSub source connector subscribes to Redis pub/sub channels and channels messages into the stream processing pipeline.
 
-## Configurations
+> [!NOTE]
+> The `redisSub` connector operates as a stream source and a scan table source. To query Redis keys on demand as a lookup table, use the [Redis source](./redis.md).
 
-Before using the RedisSub Source Connector, it's essential to configure the connection settings and other relevant parameters. Here are the available configuration options:
+## Configuration Overview
 
-The configuration file for the RedisSub source is located at */etc/sources/redisSub.yaml*.
+Configure connection and channel settings in `etc/sources/redisSub.yaml`:
 
 ```yaml
 default:
-   address: 127.0.0.1:6379
-   username: default
-   db: 0
+  address: 127.0.0.1:6379
+  username: default
+  db: 0
+  channels:
+    - telemetry
 ```
 
-**Configuration Items**
+### Configuration Parameters
 
-- **`address`**：Specifies the address of the Redis server in the format hostname:port or IP_address:port.
-- **`username`**：Sets the username for accessing the Redis server. This is only required when the server has authentication enabled.
-- **`password`**：Sets the password for accessing the Redis server. This is only required when the server has authentication enabled.
-- **`db`**：Selects the Redis database to connect to. The default is 0.
-- **`channels`**：Used to specify a list of Redis channels to subscribe to.
-- **`decompression`**：Specifies the compression method for decompressing Redis Payload. Supported compression methods include "zlib," "gzip," "flate," and "zstd."
+- `address`: Redis server address formatted as `host:port` or `ip:port`. Default is `127.0.0.1:6379`.
+- `username`: Authentication username for Redis ACL security.
+- `password`: Authentication password for the Redis server.
+- `db`: Redis database index. Default is `0`.
+- `channels`: Array of Redis channel names for subscription.
+- `decompression`: Decompresses incoming message payloads. Supported algorithms: `"zlib"`, `"gzip"`, `"flate"`, and `"zstd"`.
 
 ## Create a Stream Source
 
-To utilize the RedisSub source Connector in rekuiper streams, define a stream specifying the RedisSub source, its configuration, and the data format.
+The RedisSub connector operates as a [stream source](../../streams/overview.md) or as a [scan table source](../../tables/scan.md).
 
-You can define the RedisSub source as the data source either by REST API or CLI tool.
+### Create Stream via REST API
 
-### Use REST API
+Send a `POST` request to `/streams`:
 
-The REST API offers a programmatic way to interact with rekuiper, perfect for users looking to automate tasks or integrate rekuiper operations into other systems.
-
-**Example**
-
-```sql
-CREATE STREAM redisSub_stream () WITH (FORMAT="json", TYPE="redisSub");
+```json
+{
+  "sql": "CREATE STREAM redisSub_stream () WITH (FORMAT = \"json\", TYPE = \"redisSub\")"
+}
 ```
 
-More details can be found at [Streams Management with REST API](../../../api/restapi/streams.md).
+For REST API specifications, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
 
-### Use CLI
+### Create Stream via CLI
 
-For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's operations.
+Run the `kuiper create stream` command:
 
-1. Navigate to the rekuiper binary directory:
+```bash
+bin/kuiper create stream redisSub_stream '() WITH (FORMAT = "json", TYPE = "redisSub")'
+```
 
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to define a stream for the RedisSub source connector:
-
-   ```bash
-   ./kuiper create stream redisSub_stream ' WITH (FORMAT="json", TYPE="redisSub")'
-   ```
-
-More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).
+For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).

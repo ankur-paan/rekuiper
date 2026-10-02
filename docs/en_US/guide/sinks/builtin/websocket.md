@@ -1,40 +1,40 @@
-# Websocket action
+# WebSocket Action
 
-The action is used for publishing output message into websocket channel.
+The WebSocket action publishes output messages through a WebSocket connection.
 
 ## Properties
 
-| Property name      | Optional | Description                                                                         |
-|--------------------|----------|-------------------------------------------------------------------------------------|
-| addr               | false    | The address of the websocket sink server, like: 127.0.0.1:8080                      |
-| path               | true     | The url path of the websocket sink server, like: /api/data                          |
-| scheme          Ω  | true     | The url scheme of the websocket sink server, like: ws or wss                        |
-| insecureSkipVerify | false    | whether to ignore SSL verification                                                  |
-| certificationPath  | true     | websocket client ssl verification crt file path                                     |
-| privateKeyPath     | true     | Key file path for websocket client SSL verification                                 |
-| rootCaPath         | true     | websocket client ssl verified ca certificate file path                              |
-| certficationRaw    | true     | base64 encoded original text of cert, use `certificationPath` first if both defined |
-| privateKeyRaw      | true     | base64 encoded original text of key, use `privateKeyPath` first if both defined     |
-| rootCARaw          | true     | base64 encoded original text of CA, use `rootCAPath` first if both defined          |
-| checkConnection    | false    | check wehther websocket connection exists                                           |
+| Property name | Optional | Description |
+|---|---|---|
+| addr | false | The network address of the WebSocket server, such as `127.0.0.1:8080`. |
+| path | true | The URL path of the WebSocket server endpoint, such as `/api/data`. |
+| scheme | true | The URL scheme of the WebSocket server: `ws` or `wss`. |
+| insecureSkipVerify | false | Controls whether to skip SSL/TLS certificate verification. Default: `false`. |
+| certificationPath | true | The client certificate file path for TLS verification. |
+| privateKeyPath | true | The client private key file path for TLS verification. |
+| rootCaPath | true | The root CA certificate file path for TLS verification. |
+| certficationRaw | true | Base64-encoded raw text of the certificate. rekuiper uses `certificationPath` first if you define both. |
+| privateKeyRaw | true | Base64-encoded raw text of the private key. rekuiper uses `privateKeyPath` first if you define both. |
+| rootCARaw | true | Base64-encoded raw text of the root CA certificate. rekuiper uses `rootCaPath` first if you define both. |
+| checkConnection | false | Controls whether rekuiper verifies that a WebSocket connection exists before rule creation. Default: `false`. |
 
-Other common sink properties are supported. Please refer to the [sink common properties](../overview.md#common-properties) for more information.
+Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
-## rekuiper as websocket client
+## rekuiper as WebSocket Client
 
-When the websocket sink defines both addr and path, rekuiper will act as a websocket client to establish a websocket connection to the remote end and push messages through the connection.
+When the WebSocket sink defines both `addr` and `path`, rekuiper operates as a WebSocket client. rekuiper connects to the remote server and pushes messages through that connection.
 
-You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
+You can verify the connectivity of the sink endpoint before rule execution by using the REST API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check).
 
-## rekuiper as websocket server
+## rekuiper as WebSocket Server
 
-When the websocket sink only defines path and addr is empty, rekuiper will serve as the websocket server and wait for the remote websocket connection to be established and push the message through the connection.
+When the WebSocket sink defines `path` and leaves `addr` empty, rekuiper operates as a WebSocket server. rekuiper waits for remote clients to connect and pushes messages to connected clients.
 
-When `checkConnection` is true, when creating a rule we need to ensure that the corresponding websocket enpoint has been established and the websocket connection has been established in order to successfully create the rule. We can [manage websocket endpoint](../../../api/restapi/connection.md#manage-websocket-connection) in rekuiper through REST API.
+When `checkConnection` is set to `true`, rekuiper verifies that the corresponding WebSocket endpoint and active connection exist before creating the rule. Refer to [Manage WebSocket Connection](../../../api/restapi/connection.md#manage-websocket-connection) for details on managing connections through the REST API.
 
 ### Server Configuration
 
-To set up rekuiper as an Websocket endpoint, configure the server settings in `etc/sources/websocket.yaml`.
+To configure rekuiper as a WebSocket server endpoint, configure the settings in `etc/sources/websocket.yaml`:
 
 ```yaml
 source:
@@ -48,22 +48,22 @@ source:
   #    keyfile: /var/https-server.key
 ```
 
-Users can specify the following properties:
+Configure the following properties:
 
-- `httpServerIp`: IP to bind the HTTP data server.
-- `httpServerPort`: Port to bind the HTTP data server.
-- `httpServerTls`: Configuration of the HTTP TLS.
+- `httpServerIp`: The IP address to bind the HTTP data server.
+- `httpServerPort`: The TCP port to bind the HTTP data server.
+- `httpServerTls`: The TLS configuration for the HTTP server.
 
-The global server initializes when any rule requiring an Websocket source is activated. It terminates once all associated rules are closed.
+The global server starts when any rule that requires a WebSocket endpoint is started. It stops when all associated rules are stopped.
 
-## Sample usage
+## Sample Usage
 
-The following is an example of publishing compressed data to a websocket server.
+The following configuration publishes output data to an external WebSocket server:
 
 ```json
 {
-  "websocket":{
-    "address": "127.0.0.1:8080",
+  "websocket": {
+    "addr": "127.0.0.1:8080",
     "path": "/api/data"
   }
 }

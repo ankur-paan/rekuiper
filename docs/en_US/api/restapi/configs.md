@@ -1,15 +1,17 @@
-# Dynamic Reload Configs
+# Dynamic Configuration Management
 
-By dynamically reloading [configuration](../../configuration/global_configurations.md), parameters such as debug and timezone
-can be updated for running rekuiper without restarting the application.
+The rekuiper REST API supports dynamic runtime updates to [global configurations](../../configuration/global_configurations.md) without restarting the server daemon.
 
-## Reload Basic Configs
+## Reload Basic Configurations
 
-```shell
+Use this endpoint to update logging and time zone configurations dynamically:
+
+```http
 PATCH http://localhost:9081/configs
+Content-Type: application/json
 ```
 
-Request demo:
+Request payload:
 
 ```json
 {
@@ -20,17 +22,17 @@ Request demo:
 }
 ```
 
-Current supported dynamic reloadable parameters:
+### Supported Dynamically Reloadable Parameters
 
-- `debug`
-- `consoleLog`
-- `fileLog`
-- `timezone`
+- `debug`: Enables or disables debug-level logging.
+- `consoleLog`: Enables or disables stdout console logging.
+- `fileLog`: Enables or disables file-based logging.
+- `timezone`: Sets the system timezone for time calculations.
 
 ## Shutdown rekuiper
 
-```shell
+Use this endpoint to stop the rekuiper server process gracefully:
+
+```http
 POST http://localhost:9081/stop
 ```
-
-Shut down rekuiper through REST API.

@@ -1,10 +1,12 @@
 # Ruleset Management
 
-The rekuiper rule command line tools allows to import and export all the stream and rule configurations.
+The rekuiper CLI provides commands to import and export entire collections of streams, tables, and rules.
 
 ## Ruleset Format
 
-The file format for importing and exporting ruleset is JSON, which can contain three parts: `streams`, `tables` and `rules`. Each type holds the key-value pair of the name and the creation statement. In the following example file, we define a stream and two rules.
+Rulesets use JSON formatting. The JSON document contains three top-level maps: `streams`, `tables`, and `rules`. Each map contains key-value pairs of object names and their creation statements.
+
+Example ruleset JSON:
 
 ```json
 {
@@ -21,7 +23,7 @@ The file format for importing and exporting ruleset is JSON, which can contain t
 
 ## Import Ruleset
 
-This command accepts the ruleset and imports it into the system. If a stream or rule in the ruleset already exists, it is not created. The imported rules are started immediately. The command returns text about the number of streams and rules created
+Use this command to import a ruleset file into the server. If a stream, table, or rule already exists, the server skips creating that duplicate item. The engine starts imported rules immediately. The CLI outputs the count of created resources.
 
 ```shell
 # bin/kuiper import ruleset -f myrules.json
@@ -29,7 +31,7 @@ This command accepts the ruleset and imports it into the system. If a stream or 
 
 ## Export Ruleset
 
-This command exports the ruleset to the specified file. The command returns text about the number of streams and rules exported.
+Use this command to export active streams, tables, and rules into a specified file. The CLI outputs the count of exported resources.
 
 ```shell
 # bin/kuiper export ruleset myrules.json

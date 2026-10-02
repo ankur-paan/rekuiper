@@ -5,10 +5,9 @@
 > **Scorecard**: **2 Verified, 0 Unsupported, 0 Broken**:  
 > - **Verified (2)**: `unnest`, `extract`.
 
-A multiple row function is a function that returns multiple rows.
+A multiple-row function expands input data structures into multiple output rows.
 
-Multiple row function can only be used in the `SELECT` clause of a query and only allowed 1 multiple rows function in
-the clause for now.
+You can use multiple-row functions only in the `SELECT` clause of a query. The engine currently permits only one multiple-row function per `SELECT` clause.
 
 ## UNNEST
 
@@ -16,13 +15,13 @@ the clause for now.
 unnest(array)
 ```
 
-The `unnest` function is used to expand an array into multiple rows.
-The argument column must be an array. This function will expand the array into multiple rows as a returned result. If
-the item in the array is map[string]interface object, then it will be built as columns in the result rows.
+Expands an array into multiple output rows. The argument must evaluate to an array.
+
+When array elements are objects (`map[string]interface{}`), the function converts the object fields into distinct columns in the resulting rows.
 
 ### Examples
 
-Create a stream demo and have below inputs
+Create a stream named `demo` with the following input record:
 
 ```json lines
 {
@@ -34,7 +33,7 @@ Create a stream demo and have below inputs
 }
 ```
 
-Rule to get the unnest values:
+Rule to unnest array values:
 
 ```text
 SQL: SELECT unnest(a) FROM demo
@@ -43,7 +42,7 @@ ___________________________________________________
 {"unnest":2}
 ```
 
-Rule to get the unnest values with other columns:
+Rule to unnest array values with adjacent columns:
 
 ```text
 SQL: SELECT unnest(a), b FROM demo
@@ -52,7 +51,7 @@ ___________________________________________________
 {"unnest":2, "b":3}
 ```
 
-Create a stream demo and have below inputs
+Create a stream named `demo` with objects inside an array:
 
 ```json lines
 {
@@ -70,7 +69,7 @@ Create a stream demo and have below inputs
 }
 ```
 
-Rule to get the unnest values with other columns:
+Rule to unnest array objects into columns:
 
 ```text
 SQL: SELECT unnest(x), c FROM demo
@@ -79,17 +78,17 @@ ___________________________________________________
 {"a":3, "b":4, "c": 5}
 ```
 
-## Extract
+## EXTRACT
 
 ```text
 extract(map[string]interface{})
 ```
 
-The argument must be a map object. This function expands the argument map and places it on the current row.
+Expands a map or JSON object and flattens its key-value pairs into individual columns on the current row. The argument must evaluate to a map object.
 
 ### Example
 
-Create a stream called demo and give it the following input.
+Create a stream named `demo` with the following input record:
 
 ```json lines
 {
@@ -100,7 +99,7 @@ Create a stream called demo and give it the following input.
 }
 ```
 
-Rule to get the extract result:
+Rule to extract map fields into row columns:
 
 ```text
 SQL: SELECT extract(data) FROM demo

@@ -1,22 +1,12 @@
-# Kafka Source
+# Kafka Source Connector
 
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 
-The source will query the Kafka periodically to get data stream.
+The Kafka source connector consumes streaming records from Apache Kafka topics into the rekuiper stream processing engine.
 
-## Default build command
+## Configuration Overview
 
-```shell
-# cd $rekuiper_src
-# go build -trimpath --buildmode=plugin -o plugins/sources/kafka.so extensions/sources/kafka/kafka.go
-# cp plugins/sources/kafka.so $rekuiper_install/plugins/sources
-```
-
-Restart the rekuiper server to activate the plugin.
-
-## Configuration
-
-The configuration for this source is `$rekuiper/etc/sources/kafka.yaml`. The format is as below:
+Configure the Kafka source in `$rekuiper/etc/sources/kafka.yaml`:
 
 ```yaml
 default:
@@ -26,23 +16,37 @@ default:
   maxBytes: 1000000
 ```
 
-You can check the connectivity of the corresponding sink endpoint in advance through the API: [Connectivity Check](../../../api/restapi/connection.md#connectivity-check)
+Verify broker reachability before runtime using the [Connectivity Check API](../../../api/restapi/connection.md#connectivity-check).
 
-### Properties
+### Configuration Properties
 
-| Property name      | Optional | Description                                                                                               |
-|--------------------|----------|-----------------------------------------------------------------------------------------------------------|
-| brokers            | false    | The broker address list ,split with ","                                                                   |
-| saslAuthType       | true     | The Kafka sasl authType, support none,plain,scram, default none                                           |
-| saslUserName       | true     | The sasl user name                                                                                        |
-| password           | true     | The sasl password                                                                                         |
-| insecureSkipVerify | true     | whether to ignore SSL verification                                                                        |
-| certificationPath  | true     | Kafka client ssl verification Cert file path                                                              |
-| privateKeyPath     | true     | Key file path for Kafka client SSL verification                                                           |
-| rootCaPath         | true     | Kafka client ssl verified CA certificate file path                                                        |
-| certficationRaw    | true     | Kafka client ssl verified Cert base64 encoded original text, use `certificationPath` first if both defined |
-| privateKeyRaw      | true     | Kafka client ssl verified Key base64 encoded original text, use `privateKeyPath` first if both defined    |
-| rootCARaw          | true     | Kafka client ssl verified CA base64 encoded original text, use `rootCaPath` first if both defined         |
-| maxBytes           | true     | The maximum number of bytes that a single Kafka message batch can carry, the default is 1MB               |
-| groupID            | true     | The group ID used by rekuiper when consuming kafka messages. |
-| partition | true     | The partition specified when rekuiper consumes kafka messages |
+| Property Name | Optional | Description |
+|---|---|---|
+| `brokers` | False | Comma-separated list of Kafka broker addresses (`host:port`). |
+| `saslAuthType` | True | SASL authentication mechanism: `"none"`, `"plain"`, or `"scram"`. Default is `"none"`. |
+| `saslUserName` | True | SASL username credential. |
+| `password` | True | SASL password credential. |
+| `insecureSkipVerify` | True | Boolean. Set to `true` to skip TLS certificate verification. |
+| `certificationPath` | True | Path to client certificate file for mTLS. |
+| `privateKeyPath` | True | Path to client private key file for mTLS. |
+| `rootCaPath` | True | Path to Root CA certificate file. |
+| `certficationRaw` | True | Base64-encoded client certificate string. |
+| `privateKeyRaw` | True | Base64-encoded client private key string. |
+| `rootCARaw` | True | Base64-encoded Root CA certificate string. |
+| `maxBytes` | True | Maximum bytes fetched per Kafka message batch. Default is `1000000` (1 MB). |
+| `groupID` | True | Kafka consumer group identifier. |
+| `partition` | True | Specific partition index consumed by the connector. |
+
+## Create a Stream Source
+
+Define a stream using SQL DDL. Set `DATASOURCE` to the target Kafka topic:
+
+```sql
+CREATE STREAM kafka_stream () WITH (
+  TYPE = "kafka",
+  DATASOURCE = "telemetry_topic",
+  FORMAT = "json"
+);
+```
+
+For REST API and CLI management procedures, refer to [Streams Management with REST API](../../../api/restapi/streams.md) and [Streams Management with CLI](../../../api/cli/streams.md).

@@ -1,7 +1,9 @@
 # Cookbook
 
-The cookbook chapter is crafted to guide users on how to leverage rekuiper's features to address particular challenges in IoT scenarios:
+The cookbook chapter explains how to use rekuiper features to solve specific IoT streaming challenges:
 
-- **[Step-by-Step Guide: Navigating rekuiper with the Management Console UI](howto.md)**: This guide provides a concise walkthrough on utilizing eKuiper through its Management Console UI. It offers step-by-step instructions for data preparation, example execution, and result interpretation.
-- **[Merge Multiple Devices' Data in a Single Stream](./data_merge/merge_single_stream.md)**: Introduces the concept of data merging in IoT scenarios, where data from multiple sensors needs to be combined for meaningful analysis. A detailed use case is provided, explaining the problem of merging data from sensors with varying data acquisition frequencies.
-- **[Data change notification in IoT scenarios](./change_data_capture.md)**: This section will take event notification when data changes in a single data stream as an example to introduce how to implement it through rekuiper.
+- **[Step-by-Step Guide: Navigating rekuiper with the Management Console UI](howto.md)**: Describes how to run examples with the rekuiper management console UI, prepare data, execute rules, and inspect output results.
+- **[Data Merging in IoT Scenarios](./data_merge/overview.md)**: Explains how to merge correlated sensor data from single or multiple data streams.
+- **[Merge Multiple Devices' Data in a Single Stream](./data_merge/merge_single_stream.md)**: Describes how to merge data from multiple sensors that share a single data stream with different reporting frequencies.
+- **[Merge Data in Multiple Streams](./data_merge/merge_multi_stream.md)**: Describes how to combine data from separate streams through memory topics or stream joins.
+- **[Data Change Notification in IoT Scenarios](./change_data_capture.md)**: Describes how to detect value changes and trigger alert events with analytical functions and window clauses.

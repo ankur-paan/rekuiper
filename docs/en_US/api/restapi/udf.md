@@ -1,22 +1,22 @@
 # User-Defined Functions (UDF) Management API
 
-Besides defining function in [plugins](./plugins.md), user-defined functions (UDF) are also supported independently. Currently, we only support JavaScript UDF. We can use REST API or [CLI](../cli/scripts.md) to manage JavaScript functions. You can create, list, describe, delete, and update functions.
+The rekuiper REST API manages standalone JavaScript user-defined functions (UDFs). You can create, list, describe, update, and delete functions.
 
 ## Create a UDF
 
-Use this endpoint to create a new function.
+Use this endpoint to register a new JavaScript function:
 
-```shell
+```http
 POST http://localhost:9081/udf/javascript
 ```
 
-The request body should be a JSON object with the following fields:  
-- id: A unique name for the function. This name must also be defined as a function in the script field.
-- description: A brief description of the function.
-- script: The function implementation in JavaScript.
-- isAgg: A boolean indicating whether the function is an aggregate function.
+Request payload fields:
+- `id`: The unique identifier for the function. The script code must define a function with this matching name.
+- `description`: An explanation of the function.
+- `script`: The JavaScript implementation code.
+- `isAgg`: A boolean indicating whether the function operates as an aggregate function.
 
-Here's an example:
+Example request payload:
 
 ```json
 {
@@ -29,13 +29,13 @@ Here's an example:
 
 ## List UDFs
 
-Use this endpoint to display all JavaScript functions defined in the server.
+Use this endpoint to display all JavaScript functions registered on the server:
 
-```shell
+```http
 GET http://localhost:9081/udf/javascript
 ```
 
-The response will be a list of function names. For example:
+Response sample:
 
 ```json
 ["area"]
@@ -43,13 +43,13 @@ The response will be a list of function names. For example:
 
 ## Describe a UDF
 
-Use this endpoint to get the detailed definition of a function.
+Use this endpoint to display the definition of a specific function:
 
-```shell
+```http
 GET http://localhost:9081/udf/javascript/{id}
 ```
 
-Replace {id} with the name of the function you want to describe. The response will be a JSON object with the function's details. For example:
+Response sample:
 
 ```json
 {
@@ -62,20 +62,20 @@ Replace {id} with the name of the function you want to describe. The response wi
 
 ## Delete a UDF
 
-Use this endpoint to delete a function.
+Use this endpoint to delete a JavaScript function:
 
-```shell
+```http
 DELETE http://localhost:9081/udf/javascript/{id}
 ```
 
-Replace {id} with the name of the function you want to delete. Note that you need to manually stop or delete any rules using the UDF before deleting it. A running rule will not be affected by the deletion of a UDF.
+Stop or delete rules that reference the function before deleting it. Running rules continue to use cached function instances until stopped or restarted.
 
 ## Update a UDF
 
-The JavaScript UDF can be updated and hot reload. Notice that, a running rule must be restarted to load the updated function.
+Use this endpoint to update an existing JavaScript function:
 
-```shell
+```http
 PUT http://localhost:9081/udf/javascript/{id}
 ```
 
-Replace {id} with the name of the function you want to update. The request body should be the same as when creating a UDF. If the function of the id does not exist, it will be created. Otherwise, it will be updated.
+If the function does not exist, the server creates it. If it exists, the server replaces it. You must restart running rules to load the updated function script.

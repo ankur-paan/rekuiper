@@ -1,10 +1,12 @@
 # Ruleset Management
 
-rekuiper REST API allows to import or export the stream and rule configurations.
+The rekuiper REST API imports and exports bulk stream, table, and rule configurations.
 
 ## Ruleset Format
 
-The file format for importing and exporting ruleset is JSON, which can contain three parts: `streams`, `tables` and `rules`. Each type holds the key-value pair of the name and the creation statement. In the following example file, we define a stream and two rules.
+Rulesets use JSON formatting. The document contains three top-level maps: `streams`, `tables`, and `rules`. Each map contains key-value pairs of resource names and their SQL or JSON creation definitions.
+
+Example ruleset JSON:
 
 ```json
 {
@@ -21,23 +23,23 @@ The file format for importing and exporting ruleset is JSON, which can contain t
 
 ## Import Ruleset
 
-The API accepts rulesets and imports them into the system. If a stream or rule in the ruleset already exists, it is not created. The API returns text informing the number of streams and rules created. The API supports specifying rulesets by means of text content or file URIs.
+Use this endpoint to import a ruleset into the server. If a stream, table, or rule already exists, the server skips creating that duplicate item. The API returns a message reporting the count of created resources.
 
-Example 1: Import by text content
+### Import Using Inline Content
 
-```shell
-POST http://{{host}}/ruleset/import
+```http
+POST http://localhost:9081/ruleset/import
 Content-Type: application/json
 
 {
-  "content": "{json of the ruleset}"
+  "content": "{\"streams\":{\"demo\":\"CREATE STREAM demo () WITH (DATASOURCE=\\\"users\\\", FORMAT=\\\"JSON\\\")\"},\"tables\":{},\"rules\":{}}"
 }
 ```
 
-Example 2: Import by file URI
+### Import Using a File URI
 
-```shell
-POST http://{{host}}/ruleset/import
+```http
+POST http://localhost:9081/ruleset/import
 Content-Type: application/json
 
 {
@@ -47,8 +49,8 @@ Content-Type: application/json
 
 ## Export Ruleset
 
-The export API returns a file to download.
+Use this endpoint to export active rulesets as a downloadable JSON file:
 
-```shell
-POST http://{{host}}/ruleset/export
+```http
+POST http://localhost:9081/ruleset/export
 ```

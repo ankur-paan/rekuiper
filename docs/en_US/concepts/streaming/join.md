@@ -1,10 +1,11 @@
-# Join of sources
+# Joining Sources
 
-Currently, join is the only way to merge multiple sources in rekuiper. It requires a way to align multiple sources and trigger the join result.
+In rekuiper, `JOIN` operations correlate data from multiple sources.
 
-The supported joins in rekuiper include:
+rekuiper supports two join combinations:
 
-- Join of streams: must do in a window.
-- Join of stream and table: the stream will be the trigger of join operation.
+- **Stream-to-Stream Join**: Joins multiple unbounded streams. Stream-to-stream joins require an explicit window definition.
+- **Stream-to-Table Join**: Joins a stream to a table. Arriving stream events trigger join calculations against current table records.
 
-The supported join type includes LEFT, RIGHT, FULL & CROSS in rekuiper.
+Supported join types include `INNER`, `LEFT`, `RIGHT`, `FULL`, and `CROSS`.
+

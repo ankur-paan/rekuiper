@@ -1,19 +1,17 @@
 # Simulator Source Connector
 
-<span style="background:green;color:white;">stream source</span>
+<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 
-Simulator source provides a way to generate data for testing and demo purposes. It can be used to simulate a stream of
-data from a device or sensor. User can define the mock data content and the sending interval.
+The Simulator source connector generates synthetic telemetry data for functional testing and demonstration rules.
 
-## Configurations
+The connector simulates streams of sensor readings according to defined payloads, generation intervals, and repetition loops.
 
-The connector in rekuiper can be configured
-with [environment variables](../../../configuration/configuration.md#environment-variable-syntax), [rest API](../../../api/restapi/configKey.md),
-or configuration file. This section focuses on the configuration file approach.
+## Configuration Overview
 
-The default simulator source configuration can be found at `$rekuiper/etc/sources/simulator.yaml`. It defines the mock
-data and the interval to generate the data.
+Configure the simulator connector through [environment variables](../../../configuration/configuration.md#environment-variable-syntax), the [REST API](../../../api/restapi/configKey.md), or the configuration file.
+
+The default configuration file resides at `$rekuiper/etc/sources/simulator.yaml`:
 
 ```yaml
 default:
@@ -24,57 +22,34 @@ default:
   loop: true
 ```
 
-Users can specify the following properties:
+### Configuration Parameters
 
-- `data`: The mock data to be sent. It is a yaml struct. The key is the field name and the value is the field value. It
-  can also be a list of yaml struct. The connector will send the data in the list one by one.
-- `interval`: The interval in milliseconds to generate the data.
-- `loop`: Whether to loop the data. If set to true, the connector will send the data in the list one by one and then
-  start from the beginning again. If set to false, the connector will stop after sending all the data in the list.
+- `data`: Mock payload definition as a YAML mapping or an array of mappings. The connector emits records in the list sequentially.
+- `interval`: Emission interval in milliseconds between generated events.
+- `loop`: Boolean. When set to `true`, the connector loops through the data array continuously. When set to `false`, the connector stops after emitting all records in the list.
 
 ## Create a Stream Source
 
-Having defined the connector, the next phase involves its integration with rekuiper rules.
+The Simulator connector operates as a [stream source](../../streams/overview.md) or as a [scan table source](../../tables/scan.md).
 
-::: tip
+### Create Stream via REST API
 
-Simulator Source connector can function as a [stream source](../../streams/overview.md) or
-a [scan table](../../tables/scan.md) source. This section illustrates the integration using the Simulator Source
-connector as a stream source example.
+Send a `POST` request to `/streams`:
 
-:::
-
-You can define the Simulator source as the data source either by REST API or CLI tool.
-
-### Use REST API
-
-The REST API offers a programmatic way to interact with rekuiper, perfect for users looking to automate tasks or
-integrate rekuiper operations into other systems.
-
-Example:
-
-```sql
-CREATE
-STREAM mock_stream () WITH (TYPE="simulator");
+```json
+{
+  "sql": "CREATE STREAM mock_stream () WITH (TYPE = \"simulator\")"
+}
 ```
 
-More details can be found at [Streams Management with REST API](../../../api/restapi/streams.md).
+For REST API specifications, refer to [Streams Management with REST API](../../../api/restapi/streams.md).
 
-### Use CLI
+### Create Stream via CLI
 
-For users who prefer a hands-on approach, the Command Line Interface (CLI) provides direct access to rekuiper's
-operations.
+Run the `kuiper create stream` command:
 
-1. Navigate to the rekuiper binary directory:
+```bash
+bin/kuiper create stream mock_stream '() WITH (TYPE = "simulator")'
+```
 
-   ```bash
-   cd path_to_rekuiper_directory/bin
-   ```
-
-2. Use the `create` command to define a stream for the Simulator source connector:
-
-   ```bash
-   ./kuiper create stream mock_stream ' WITH (TYPE="simulator")'
-   ```
-
-More details can be found at [Streams Management with CLI](../../../api/cli/streams.md).
+For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).

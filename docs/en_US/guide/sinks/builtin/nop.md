@@ -1,7 +1,23 @@
-# Nop action
+# Nop Sink Connector
 
-The action is an Nop sink, the result sent to this sink will be ignored. If specify the `log` property to `true`, then the result will be saved into log file, the log file is at `$rekuiper_install/log/stream.log` by default.
+The Nop sink connector discards output records without executing I/O operations. Use this sink for performance testing and throughput benchmarking.
 
-| Property name | Optional | Description                                                                                                          |
-|---------------|----------|----------------------------------------------------------------------------------------------------------------------|
-| log           | true     | true/false - print the sink result to log or not. By default is `false`, that will not print the result to log file. |
+When `log` is set to `true`, the connector writes output records to `$rekuiper_install/log/stream.log`.
+
+## Configuration Properties
+
+| Property Name | Optional | Description |
+|---|---|---|
+| `log` | True | Boolean. When `true`, prints output records to the log file. Default is `false`. |
+
+The Nop sink supports all [common sink properties](../overview.md#common-properties).
+
+## Example Configuration
+
+```json
+{
+  "nop": {
+    "log": false
+  }
+}
+```
