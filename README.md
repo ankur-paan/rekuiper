@@ -25,45 +25,100 @@ The engine is optimized for resource-constrained edge hardware, such as Industri
 
 ## Performance Evaluation
 
-rekuiper was evaluated against eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 across five industrial MQTT workloads.
+rekuiper is evaluated against LF Edge eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 across high-throughput data paths and high-concurrency multi-rule workloads.
 
-### Test Environment
-- **Host Resource Limits**: 1 CPU core, 1 GiB RAM per engine container.
-- **Ingestion Broker**: Mosquitto MQTT broker.
-- **Workload Generator**: Open-loop synthetic telemetry generator written in Rust.
-- **Validation**: Exact end-to-end output verification at the sink (zero message loss, verified message identifiers).
+All tests run in Docker on Linux with strict resource boundaries:
+- **CPU Limit**: 1 CPU core (`--cpuset-cpus=2 --cpus=1`).
+- **Memory Limit**: 1 GiB RAM (`--memory=1g --memory-swap=1g`).
+- **Engine Tuning**: `rekuiper` with `TOKIO_WORKER_THREADS=1`; `eKuiper 2.4.1` with `GOMAXPROCS=1, GOMEMLIMIT=900MiB`.
 
-### Maximum Sustained Throughput (Zero Message Loss)
+---
+
+### 1. Concurrent Parallel Rules Benchmark (rekuiper 0.505)
+
+This benchmark evaluates the maximum number of concurrent SQL rules an engine can execute in parallel on a single shared stream before buffer accumulation occurs. Evaluated on **rekuiper 0.505-beta** against **eKuiper 2.4.1**.
+
+- **Workload**: Single stream broadcast (`CREATE STREAM rawdata () WITH (TYPE="httppush")`) to $N$ parallel SQL filter rules (`SELECT id, device, temp FROM rawdata WHERE temp > 21.0`) with `nop` sink.
+- **Load Rate**: Constant 500 events/second ($500 \times N$ rule evaluations/second) across a 30.0-second window.
+- **Sustainability Criteria**: Anonymous heap memory must establish a flat plateau ($\Delta M_{15-30\text{s}} \le 2.0\text{ MiB}$) and processing must finish without drain lag ($\text{Lag} \le 1.0\text{s}$).
+
+#### Table 1: Head-to-Head Concurrency Comparison (Equal Baseline)
+
+| Parallel Rules | Ingest Rate | Rule Evaluation Rate | Engine | CPU Load (Mean) | Peak Memory (Anon) | Memory per Rule | Drain Lag | Sustainability Status |
+| :---: | :---: | :---: | :--- | :---: | :---: | :---: | :---: | :--- |
+| **50** | 500 msg/s | 25,000 /s | **rekuiper 0.505** | **13.2%** | **7.6 MiB** | **38 KiB** | **0.0s** | Sustained (Level) |
+| 50 | 500 msg/s | 25,000 /s | eKuiper 2.4.1 | 48.7% | 33.0 MiB | 277 KiB | 0.0s | Sustained (Level) |
+| **100** | 500 msg/s | 50,000 /s | **rekuiper 0.505** | **22.8%** | **10.1 MiB** | **40 KiB** | **0.0s** | Sustained (Level) |
+| 100 | 500 msg/s | 50,000 /s | eKuiper 2.4.1 | 80.3% | 66.4 MiB | 254 KiB | +0.2s | **Sustained Ceiling** |
+| **200** | 500 msg/s | 100,000 /s | **rekuiper 0.505** | **43.3%** | **15.2 MiB** | **37 KiB** | **0.0s** | Sustained (Level) |
+| 200 | 500 msg/s | 100,000 /s | eKuiper 2.4.1 | 95.3% | 613.6 MiB | 2,940 KiB | **+28.1s** | **Failed (Queue Backlog)** |
+
+#### Table 2: Concurrency Summary (Ceiling Comparison)
+
+| Performance Metric | rekuiper 0.505 | eKuiper 2.4.1 | Ratio / Advantage |
+| :--- | :---: | :---: | :---: |
+| **Maximum Sustainable Rules** | **1,000 rules** | 100 rules | **10.0x higher concurrency** |
+| **Sustained Rule Evaluations** | **500,000 evals/s** | 50,000 evals/s | **10.0x higher throughput** |
+| **Idle Memory per Active Rule** | **~40 KiB / rule** | ~254 KiB / rule | **6.3x lower memory footprint** |
+| **CPU Utilization at 100 Rules** | **22.8% of 1 core** | 80.3% of 1 core | **3.5x lower CPU utilization** |
+| **Processing at 200 Rules** | **Sustainable (0.0s lag)** | Failed (+28.1s lag) | eKuiper accumulates queue backlog |
+| **Peak Memory Stability** | **Level ($\Delta M = -1.1\text{ MiB}$)** | Accumulated (+201.9 MiB) | rekuiper maintains flat plateau |
+
+#### Table 3: rekuiper Concurrency Scaling Ladder
+
+| Active Rules | Input Rate | Rule Evals / s | CPU Load (Mean) | Peak Heap (Anon) | Trajectory $\Delta M_{15-30s}$ | Drain Lag | Test Status |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **50** | 500 msg/s | 25,000 /s | 13.2% | 7.6 MiB | +0.4 MiB (+5.6%) | 0.0s | Level (Sustainable) |
+| **100** | 500 msg/s | 50,000 /s | 22.8% | 10.1 MiB | -0.1 MiB (-1.0%) | 0.0s | Level (Sustainable) |
+| **200** | 500 msg/s | 100,000 /s | 43.3% | 15.2 MiB | -0.2 MiB (-1.3%) | 0.0s | Level (Sustainable) |
+| **300** | 500 msg/s | 150,000 /s | 58.8% | 20.5 MiB | +0.1 MiB (+0.5%) | 0.0s | Level (Sustainable) |
+| **500** | 500 msg/s | 250,000 /s | 87.0% | 70.6 MiB | -0.5 MiB (-0.7%) | 0.0s | Level (Sustainable) |
+| **750** | 500 msg/s | 375,000 /s | 88.3% | 184.5 MiB | +1.2 MiB (+0.7%) | 0.0s | Level (Sustainable) |
+| **1,000** | 500 msg/s | 500,000 /s | 90.1% | 251.4 MiB | -1.1 MiB (-0.4%) | 0.0s | **Certified Peak Ceiling** |
+| **1,500** | 500 msg/s | 750,000 /s | 90.2% | 379.4 MiB | +18.4 MiB (+5.1%) | +9.8s | Queue Lag (Unsustainable) |
+| **2,000** | 500 msg/s | 1,000,000 /s | 95.4% | 203.9 MiB | +42.1 MiB (+26.0%) | +75.0s | Queue Lag (Unsustainable) |
+
+Detailed benchmark runner scripts, methodology, and raw telemetry logs are in [test/benchmark/multiple_rules](test/benchmark/multiple_rules/README.md) and [docs/en_US/benchmarks/parallel_rules.md](docs/en_US/benchmarks/parallel_rules.md).
+
+---
+
+### 2. Single-Rule MQTT Peak Throughput Benchmark (rekuiper 0.500)
+
+This benchmark evaluates maximum message throughput on a single rule across five industrial MQTT workloads against Mosquitto with exact verification at the sink (zero loss). Evaluated on **rekuiper 0.500-beta** against **eKuiper 2.4.1**, **Telegraf 1.40.0**, and **Redpanda Connect 4.109.0**.
+
+Historical benchmark measurements for **0.426-beta** (120-second sustained) and **0.425-beta** (initial rate ladder) are recorded in [docs/en_US/benchmarks/throughput.md](docs/en_US/benchmarks/throughput.md).
+
+#### Table 4: Maximum Sustained Ingestion Rate (Zero Message Loss)
 
 | Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | :--- | :--- | :--- | :--- |
-| Telemetry filter (1,000 devices) | **150,000 msg/s** | 20,000 msg/s | 50,000 msg/s (backlog) | 20,000 msg/s |
-| 10-second tumbling window per device | **200,000 msg/s** | 20,000 msg/s | Incomplete (6–27% loss) | 5,000 msg/s |
-| ESPHome telemetry (10,000 topics, `meta(topic)`) | **150,000 msg/s** | 20,000 msg/s | 50,000 msg/s (backlog) | 20,000 msg/s |
-| Vehicle telemetry (10,000 topics, windowed) | **200,000 msg/s** | 20,000 msg/s | Inconsistent output | 5,000 msg/s |
-| EV charger sessions (`SESSIONWINDOW`) | **126,000 msg/s** | 20,000 msg/s | Not supported | Not supported |
+| :--- | :---: | :---: | :---: | :---: |
+| **W1: Telemetry Filter (1,000 devices)** | **150,000 msg/s** | 20,000 msg/s | 50,000 msg/s (backlog) | 20,000 msg/s |
+| **W2: Device Windows (10s tumbling)** | **200,000 msg/s** | 20,000 msg/s | Incomplete (6–27% loss) | 5,000 msg/s |
+| **W3: ESPHome Topics (10,000 plain-text)** | **150,000 msg/s** | 20,000 msg/s | 50,000 msg/s (backlog) | 20,000 msg/s |
+| **W4: Vehicle Wildcards (10,000 VINs)** | **200,000 msg/s** | 20,000 msg/s | Inconsistent output | 5,000 msg/s |
+| **W5: EV Charger Sessions (`SESSIONWINDOW`)** | **126,000 msg/s** | 20,000 msg/s | Not supported | Not supported |
 
-### CPU Utilization at 20,000 msg/s (% of One Core)
-
-| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **45%** | 99% | 90% | 99% |
-| 10-second tumbling window per device | **43%** | 86% | 81% (9% loss) | 98% (data loss) |
-| ESPHome telemetry (10,000 topics) | **50%** | 94% | 70% | 98% |
-| Vehicle telemetry (10,000 topics) | **41%** | 91% | 86% (9% loss) | 99% (data loss) |
-| EV charger sessions | **50%** | 87% | Not supported | Not supported |
-
-### Memory Allocation at 20,000 msg/s (Anonymous Memory, MiB)
+#### Table 5: CPU Utilization at 20,000 msg/s (% of One Core)
 
 | Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
-| :--- | ---: | ---: | ---: | ---: |
-| Telemetry filter | **4.4 MiB** | 15 MiB | 92 MiB | 72 MiB |
-| 10-second tumbling window per device | **6.4 MiB** | 536 MiB | 52 MiB (9% loss) | 1,012 MiB (data loss) |
-| ESPHome telemetry (10,000 topics) | **4.5 MiB** | 43 MiB | 85 MiB | 68 MiB |
-| Vehicle telemetry (10,000 topics) | **10.2 MiB** | 886 MiB | 94 MiB (9% loss) | 993 MiB (data loss) |
-| EV charger sessions | **7.3 MiB** | 832 MiB | Not supported | Not supported |
+| :--- | :---: | :---: | :---: | :---: |
+| **W1: Telemetry Filter** | **45.4%** | 99.0% | 90.0% | 99.0% |
+| **W2: Device Windows** | **42.7%** | 86.2% | 81.4% (9% loss) | 97.8% (data loss) |
+| **W3: ESPHome Topics** | **50.3%** | 94.0% | 70.3% | 97.8% |
+| **W4: Vehicle Wildcards** | **41.1%** | 91.4% | 85.7% (9% loss) | 98.6% (data loss) |
+| **W5: EV Charger Sessions** | **50.3%** | 87.2% | Not supported | Not supported |
 
-Benchmark tools, system configurations, and raw telemetry data are available in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md) and [BENCHMARK-0.500.md](test/benchmark/iiot-mqtt/BENCHMARK-0.500.md).
+#### Table 6: Memory Allocation at 20,000 msg/s (Anonymous Heap Memory)
+
+| Workload | rekuiper 0.500 | eKuiper 2.4.1 | Telegraf 1.40.0 | Redpanda Connect 4.109.0 |
+| :--- | :---: | :---: | :---: | :---: |
+| **W1: Telemetry Filter** | **4.4 MiB** | 15.3 MiB | 91.6 MiB | 71.5 MiB |
+| **W2: Device Windows** | **6.4 MiB** | 535.9 MiB | 51.6 MiB | 1,012.3 MiB |
+| **W3: ESPHome Topics** | **4.5 MiB** | 43.2 MiB | 84.9 MiB | 67.7 MiB |
+| **W4: Vehicle Wildcards** | **10.2 MiB** | 886.2 MiB | 94.0 MiB | 992.9 MiB |
+| **W5: EV Charger Sessions** | **7.3 MiB** | 831.7 MiB | Not supported | Not supported |
+
+Detailed benchmark methodology, raw evidence, and peak capacity searches are in [test/benchmark/iiot-mqtt](test/benchmark/iiot-mqtt/README.md), [docs/en_US/benchmarks/throughput.md](docs/en_US/benchmarks/throughput.md), and [BENCHMARK-0.500.md](test/benchmark/iiot-mqtt/BENCHMARK-0.500.md).
 
 ---
 

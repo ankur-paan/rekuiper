@@ -39,6 +39,7 @@ export default withMermaid(
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/rules/overview' },
+      { text: 'Benchmarks', link: '/benchmarks/overview' },
       { text: 'SQL Reference', link: '/sqls/overview' },
       { text: 'API Reference', link: '/api/restapi/overview' },
       { text: 'GitHub', link: 'https://github.com/ankur-paan/rekuiper' }

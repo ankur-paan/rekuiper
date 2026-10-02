@@ -28,28 +28,35 @@ rekuiper processes real-time telemetry on the local machine before it sends data
 
 | Feature | rekuiper (Rust) | eKuiper (Go) | Details |
 | :--- | :--- | :--- | :--- |
-| **Throughput** | **150k to 200k msg/s** | 20k msg/s | Provides 7.5x to 10x higher throughput on a single CPU core |
-| **Memory Footprint** | **4.4 to 6.4 MiB** | 15 to 536 MiB | Maintains small memory usage under load. Suitable for low-memory edge devices |
-| **Garbage Collection** | **Zero GC** | GC pauses (Go runtime) | Provides predictable execution without GC pauses or dropped packets |
-| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Provides a single binary with no external runtime dependencies |
+| **Throughput** | **150k to 200k msg/s** | 20k msg/s | Provides 7.5x to 10x higher message throughput on a single CPU core |
+| **Rule Concurrency** | **1,000 rules** | 100 rules | Executes 10x more parallel SQL rules on a shared stream without queue accumulation |
+| **Memory Footprint** | **4.4 to 6.4 MiB** | 15 to 536 MiB | Maintains small deterministic memory under load. Fits low-memory edge devices |
+| **Garbage Collection** | **Zero GC** | GC pauses (Go runtime) | Provides predictable latency without garbage collection stops or packet loss |
+| **Binary Deployment** | **Single static binary** | Dynamic Go runtime | Provides a single binary with zero external runtime dependencies |
 | **Compatibility** | **Wire-compatible** | Reference implementation | Operates with existing eKuiper REST API, SQL syntax, and CLI |
-| **AI Integration** | **Native MCP Server** | Not available | Enables AI assistants (Cursor, Claude, Antigravity) to query and manage rules |
+| **AI Integration** | **Native MCP Server** | Not available | Enables AI assistants (Cursor, Claude, Antigravity) to query and validate rules |
 
 ---
 
 ## Performance
 
-This benchmark compares rekuiper against eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 on five MQTT workloads. Each engine runs on one CPU core with 1 GiB memory against the same Mosquitto broker. Tests verify data correctness at the sink.
+rekuiper is evaluated against eKuiper 2.4.1, Telegraf 1.40.0, and Redpanda Connect 4.109.0 on a single CPU core with 1 GiB of RAM.
 
-* **Highest tested rate with exact, loss-free results:**
-  * Telemetry filter (1,000 devices): **150k msg/s** (eKuiper: 20k msg/s)
-  * 10-second window per device: **200k msg/s** (eKuiper: 20k msg/s)
-  * ESPHome (10,000 topics, `meta(topic)`): **150k msg/s** (eKuiper: 20k msg/s)
-  * EV charger sessions (`SESSIONWINDOW`): **126k msg/s** (eKuiper: 20k msg/s)
+* **Concurrent Parallel Rules (rekuiper 0.505)**:
+  * Maximum sustainable rules: **1,000 rules** (eKuiper 2.4.1: 100 rules — **10x higher concurrency**).
+  * Sustained rule evaluations: **500,000 evals/s** (eKuiper 2.4.1: 50,000 evals/s).
+  * CPU utilization at 100 rules: **22.8%** of one core (eKuiper 2.4.1: 80.3% of one core).
+  * See [Concurrent Parallel Rules Benchmark](./benchmarks/parallel_rules.md).
 
-* **Resource usage at 20,000 msg/s:**
-  * CPU utilization: **41% to 50%** of one core (eKuiper: 86% to 99%)
-  * Memory footprint: **4.4 to 6.4 MiB** (eKuiper: 15 to 536 MiB)
+* **Single-Rule MQTT Throughput (rekuiper 0.500)**:
+  * Telemetry filter (1,000 devices): **150k msg/s** (eKuiper 2.4.1: 20k msg/s).
+  * 10-second tumbling window: **200k msg/s** (eKuiper 2.4.1: 20k msg/s).
+  * ESPHome (10,000 topics, `meta(topic)`): **150k msg/s** (eKuiper 2.4.1: 20k msg/s).
+  * EV charger sessions (`SESSIONWINDOW`): **126k msg/s** (eKuiper 2.4.1: 20k msg/s).
+  * See [Single-Rule MQTT High-Throughput Benchmark](./benchmarks/throughput.md).
+
+* **Detailed Methodology**:
+  * See [Benchmark Overview](./benchmarks/overview.md) for test principles, hardware boundaries, and validation criteria.
 
 ---
 

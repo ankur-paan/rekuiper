@@ -97,6 +97,24 @@
       "path": "installation"
     },
     {
+      "title": "Benchmarks",
+      "path": "benchmarks/overview",
+      "children": [
+        {
+          "title": "Benchmark Overview",
+          "path": "benchmarks/overview"
+        },
+        {
+          "title": "Single-Rule MQTT Throughput",
+          "path": "benchmarks/throughput"
+        },
+        {
+          "title": "Concurrent Parallel Rules",
+          "path": "benchmarks/parallel_rules"
+        }
+      ]
+    },
+    {
       "title": "Rules",
       "path": "guide/rules/overview",
       "children": [

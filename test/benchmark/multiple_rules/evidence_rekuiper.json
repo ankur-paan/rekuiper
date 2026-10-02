@@ -1,0 +1,29 @@
+[
+  {
+    "rules": 50,
+    "baseline_anon_mb": 9.3671875,
+    "peak_anon_mb": 1013.71,
+    "m_mid_mb": 9.3671875,
+    "m_end_mb": 1013.71,
+    "delta_m_mb": 1004.3428125,
+    "pct_rise": 0.0,
+    "mean_cpu_pct": 88.8,
+    "peak_cpu_pct": 92.4,
+    "is_level": false,
+    "status": "ACCUMULATING (UNSUSTAINABLE)",
+    "anon_seq": [
+      180.26,
+      391.72,
+      544.28,
+      791.12,
+      1013.71
+    ],
+    "cpu_seq": [
+      75.6,
+      92.1,
+      92.4,
+      91.9,
+      92.2
+    ]
+  }
+]
