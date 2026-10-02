@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
-use lapin::{
-    options::*, types::FieldTable, BasicProperties, Connection, ConnectionProperties,
-};
+use lapin::{options::*, types::FieldTable, BasicProperties, Connection, ConnectionProperties};
 use rekuiper_core::model::StreamRecord;
 use rekuiper_core::StreamSender;
 use serde::{Deserialize, Serialize};
@@ -42,6 +40,12 @@ pub struct RabbitMqConfig {
     /// Consumer prefetch count (QoS).
     #[serde(default = "default_prefetch")]
     pub prefetch_count: u16,
+    /// Optional username (supports dynamic secrets like `env://` or `vault://`).
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Optional password (supports dynamic secrets like `env://` or `vault://`).
+    #[serde(default)]
+    pub password: Option<String>,
     /// Payload decoding format (stream FORMAT).
     #[serde(skip)]
     pub format: PayloadFormat,
@@ -70,15 +74,32 @@ impl Default for RabbitMqConfig {
             auto_delete: false,
             exclusive: false,
             prefetch_count: 100,
+            username: None,
+            password: None,
             format: PayloadFormat::Json,
         }
     }
 }
 
 impl RabbitMqConfig {
-    /// Dynamically resolve any secrets (e.g. `vault://` or `env://`) in server URL.
+    /// Dynamically resolve any secrets (e.g. `vault://` or `env://`) in server URL, username, or password.
     pub async fn resolve_secrets(&mut self, resolver: &SecretResolver) -> Result<()> {
         self.server = resolver.resolve(&self.server).await?;
+        if let Some(u) = &self.username {
+            self.username = Some(resolver.resolve(u).await?);
+        }
+        if let Some(p) = &self.password {
+            self.password = Some(resolver.resolve(p).await?);
+        }
+        if let (Some(u), Some(p)) = (&self.username, &self.password) {
+            if !self.server.contains('@') {
+                if let Some(rest) = self.server.strip_prefix("amqp://") {
+                    self.server = format!("amqp://{}:{}@{}", u, p, rest);
+                } else if let Some(rest) = self.server.strip_prefix("amqps://") {
+                    self.server = format!("amqps://{}:{}@{}", u, p, rest);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -100,15 +121,14 @@ impl RabbitMqSource {
         mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let conn = match Connection::connect(
-                &self.config.server,
-                ConnectionProperties::default(),
-            )
-            .await
+            let mut cfg = self.config.clone();
+            let _ = cfg.resolve_secrets(&SecretResolver::from_env()).await;
+
+            let conn = match Connection::connect(&cfg.server, ConnectionProperties::default()).await
             {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!("RabbitMQ source failed to connect to {}: {}", self.config.server, e);
+                    tracing::warn!("RabbitMQ source failed to connect to {}: {}", cfg.server, e);
                     return;
                 }
             };
@@ -123,10 +143,7 @@ impl RabbitMqSource {
 
             // Set QoS prefetch
             let _ = channel
-                .basic_qos(
-                    self.config.prefetch_count,
-                    BasicQosOptions::default(),
-                )
+                .basic_qos(self.config.prefetch_count, BasicQosOptions::default())
                 .await;
 
             // Declare queue if configured
@@ -138,10 +155,17 @@ impl RabbitMqSource {
                     nowait: false,
                     passive: false,
                 };
-                match channel.queue_declare(&self.config.queue, opts, FieldTable::default()).await {
+                match channel
+                    .queue_declare(&self.config.queue, opts, FieldTable::default())
+                    .await
+                {
                     Ok(q) => q.name().to_string(),
                     Err(e) => {
-                        tracing::warn!("RabbitMQ failed to declare queue {}: {}", self.config.queue, e);
+                        tracing::warn!(
+                            "RabbitMQ failed to declare queue {}: {}",
+                            self.config.queue,
+                            e
+                        );
                         return;
                     }
                 }
@@ -241,14 +265,31 @@ impl RabbitMqSink {
             }
         }
 
-        let conn = Connection::connect(
-            &self.config.server,
-            ConnectionProperties::default(),
-        )
-        .await
-        .with_context(|| format!("Failed to connect to RabbitMQ server at {}", self.config.server))?;
+        let mut cfg = self.config.clone();
+        let _ = cfg.resolve_secrets(&SecretResolver::from_env()).await;
 
-        let channel = conn.create_channel().await.context("Failed to create RabbitMQ channel")?;
+        let conn = Connection::connect(&cfg.server, ConnectionProperties::default())
+            .await
+            .with_context(|| format!("Failed to connect to RabbitMQ server at {}", cfg.server))?;
+
+        let channel = conn
+            .create_channel()
+            .await
+            .context("Failed to create RabbitMQ channel")?;
+
+        if !cfg.queue.is_empty() {
+            let opts = QueueDeclareOptions {
+                durable: cfg.durable,
+                auto_delete: cfg.auto_delete,
+                exclusive: cfg.exclusive,
+                nowait: false,
+                passive: false,
+            };
+            let _ = channel
+                .queue_declare(&cfg.queue, opts, FieldTable::default())
+                .await;
+        }
+
         *lock = Some(channel.clone());
         Ok(channel)
     }
@@ -260,10 +301,16 @@ impl Sink for RabbitMqSink {
         let channel = self.get_or_connect().await?;
         let payload = serde_json::to_vec(&record.data)?;
 
+        let routing_key = if self.config.routing_key.is_empty() && !self.config.queue.is_empty() {
+            &self.config.queue
+        } else {
+            &self.config.routing_key
+        };
+
         channel
             .basic_publish(
                 &self.config.exchange,
-                &self.config.routing_key,
+                routing_key,
                 BasicPublishOptions::default(),
                 &payload,
                 BasicProperties::default(),
@@ -290,5 +337,67 @@ mod tests {
         assert_eq!(cfg.routing_key, "sensor.temp");
         assert!(cfg.durable);
         assert_eq!(cfg.prefetch_count, 100);
+    }
+
+    #[tokio::test]
+    async fn test_rabbitmq_live_cloudamqp_sink_and_source() {
+        use rekuiper_core::StreamBus;
+        use std::collections::HashMap;
+
+        let Ok(server) = std::env::var("TEST_RABBITMQ_URL") else {
+            // Skip live broker test if TEST_RABBITMQ_URL is not configured
+            return;
+        };
+
+        let queue_id = format!(
+            "kuiper_cloud_live_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
+        let cfg = RabbitMqConfig {
+            server,
+            queue: queue_id.clone(),
+            routing_key: queue_id.clone(),
+            durable: false,
+            auto_delete: true,
+            ..Default::default()
+        };
+
+        let bus = StreamBus::new();
+        let mut rx = bus.subscribe("cloud_stream");
+        let tx = bus.get_or_create("cloud_stream");
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let source = RabbitMqSource::new(cfg.clone(), tx);
+        let handle = source.spawn(cancel_rx);
+
+        // Allow consumer to attach
+        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
+
+        let sink = RabbitMqSink::new(cfg.clone());
+        let mut data = HashMap::new();
+        data.insert("sensor".to_string(), serde_json::json!("roundtrip_probe"));
+        data.insert("temperature".to_string(), serde_json::json!(88.5));
+        let record = StreamRecord::new(data);
+
+        sink.send(&record).await.expect("publish");
+
+        // Receive from source via StreamBus
+        let received = tokio::time::timeout(tokio::time::Duration::from_secs(6), rx.recv())
+            .await
+            .expect("timeout waiting for RabbitMQ delivery")
+            .expect("channel closed");
+
+        assert_eq!(
+            received.data.get("sensor").and_then(|v| v.as_str()),
+            Some("roundtrip_probe")
+        );
+        assert_eq!(
+            received.data.get("temperature").and_then(|v| v.as_f64()),
+            Some(88.5)
+        );
+        let _ = cancel_tx.send(true);
+        let _ = handle.await;
     }
 }

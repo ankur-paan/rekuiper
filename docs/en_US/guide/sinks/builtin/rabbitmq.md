@@ -12,7 +12,7 @@ Configure the RabbitMQ sink in the `actions` array of a rule definition.
 | :--- | :--- | :--- | :--- |
 | `server` (or `url`) | string | `"amqp://guest:guest@127.0.0.1:5672/%2f"` | The AMQP broker connection URL. Supports TLS (`amqps://`) and secret templates. |
 | `exchange` | string | `""` | The destination exchange name. An empty string publishes to the default direct exchange. |
-| `routingKey` | string | `""` | The message routing key. Supports mustache templates (such as `devices.{{.device_id}}`). |
+| `routingKey` | string | `""` | The message routing key. Supports mustache templates (such as <code v-pre>devices.{{.device_id}}</code>). |
 | `durable` | boolean | `true` | When `true`, exchange and queue declarations survive broker restarts. |
 | `autoDelete` | boolean | `false` | When `true`, the broker removes declared resources when no longer in use. |
 | `dataTemplate` | string | `""` | A template to format output payloads. If you omit this parameter, the connector publishes raw JSON. |

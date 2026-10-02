@@ -3654,14 +3654,10 @@ impl Evaluator {
                         res.push(f);
                     } else if let Some(i) = item.as_i64() {
                         res.push(i as f64);
-                    } else if let Some(s) = item.as_str() {
-                        if let Ok(f) = s.trim().parse::<f64>() {
-                            res.push(f);
-                        } else {
-                            return None;
-                        }
                     } else {
-                        return None;
+                        let s = item.as_str()?;
+                        let f = s.trim().parse::<f64>().ok()?;
+                        res.push(f);
                     }
                 }
                 Some(res)
@@ -3681,7 +3677,10 @@ impl Evaluator {
         if args.len() != 2 {
             return Value::Null;
         }
-        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+        let (Some(v1), Some(v2)) = (
+            Self::extract_f64_vec(&args[0]),
+            Self::extract_f64_vec(&args[1]),
+        ) else {
             return Value::Null;
         };
         if v1.is_empty() || v1.len() != v2.len() {
@@ -3710,14 +3709,21 @@ impl Evaluator {
         if args.len() != 2 {
             return Value::Null;
         }
-        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+        let (Some(v1), Some(v2)) = (
+            Self::extract_f64_vec(&args[0]),
+            Self::extract_f64_vec(&args[1]),
+        ) else {
             return Value::Null;
         };
         if v1.is_empty() || v1.len() != v2.len() {
             return Value::Null;
         }
 
-        let sum_sq: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+        let sum_sq: f64 = v1
+            .iter()
+            .zip(v2.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum();
         serde_json::json!(sum_sq.sqrt())
     }
 
@@ -3725,7 +3731,10 @@ impl Evaluator {
         if args.len() != 2 {
             return Value::Null;
         }
-        let (Some(v1), Some(v2)) = (Self::extract_f64_vec(&args[0]), Self::extract_f64_vec(&args[1])) else {
+        let (Some(v1), Some(v2)) = (
+            Self::extract_f64_vec(&args[0]),
+            Self::extract_f64_vec(&args[1]),
+        ) else {
             return Value::Null;
         };
         if v1.is_empty() || v1.len() != v2.len() {

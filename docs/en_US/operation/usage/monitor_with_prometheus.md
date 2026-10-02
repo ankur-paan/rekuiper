@@ -94,7 +94,7 @@ docker run -d \
   -p 9081:9081 \
   -p 20499:20499 \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.504-beta
+  ankurkrp/rekuiper:0.505-beta
 ```
 
 The server exposes raw Prometheus metrics on `http://localhost:20499/metrics`.

@@ -93,12 +93,42 @@ impl SecretResolver {
     pub async fn resolve(&self, secret_ref: &str) -> Result<String> {
         let trimmed = secret_ref.trim();
         if let Some(var_name) = trimmed.strip_prefix("env://") {
-            return std::env::var(var_name)
-                .with_context(|| format!("Environment variable '{}' referenced by secret not found", var_name));
+            return std::env::var(var_name).with_context(|| {
+                format!(
+                    "Environment variable '{}' referenced by secret not found",
+                    var_name
+                )
+            });
         }
 
         if let Some(vault_target) = trimmed.strip_prefix("vault://") {
             return self.resolve_vault(vault_target).await;
+        }
+
+        if trimmed.contains("{{") && trimmed.contains("}}") {
+            let mut result = trimmed.to_string();
+            while let Some(start) = result.find("{{") {
+                if let Some(end) = result[start..].find("}}") {
+                    let end_pos = start + end;
+                    let inner = result[start + 2..end_pos].trim();
+                    let resolved = if let Some(var_name) = inner.strip_prefix("env://") {
+                        std::env::var(var_name).with_context(|| {
+                            format!(
+                                "Environment variable '{}' referenced by secret not found",
+                                var_name
+                            )
+                        })?
+                    } else if let Some(vault_target) = inner.strip_prefix("vault://") {
+                        self.resolve_vault(vault_target).await?
+                    } else {
+                        inner.to_string()
+                    };
+                    result.replace_range(start..end_pos + 2, &resolved);
+                } else {
+                    break;
+                }
+            }
+            return Ok(result);
         }
 
         Ok(trimmed.to_string())
@@ -141,10 +171,7 @@ impl SecretResolver {
 
         // Standard Vault v1 URL: /v1/{path}
         let url = format!("{}/v1/{}", addr, path);
-        let mut req = self
-            .client
-            .get(&url)
-            .header("X-Vault-Token", token);
+        let mut req = self.client.get(&url).header("X-Vault-Token", token);
 
         if let Some(ns) = &self.vault_namespace {
             req = req.header("X-Vault-Namespace", ns);
@@ -166,10 +193,12 @@ impl SecretResolver {
             );
         }
 
-        let json: Value = resp
-            .json()
-            .await
-            .with_context(|| format!("Failed to parse JSON response from Vault for path '{}'", path))?;
+        let json: Value = resp.json().await.with_context(|| {
+            format!(
+                "Failed to parse JSON response from Vault for path '{}'",
+                path
+            )
+        })?;
 
         // Extract secret field handling both KV v2 and KV v1
         let val_found = if let Some(v2_data) = json.pointer("/data/data") {
@@ -225,7 +254,10 @@ mod tests {
     async fn test_resolve_env_var() {
         std::env::set_var("REKUIPER_TEST_SECRET", "super_secret_token_abc");
         let resolver = SecretResolver::from_env();
-        let res = resolver.resolve("env://REKUIPER_TEST_SECRET").await.unwrap();
+        let res = resolver
+            .resolve("env://REKUIPER_TEST_SECRET")
+            .await
+            .unwrap();
         assert_eq!(res, "super_secret_token_abc");
     }
 
@@ -242,5 +274,15 @@ mod tests {
         let err = resolver.resolve("vault://secret/mqtt#password").await;
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("VAULT_ADDR"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_template_env() {
+        std::env::set_var("RMQ_USER", "app_operator");
+        std::env::set_var("RMQ_PASS", "s3cr3t_p@ss!");
+        let resolver = SecretResolver::from_env();
+        let conn_str = "amqp://{{env://RMQ_USER}}:{{env://RMQ_PASS}}@127.0.0.1:5672/%2f";
+        let res = resolver.resolve(conn_str).await.unwrap();
+        assert_eq!(res, "amqp://app_operator:s3cr3t_p@ss!@127.0.0.1:5672/%2f");
     }
 }

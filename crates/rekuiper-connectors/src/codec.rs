@@ -1128,13 +1128,22 @@ impl EdgeXCodec {
         let mut meta_map = serde_json::Map::new();
 
         if !event.device_name.is_empty() {
-            meta_map.insert("deviceName".to_string(), Value::String(event.device_name.clone()));
+            meta_map.insert(
+                "deviceName".to_string(),
+                Value::String(event.device_name.clone()),
+            );
         }
         if !event.profile_name.is_empty() {
-            meta_map.insert("profileName".to_string(), Value::String(event.profile_name.clone()));
+            meta_map.insert(
+                "profileName".to_string(),
+                Value::String(event.profile_name.clone()),
+            );
         }
         if !event.source_name.is_empty() {
-            meta_map.insert("sourceName".to_string(), Value::String(event.source_name.clone()));
+            meta_map.insert(
+                "sourceName".to_string(),
+                Value::String(event.source_name.clone()),
+            );
         }
         if !event.id.is_empty() {
             meta_map.insert("id".to_string(), Value::String(event.id.clone()));
@@ -1143,7 +1152,10 @@ impl EdgeXCodec {
             meta_map.insert("origin".to_string(), Value::from(event.origin));
         }
         if !correlation_id.is_empty() {
-            meta_map.insert("correlationid".to_string(), Value::String(correlation_id.to_string()));
+            meta_map.insert(
+                "correlationid".to_string(),
+                Value::String(correlation_id.to_string()),
+            );
         }
         if !event.tags.is_empty() {
             meta_map.insert(
@@ -1159,7 +1171,8 @@ impl EdgeXCodec {
                 continue;
             };
 
-            let parsed_val = parse_edgex_value(r.value.as_ref(), r.binary_value.as_deref(), &r.value_type);
+            let parsed_val =
+                parse_edgex_value(r.value.as_ref(), r.binary_value.as_deref(), &r.value_type);
             row_data.insert(key.clone(), parsed_val);
 
             // Record reading metadata
@@ -1191,7 +1204,9 @@ impl EdgeXCodec {
 
         if !row_data.is_empty() {
             let mut record = rekuiper_core::StreamRecord::new(row_data);
-            record.data.insert("__meta__".to_string(), Value::Object(meta_map));
+            record
+                .data
+                .insert("__meta__".to_string(), Value::Object(meta_map));
             out.push(record);
         }
         Ok(())
