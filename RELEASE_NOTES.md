@@ -1,3 +1,20 @@
+# Release Notes - rekuiper v0.505-beta
+
+`rekuiper` v0.505-beta introduces six enterprise features: native RabbitMQ AMQP 0-9-1 source and sink connectors, vector similarity search and distance functions, WebAssembly (WASM) plugin runtime, dynamic secret interpolation with Vault and environment variables, Apache Parquet columnar storage, and EdgeX Foundry concurrent dual-port listening (59720 and 9081) with OpenZiti zero-trust architecture.
+
+Key highlights:
+- **Native RabbitMQ AMQP 0-9-1 Connector**: High-throughput message ingestion and publishing with support for durable exchanges, consumer routing keys, prefetch count QoS, and auto-acknowledgment.
+- **Vector Math & Similarity Functions**: Native SQL functions `cosine_similarity(v1, v2)`, `vector_l2(v1, v2)`, `vector_dot(v1, v2)`, and `vector_match(v1, v2)` enabling real-time edge vector search and anomaly detection.
+- **WebAssembly (WASM) Plugin Runtime**: Dynamic module upload and registration via REST (`/plugins/wasm`) with SQL execution via `wasm_run(...)`.
+- **Dynamic Secret Interpolation**: Automatic resolution of `vault://` and `env://` URIs across all connector configurations, with automatic redaction in REST management endpoints.
+- **Apache Parquet Columnar Sink & Reader**: Compact columnar file sink and streaming reader with projection pushdown and predicate filtering.
+- **EdgeX Foundry Dual-Port & Message Bus Compatibility**: Concurrent dual-port listening on 59720 (legacy EdgeX) and 9081 (native HTTP) with zero-trust OpenZiti stack support.
+
+- Docker image: `ankurkrp/rekuiper:0.505-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.505-beta`)
+
+---
+
 # Release Notes - rekuiper v0.504-beta
 
 `rekuiper` v0.504-beta delivers native dual-binary target parity (`rekuiperd` engine daemon and `rekuiper` CLI tool), prioritized `etc/rekuiper.yaml` configuration and `REKUIPER__` environment variable loading, complete metadata and vendor sanitization, and full documentation site rebuild.

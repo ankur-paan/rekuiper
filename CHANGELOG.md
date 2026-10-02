@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
 > No latency-histogram p99 is claimed.
 
+## [0.505.0-beta] - 2026-10-02
+
+### Added
+- **Native RabbitMQ Connector**: Native AMQP 0-9-1 source and sink connectors supporting durable exchanges, prefetch QoS, consumer routing, and automatic connection recovery.
+- **Vector Math & Similarity Search**: Full support for vector distance and similarity functions (`cosine_similarity`, `vector_l2`, `vector_dot`, `vector_match`) with SQL threshold filtering.
+- **WebAssembly (WASM) Plugin Runtime**: Integrated WASM runtime with dynamic REST registration (`POST /plugins/wasm`), lifecycle monitoring, and custom SQL function invocation (`wasm_run`).
+- **Dynamic Secret Interpolation**: Connector secret resolution supporting both `env://` and `vault://` URIs with automatic masking on REST metadata endpoints.
+- **Apache Parquet Columnar Storage**: Parquet sink and reader supporting columnar projection, compression, and predicate evaluation.
+- **EdgeX Foundry Dual-Port & Message Bus Compatibility**: Concurrent dual-port listening on 59720 (legacy EdgeX) and 9081 (native HTTP), with OpenZiti zero-trust Docker Compose integration and synchronized KV storage configuration.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.505-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.505-beta`.
+
+---
+
 ## [0.504.0-beta] - 2026-10-01
 
 ### Added
