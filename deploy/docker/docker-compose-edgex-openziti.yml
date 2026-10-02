@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Zero-Trust EdgeX Foundry + rekuiper deployment using OpenZiti Overlay
 # Eliminates all public/host port mappings for EdgeX and rekuiper.
 

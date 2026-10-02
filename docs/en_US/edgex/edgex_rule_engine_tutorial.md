@@ -59,9 +59,11 @@ Refer to [Connection Reusability](../guide/sinks/builtin/edgex.md#connection-reu
 ### 3. Create an EdgeX Stream
 
 > [!NOTE]
-> In EdgeX container deployments, the rekuiper REST API listens on port `59720` instead of the default port `9081`.
+> `rekuiper` serves the complete REST API concurrently on both port `9081` (standard eKuiper port) and port `59720` (EdgeX Foundry application service port). You can send REST queries to either port with full bidirectional parity.
 
 #### Option A: Create via REST API
+
+You can use port `59720` (EdgeX convention) or port `9081`:
 
 ```shell
 curl -X POST \

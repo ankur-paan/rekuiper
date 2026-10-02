@@ -58,13 +58,13 @@ pub fn write_records_to_parquet(records: &[StreamRecord], path: &Path) -> Result
 
 /// Appends a single [`StreamRecord`] to the Parquet file at `path`.
 pub fn append_record_to_parquet(record: &StreamRecord, path: &Path) -> Result<()> {
-    write_records_to_parquet(&[record.clone()], path)
+    write_records_to_parquet(std::slice::from_ref(record), path)
 }
 
 /// Reads all [`StreamRecord`] rows from a Parquet file.
 pub fn read_parquet_file(path: &Path) -> Result<Vec<StreamRecord>> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open Parquet file at {:?}", path))?;
+    let file =
+        File::open(path).with_context(|| format!("Failed to open Parquet file at {:?}", path))?;
 
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .with_context(|| format!("Failed to read Parquet metadata from {:?}", path))?;
@@ -209,10 +209,18 @@ fn record_batch_to_records(batch: &RecordBatch) -> Result<Vec<StreamRecord>> {
                 DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 => {
                     use arrow::array::AsArray;
                     let num = match field.data_type() {
-                        DataType::Int8 => col.as_primitive::<arrow::datatypes::Int8Type>().value(row_idx) as i64,
-                        DataType::Int16 => col.as_primitive::<arrow::datatypes::Int16Type>().value(row_idx) as i64,
-                        DataType::Int32 => col.as_primitive::<arrow::datatypes::Int32Type>().value(row_idx) as i64,
-                        DataType::Int64 => col.as_primitive::<arrow::datatypes::Int64Type>().value(row_idx),
+                        DataType::Int8 => col
+                            .as_primitive::<arrow::datatypes::Int8Type>()
+                            .value(row_idx) as i64,
+                        DataType::Int16 => col
+                            .as_primitive::<arrow::datatypes::Int16Type>()
+                            .value(row_idx) as i64,
+                        DataType::Int32 => col
+                            .as_primitive::<arrow::datatypes::Int32Type>()
+                            .value(row_idx) as i64,
+                        DataType::Int64 => col
+                            .as_primitive::<arrow::datatypes::Int64Type>()
+                            .value(row_idx),
                         _ => unreachable!(),
                     };
                     Value::Number(num.into())
@@ -220,24 +228,36 @@ fn record_batch_to_records(batch: &RecordBatch) -> Result<Vec<StreamRecord>> {
                 DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 => {
                     use arrow::array::AsArray;
                     let num = match field.data_type() {
-                        DataType::UInt8 => col.as_primitive::<arrow::datatypes::UInt8Type>().value(row_idx) as u64,
-                        DataType::UInt16 => col.as_primitive::<arrow::datatypes::UInt16Type>().value(row_idx) as u64,
-                        DataType::UInt32 => col.as_primitive::<arrow::datatypes::UInt32Type>().value(row_idx) as u64,
-                        DataType::UInt64 => col.as_primitive::<arrow::datatypes::UInt64Type>().value(row_idx),
+                        DataType::UInt8 => col
+                            .as_primitive::<arrow::datatypes::UInt8Type>()
+                            .value(row_idx) as u64,
+                        DataType::UInt16 => col
+                            .as_primitive::<arrow::datatypes::UInt16Type>()
+                            .value(row_idx) as u64,
+                        DataType::UInt32 => col
+                            .as_primitive::<arrow::datatypes::UInt32Type>()
+                            .value(row_idx) as u64,
+                        DataType::UInt64 => col
+                            .as_primitive::<arrow::datatypes::UInt64Type>()
+                            .value(row_idx),
                         _ => unreachable!(),
                     };
                     Value::Number(num.into())
                 }
                 DataType::Float32 => {
                     use arrow::array::AsArray;
-                    let f = col.as_primitive::<arrow::datatypes::Float32Type>().value(row_idx);
+                    let f = col
+                        .as_primitive::<arrow::datatypes::Float32Type>()
+                        .value(row_idx);
                     serde_json::Number::from_f64(f as f64)
                         .map(Value::Number)
                         .unwrap_or(Value::Null)
                 }
                 DataType::Float64 => {
                     use arrow::array::AsArray;
-                    let f = col.as_primitive::<arrow::datatypes::Float64Type>().value(row_idx);
+                    let f = col
+                        .as_primitive::<arrow::datatypes::Float64Type>()
+                        .value(row_idx);
                     serde_json::Number::from_f64(f)
                         .map(Value::Number)
                         .unwrap_or(Value::Null)

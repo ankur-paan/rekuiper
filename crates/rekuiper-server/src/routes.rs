@@ -15,9 +15,9 @@ use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
     apply_data_template, parse_interval_ms, EdgeXCodec, FileSink, FileSource, FileSourceConfig,
     HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink,
-    MqttSource, PayloadFormat, RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig,
-    SimulatorSource, Sink, SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink,
-    WebSocketSource, RabbitMqConfig, RabbitMqSink, RabbitMqSource,
+    MqttSource, PayloadFormat, RabbitMqConfig, RabbitMqSink, RabbitMqSource, RedisSink,
+    RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink, SqlConnectorConfig,
+    SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
 };
 use rekuiper_core::{
     model::{
@@ -579,6 +579,12 @@ fn load_default_source_file(
 }
 
 fn apply_edgex_env_overlays(source_configs: &Arc<RwLock<HashMap<String, Value>>>) {
+    let edgex_vars: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| k.starts_with("EDGEX__"))
+        .collect();
+    if edgex_vars.is_empty() {
+        return;
+    }
     let mut guard = source_configs.write();
     let default_key = "edgex/default".to_string();
     let entry = guard.entry(default_key).or_insert_with(|| {
@@ -593,7 +599,7 @@ fn apply_edgex_env_overlays(source_configs: &Arc<RwLock<HashMap<String, Value>>>
     });
 
     if let Value::Object(ref mut map) = entry {
-        for (env_k, env_v) in std::env::vars() {
+        for (env_k, env_v) in edgex_vars {
             if let Some(rest) = env_k.strip_prefix("EDGEX__") {
                 let mut parts = rest.split("__");
                 let (Some(section), Some(field)) = (parts.next(), parts.next()) else {
@@ -978,6 +984,11 @@ pub fn create_router(state: AppState) -> Router {
             "/plugins/udfs/:name",
             get(get_udf_plugin).delete(delete_udf_plugin),
         )
+        .route(
+            "/plugins/wasm",
+            get(list_wasm_plugins).post(create_wasm_plugin),
+        )
+        .route("/plugins/wasm/:name", delete(delete_wasm_plugin))
         .route("/services", get(list_services).post(create_service))
         .route(
             "/services/:name",
@@ -1802,10 +1813,12 @@ fn resolve_edgex_source(
         return None;
     }
 
-    let mut config = MqttConfig::default();
-    config.server = "tcp://edgex-mqtt-broker:1883".to_string();
-    config.topic = "edgex/rules-events".to_string();
-    config.format = PayloadFormat::EdgeX;
+    let mut config = MqttConfig {
+        server: "tcp://edgex-mqtt-broker:1883".to_string(),
+        topic: "edgex/rules-events".to_string(),
+        format: PayloadFormat::EdgeX,
+        ..Default::default()
+    };
 
     let conf_key = def
         .options
@@ -1830,7 +1843,10 @@ fn resolve_edgex_source(
     drop(configs_guard);
 
     if let Some(val) = conf_val {
-        let srv = val.get("server").and_then(|v| v.as_str()).unwrap_or("edgex-mqtt-broker");
+        let srv = val
+            .get("server")
+            .and_then(|v| v.as_str())
+            .unwrap_or("edgex-mqtt-broker");
         let port = val
             .get("port")
             .and_then(|v| {
@@ -1843,7 +1859,10 @@ fn resolve_edgex_source(
                 }
             })
             .unwrap_or(1883);
-        let proto = val.get("protocol").and_then(|v| v.as_str()).unwrap_or("tcp");
+        let proto = val
+            .get("protocol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tcp");
 
         if srv.contains("://") {
             config.server = srv.to_string();
@@ -1857,13 +1876,25 @@ fn resolve_edgex_source(
             }
         }
         if let Some(opt) = val.get("optional") {
-            if let Some(u) = opt.get("Username").or_else(|| opt.get("username")).and_then(|v| v.as_str()) {
+            if let Some(u) = opt
+                .get("Username")
+                .or_else(|| opt.get("username"))
+                .and_then(|v| v.as_str())
+            {
                 config.username = Some(u.to_string());
             }
-            if let Some(p) = opt.get("Password").or_else(|| opt.get("password")).and_then(|v| v.as_str()) {
+            if let Some(p) = opt
+                .get("Password")
+                .or_else(|| opt.get("password"))
+                .and_then(|v| v.as_str())
+            {
                 config.password = Some(p.to_string());
             }
-            if let Some(cid) = opt.get("ClientId").or_else(|| opt.get("clientId")).and_then(|v| v.as_str()) {
+            if let Some(cid) = opt
+                .get("ClientId")
+                .or_else(|| opt.get("clientId"))
+                .and_then(|v| v.as_str())
+            {
                 config.client_id = Some(cid.to_string());
             }
         }
@@ -1877,7 +1908,11 @@ fn resolve_edgex_source(
             config.server = format!("tcp://{}", srv);
         }
     }
-    if let Some(ds) = def.options.get("DATASOURCE").filter(|s| !s.trim().is_empty()) {
+    if let Some(ds) = def
+        .options
+        .get("DATASOURCE")
+        .filter(|s| !s.trim().is_empty())
+    {
         config.topic = ds.trim().to_string();
     }
 
@@ -2149,8 +2184,35 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
             .is_some_and(|t| t.eq_ignore_ascii_case("rabbitmq") || t.eq_ignore_ascii_case("amqp"));
         if is_rmq {
             let mut config = RabbitMqConfig::default();
-            if let Some(ds) = def.options.get("DATASOURCE") {
-                config.queue = ds.clone();
+            if let Some(srv) = def.options.get("SERVER").or_else(|| def.options.get("URL")) {
+                config.server = srv.clone();
+            }
+            if let Some(q) = def
+                .options
+                .get("QUEUE")
+                .or_else(|| def.options.get("DATASOURCE"))
+            {
+                config.queue = q.clone();
+            }
+            if let Some(ex) = def.options.get("EXCHANGE") {
+                config.exchange = ex.clone();
+            }
+            if let Some(rk) = def
+                .options
+                .get("ROUTINGKEY")
+                .or_else(|| def.options.get("ROUTING_KEY"))
+            {
+                config.routing_key = rk.clone();
+            }
+            if let Some(u) = def
+                .options
+                .get("USERNAME")
+                .or_else(|| def.options.get("USER"))
+            {
+                config.username = Some(u.clone());
+            }
+            if let Some(p) = def.options.get("PASSWORD") {
+                config.password = Some(p.clone());
             }
             if let Some(key) = def.options.get("CONF_KEY").cloned() {
                 let lookup = format!("rabbitmq/{}", key);
@@ -2801,8 +2863,10 @@ fn prepare_actions(
                     }
                 }
                 "edgex" => {
-                    let mut config = MqttConfig::default();
-                    config.format = PayloadFormat::EdgeX;
+                    let mut config = MqttConfig {
+                        format: PayloadFormat::EdgeX,
+                        ..Default::default()
+                    };
 
                     let conf_key = opts
                         .get("confKey")
@@ -2882,13 +2946,25 @@ fn prepare_actions(
                         .get("optional")
                         .or_else(|| default_conf.as_ref().and_then(|c| c.get("optional")));
                     if let Some(opt) = opt_sec {
-                        if let Some(u) = opt.get("Username").or_else(|| opt.get("username")).and_then(|v| v.as_str()) {
+                        if let Some(u) = opt
+                            .get("Username")
+                            .or_else(|| opt.get("username"))
+                            .and_then(|v| v.as_str())
+                        {
                             config.username = Some(u.to_string());
                         }
-                        if let Some(p) = opt.get("Password").or_else(|| opt.get("password")).and_then(|v| v.as_str()) {
+                        if let Some(p) = opt
+                            .get("Password")
+                            .or_else(|| opt.get("password"))
+                            .and_then(|v| v.as_str())
+                        {
                             config.password = Some(p.to_string());
                         }
-                        if let Some(cid) = opt.get("ClientId").or_else(|| opt.get("clientId")).and_then(|v| v.as_str()) {
+                        if let Some(cid) = opt
+                            .get("ClientId")
+                            .or_else(|| opt.get("clientId"))
+                            .and_then(|v| v.as_str())
+                        {
                             config.client_id = Some(cid.to_string());
                         }
                     }
@@ -3110,7 +3186,7 @@ fn spawn_rule_task(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(buffer_len);
-    let prepared = prepare_actions(&actions, &rule_id, &source_configs);
+    let prepared = prepare_actions(&actions, &rule_id, source_configs);
     let cache_configs = action_cache_configs(&actions);
     let sink_rule_id = rule_id.clone();
     let sink_rule_mgr = rule_manager.clone();
@@ -3756,7 +3832,8 @@ async fn send_action(
             let mut rec = output.clone();
             if let Some(tpl) = template {
                 let rendered = apply_data_template(tpl, &record_template_map(&output.data));
-                rec.data.insert("result".to_string(), Value::String(rendered));
+                rec.data
+                    .insert("result".to_string(), Value::String(rendered));
             }
             sink.send(&rec)
                 .await
@@ -3782,13 +3859,8 @@ async fn send_action(
                 Some(tpl) => {
                     apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
                 }
-                None => EdgeXCodec::encode(
-                    &output.data,
-                    device_name,
-                    profile_name,
-                    source_name,
-                )
-                .map_err(|e| SendError::Permanent(format!("edgex payload encode: {}", e)))?,
+                None => EdgeXCodec::encode(&output.data, device_name, profile_name, source_name)
+                    .map_err(|e| SendError::Permanent(format!("edgex payload encode: {}", e)))?,
             };
             sink.send_raw_to(destination.unwrap_or(&config.topic), payload)
                 .await
@@ -4119,8 +4191,10 @@ async fn dispatch_rule_actions_legacy(
                     let _ = stream_bus.publish(topic, output.clone());
                 }
                 "edgex" => {
-                    let mut config = MqttConfig::default();
-                    config.format = PayloadFormat::EdgeX;
+                    let mut config = MqttConfig {
+                        format: PayloadFormat::EdgeX,
+                        ..Default::default()
+                    };
                     let srv = opts
                         .get("server")
                         .and_then(|v| v.as_str())
@@ -4172,11 +4246,10 @@ async fn dispatch_rule_actions_legacy(
                     match MqttSink::new(config) {
                         Ok(sink) => {
                             let payload = match action_template(opts) {
-                                Some(tpl) => apply_data_template(
-                                    tpl,
-                                    &record_template_map(&output.data),
-                                )
-                                .into_bytes(),
+                                Some(tpl) => {
+                                    apply_data_template(tpl, &record_template_map(&output.data))
+                                        .into_bytes()
+                                }
                                 None => match EdgeXCodec::encode(
                                     &output.data,
                                     device_name,
@@ -4185,7 +4258,11 @@ async fn dispatch_rule_actions_legacy(
                                 ) {
                                     Ok(b) => b,
                                     Err(e) => {
-                                        tracing::warn!("[RULE {}] edgex encode failed: {}", rule_id, e);
+                                        tracing::warn!(
+                                            "[RULE {}] edgex encode failed: {}",
+                                            rule_id,
+                                            e
+                                        );
                                         rule_mgr.inc_exceptions(rule_id, 1);
                                         continue;
                                     }
@@ -7643,7 +7720,73 @@ async fn register_function_plugin(
 }
 
 async fn list_prebuild_plugins() -> impl IntoResponse {
-    Json(json!({}))
+    Json(json!([]))
+}
+
+async fn list_wasm_plugins() -> impl IntoResponse {
+    Json(rekuiper_core::wasm::get_global_wasm_registry().list_modules())
+}
+
+async fn create_wasm_plugin(Json(payload): Json<Value>) -> Response {
+    let name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    if name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing plugin 'name'").into_response();
+    }
+    let bytes = if let Some(b64) = payload.get("bytecode").and_then(|v| v.as_str()) {
+        match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64) {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid base64 bytecode: {}", e),
+                )
+                    .into_response()
+            }
+        }
+    } else if let Some(fpath) = payload.get("file").and_then(|v| v.as_str()) {
+        let clean_path = fpath.trim_start_matches("file://");
+        match std::fs::read(clean_path) {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to read file {}: {}", clean_path, e),
+                )
+                    .into_response()
+            }
+        }
+    } else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing 'file' or 'bytecode' parameter",
+        )
+            .into_response();
+    };
+
+    match rekuiper_core::wasm::get_global_wasm_registry().register_module_as_udfs(name, &bytes) {
+        Ok(funcs) => (
+            StatusCode::CREATED,
+            Json(json!({"name": name, "functions": funcs})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to register WASM module: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+async fn delete_wasm_plugin(Path(name): Path<String>) -> Response {
+    if rekuiper_core::wasm::get_global_wasm_registry().unregister_module(&name) {
+        StatusCode::OK.into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("WASM plugin {} not found", name),
+        )
+            .into_response()
+    }
 }
 
 async fn list_udf_plugins(State(state): State<AppState>) -> impl IntoResponse {

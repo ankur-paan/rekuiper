@@ -154,7 +154,10 @@ pub async fn start_server(config: KuiperConfig, version: String) -> Result<()> {
         tokio::spawn(async move {
             let edgex_addr = SocketAddr::from(([0, 0, 0, 0], edgex_port));
             if let Ok(listener) = tokio::net::TcpListener::bind(edgex_addr).await {
-                tracing::info!("Serving EdgeX dual-port REST API on http://0.0.0.0:{}", edgex_port);
+                tracing::info!(
+                    "Serving EdgeX dual-port REST API on http://0.0.0.0:{}",
+                    edgex_port
+                );
                 let _ = axum::serve(listener, edgex_app).tcp_nodelay(true).await;
             }
         });

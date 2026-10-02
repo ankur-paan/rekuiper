@@ -2483,25 +2483,43 @@ fn test_newly_implemented_functions_all() {
 fn test_vector_similarity_and_search() {
     let empty = rec(&[]);
     // 1. Cosine similarity
-    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [1.0, 0.0]) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT cosine_similarity([1.0, 0.0], [1.0, 0.0]) AS v FROM demo",
+        &empty,
+    );
     assert!((r.as_f64().unwrap() - 1.0).abs() < 1e-6);
 
-    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [0.0, 1.0]) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT cosine_similarity([1.0, 0.0], [0.0, 1.0]) AS v FROM demo",
+        &empty,
+    );
     assert!((r.as_f64().unwrap() - 0.0).abs() < 1e-6);
 
-    let r = eval_one("SELECT cosine_similarity([1.0, 0.0], [-1.0, 0.0]) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT cosine_similarity([1.0, 0.0], [-1.0, 0.0]) AS v FROM demo",
+        &empty,
+    );
     assert!((r.as_f64().unwrap() - (-1.0)).abs() < 1e-6);
 
     // 2. Vector L2 (Euclidean distance): sqrt(3^2 + 4^2) = 5.0
-    let r = eval_one("SELECT vector_l2([1.0, 2.0], [4.0, 6.0]) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT vector_l2([1.0, 2.0], [4.0, 6.0]) AS v FROM demo",
+        &empty,
+    );
     assert!((r.as_f64().unwrap() - 5.0).abs() < 1e-6);
 
     // 3. Vector dot product: 1*3 + 2*4 = 11.0
-    let r = eval_one("SELECT vector_dot([1.0, 2.0], [3.0, 4.0]) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT vector_dot([1.0, 2.0], [3.0, 4.0]) AS v FROM demo",
+        &empty,
+    );
     assert!((r.as_f64().unwrap() - 11.0).abs() < 1e-6);
 
     // 4. Vector match: top-k search
-    let r = eval_one("SELECT vector_match([1.0, 0.0], [[0.0, 1.0], [0.9, 0.1], [-1.0, 0.0]], 2) AS v FROM demo", &empty);
+    let r = eval_one(
+        "SELECT vector_match([1.0, 0.0], [[0.0, 1.0], [0.9, 0.1], [-1.0, 0.0]], 2) AS v FROM demo",
+        &empty,
+    );
     let arr = r.as_array().expect("array of matches");
     assert_eq!(arr.len(), 2);
     let top1 = &arr[0];
@@ -2526,7 +2544,10 @@ fn test_wasm_function_plugin_sql_execution() {
     let empty = rec(&[]);
 
     // 1. Direct call via wasm_run built-in function
-    let r1 = eval_one("SELECT wasm_run('math_wasm', 'add', 40, 2) AS v FROM demo", &empty);
+    let r1 = eval_one(
+        "SELECT wasm_run('math_wasm', 'add', 40, 2) AS v FROM demo",
+        &empty,
+    );
     assert_eq!(r1, json!(42));
 
     // 2. Call via registered UDF name

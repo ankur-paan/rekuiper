@@ -2715,9 +2715,15 @@ async fn test_edgex_stream_e2e_data_pipeline() {
     assert_eq!(received.data.get("Humidity"), Some(&json!(62.0)));
 
     // 5. Test EdgeX encoding on output record:
-    let encoded = EdgeXCodec::encode(&received.data, "kuiper_alert", "alert_profile", "rule_edgex_filter")
-        .expect("encode edgex output");
-    let out_event: serde_json::Value = serde_json::from_slice(&encoded).expect("parse encoded event");
+    let encoded = EdgeXCodec::encode(
+        &received.data,
+        "kuiper_alert",
+        "alert_profile",
+        "rule_edgex_filter",
+    )
+    .expect("encode edgex output");
+    let out_event: serde_json::Value =
+        serde_json::from_slice(&encoded).expect("parse encoded event");
     assert_eq!(out_event["deviceName"], "kuiper_alert");
     assert_eq!(out_event["sourceName"], "rule_edgex_filter");
     assert!(out_event["readings"].as_array().unwrap().len() >= 2);

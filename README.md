@@ -134,6 +134,7 @@ Compiled binaries are located in `target/release/`.
 | Port | Protocol | Purpose | Default Bind |
 | :--- | :--- | :--- | :--- |
 | `9081` | HTTP / TCP | REST API, OpenAPI docs, stream and rule management, CLI | `0.0.0.0:9081` |
+| `59720` | HTTP / TCP | EdgeX REST API listener (Concurrent parity with 9081) | `0.0.0.0:59720` |
 | `20499` | HTTP / TCP | Prometheus metrics (`/metrics`) | `0.0.0.0:20499` |
 | `20498` | TCP | RPC protocol compatibility | `127.0.0.1:20498` |
 
@@ -202,6 +203,12 @@ curl http://localhost:9081/rules/alert_rule/status
 | **Window Processing** | Tumbling, hopping, sliding, count, and session windows. Common aggregations (`count`, `sum`, `avg`, `min`, `max`) execute incrementally to preserve bounded memory. |
 | **Table Joins** | Stream-to-table lookups against in-memory tables, Redis, and SQL databases. Stream-to-stream windowed joins (inner, left, right, full, and cross). |
 | **MQTT Connector** | Source and sink support for MQTT 3.1.1 (QoS 0, 1, and 2). Payload formats: JSON objects and arrays, raw binary, delimited text, and Protocol Buffers. Supports topic wildcards and metadata extraction (`meta(topic)`, `meta(qos)`, `meta(messageId)`). |
+| **RabbitMQ Connector** | Native AMQP 0-9-1 source and sink with TLS (`amqps://`), dynamic exchange bindings, and QoS prefetch control without external CGO plugins. |
+| **Vector Similarity** | In-database vector mathematical functions: `cosine_similarity`, `vector_l2`, `vector_dot`, `vector_match`, and SQL similarity threshold predicates (`WHERE cosine_similarity(v1, v2) > 0.85`). |
+| **Wasm Plugin Engine** | Embedded WebAssembly runtime for safe, sandboxed SQL UDFs. Supports modules compiled from Rust, C, and Go, with REST management endpoints (`/plugins/wasm`). |
+| **Dynamic Secrets** | Secret template interpolation for HashiCorp Vault (`{{vault://...}}`) and environment variables (`{{env://...}}`). Stream catalogs automatically redact sensitive credentials. |
+| **Parquet Columnar** | High-performance Apache Parquet sink and source. Generates Snappy-compressed binary files and reads them with automatic Arrow schema inference and projection. |
+| **EdgeX & OpenZiti** | Native EdgeX Foundry message bus source and sink (V2/V3 DTO events over MQTT/Redis/ZeroMQ), concurrent dual-port listening (9081 and 59720), and OpenZiti zero-trust overlay. |
 | **Additional Connectors** | Connectors for Kafka, Redis, WebSocket, HTTP pull/push, SQL databases (PostgreSQL, MySQL, SQLite), and files (CSV, JSON Lines). |
 | **Sink Delivery** | Template rendering via `dataTemplate`. Configurable offline caching (`enableCache`, `memoryCacheThreshold`, `maxDiskCache`) stores failed records and resends them in order upon target reconnection. |
 | **Rule Testing and Graphs**| Interactive rule testing with Server-Sent Events (`POST /ruletest`); supports Directed Acyclic Graph (DAG) rule definitions. |
@@ -310,7 +317,7 @@ Prometheus metrics are available at `http://localhost:9081/metrics` and on port 
 
 ## Release History
 
-- **0.504-beta** (Current): Native dual binary entrypoints (`rekuiperd` daemon and `rekuiper` CLI); native `etc/rekuiper.yaml` configuration with `REKUIPER__` and `KUIPER__` environment overrides; repository metadata maintenance for I-Dacs Labs; updated technical documentation site with VitePress.
+- **0.504-beta** (Current): Native dual binary entrypoints (`rekuiperd` daemon and `rekuiper` CLI); native RabbitMQ AMQP 0-9-1 source and sink; vector database functions and SQL similarity search; WebAssembly (Wasm) UDF plugin engine; Apache Parquet columnar sink and source; dynamic secrets resolution (Vault and environment templates); EdgeX Foundry message bus connector and concurrent dual-port listening (9081 and 59720) with OpenZiti zero-trust overlay; repository metadata maintenance for I-Dacs Labs; updated technical documentation site.
 - **0.503-beta**: Full SQL function library parity (162 functions) verified against live MQTT telemetry; compression extensions (`compress`, `decompress` for zlib, gzip, flate, zstd); timezone conversions (`convert_tz`); high-resolution date arithmetic (`date_calc`); dynamic column projection (`changed_cols`); row unnesting (`unnest`, `extract`); running stream accumulators (`acc_collect`).
 - **0.502-beta**: Embedded Model Context Protocol (MCP) server (`rekuiper-mcp`) with 42 tools; offline streaming SQL query simulation; runtime rule tracing controls (`start_rule_trace`, `stop_rule_trace`); 99.98% differential mathematical verification; automated crash qualification harness; multi-platform container images.
 - **0.501-beta**: Transactional storage atomicity (`KvOperation`, `apply_transaction`); strict configuration key validation; IIoT MQTT ladder benchmarks with zero packet loss.
