@@ -58,6 +58,7 @@ spec:
       - name: ekuiper-data
         emptyDir: {}
       - name: ekuiper-plugins
+        emptyDir: {}
       {{- else if .Values.persistence.existingClaim }}
       - name: ekuiper-data
         persistentVolumeClaim:

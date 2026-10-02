@@ -36,23 +36,22 @@ helm uninstall rekuiper
 | image.repository | string | `"ankurkrp/rekuiper"` |  |
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | nodeSelector | object | `{}` |  |
-| persistence.enabled | bool | `false` |  |
-| persistence.storageClass | string | ""  | Storage class of backing PVC|
-| persistence.existingClaim| string | "" | EMQX data Persistent Volume existing claim name, evaluated as a template |
-| persistence.accessMode   | string | ReadWriteOnce | PVC Access Mode for volume |
-| persistence.size` | string | 20Mi | PVC Storage Request for EMQX volume |
-| persistence.existingClaim | string | `""` | Existing PersistentVolumeClaims The value is evaluated as a template So, for example, the name can depend on .Release or .Chart |
-| resources | object | `{}` |  |
+| persistence.enabled | bool | `false` | Enable persistent storage for data and plugins |
+| persistence.storageClass | string | `""` | Storage class of backing PVC |
+| persistence.existingClaim | string | `""` | Existing PersistentVolumeClaim name, evaluated as a template |
+| persistence.accessMode | string | `"ReadWriteOnce"` | PVC Access Mode for volume |
+| persistence.size | string | `"20Mi"` | PVC Storage Request for rekuiper volume |
+| resources | object | `{}` | Pod resource requests and limits |
 | service.annotations | object | `{}` | Provide any additional annotations which may be required. Evaluated as a template |
-| service.nodePorts | object | `{"ekuiper":null,"restapi":null,"prometheus":null}` | Specify the nodePort(s) value for the LoadBalancer and NodePort service types. ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport |
+| service.nodePorts | object | `{"ekuiper":null,"restapi":null,"prometheus":null}` | Specify nodePort(s) for LoadBalancer and NodePort service types |
 | service.ports | object | `{"ekuiper":{"name":"ekuiper","port":20498},"restapi":{"name":"restapi","port":9081},"prometheus":{"name":"prometheus","port":20499}}` | Service ports |
-| service.ports.ekuiper.name | string | `"ekuiper"` | eKuiper port name |
-| service.ports.ekuiper.port | int | `20498` | eKuiper port |
-| service.ports.restapi.name | string | `"restapi"` | eKuiper restapi port name |
-| service.ports.restapi.port | int | `9081` | eKuiper restapi port |
+| service.ports.ekuiper.name | string | `"ekuiper"` | CLI port name |
+| service.ports.ekuiper.port | int | `20498` | CLI port |
+| service.ports.restapi.name | string | `"restapi"` | REST API port name |
+| service.ports.restapi.port | int | `9081` | REST API port |
 | service.ports.prometheus.name | string | `"prometheus"` | Prometheus metrics port name |
 | service.ports.prometheus.port | int | `20499` | Prometheus metrics port |
-| service.type | string | `"ClusterIP"` | service type |
+| service.type | string | `"ClusterIP"` | Service type |
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
