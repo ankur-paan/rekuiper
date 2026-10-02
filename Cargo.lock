@@ -2311,6 +2311,7 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
  "webpki-roots 0.26.11",
 ]
 

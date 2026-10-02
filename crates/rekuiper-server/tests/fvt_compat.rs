@@ -2566,6 +2566,29 @@ async fn test_mqtt_source_lifecycle_and_defaults() {
         "TYPE=mqtt stream should bootstrap an MQTT subscriber"
     );
 
+    // 2b. Explicit TYPE="edgex" also bootstraps an EdgeX source and handles edgex sink actions.
+    create_stream(
+        &client,
+        &base_url,
+        "CREATE STREAM m_edgex () WITH (TYPE=\"edgex\")",
+    )
+    .await;
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_edgex_explicit",
+            "sql": "SELECT Temperature FROM m_edgex WHERE Temperature > 20.0",
+            "actions": [{"edgex": {"topic": "edgex/alerts", "deviceName": "sensor"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "create edgex rule");
+    assert!(
+        has_source_handle(&state, "rule_edgex_explicit"),
+        "TYPE=edgex stream should bootstrap an EdgeX subscriber"
+    );
+
     // 3. Other source types must not bootstrap MQTT.
     create_stream(
         &client,
@@ -2590,6 +2613,16 @@ async fn test_mqtt_source_lifecycle_and_defaults() {
         !has_source_handle(&state, "rule_mqtt_default"),
         "stopped rule should release its source handle"
     );
+    let resp = client
+        .post(format!("{}/rules/rule_edgex_explicit/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        !has_source_handle(&state, "rule_edgex_explicit"),
+        "stopped edgex rule should release its source handle"
+    );
     let status: serde_json::Value = client
         .get(format!("{}/rules/rule_mqtt_default/status", base_url))
         .send()
@@ -2599,6 +2632,95 @@ async fn test_mqtt_source_lifecycle_and_defaults() {
         .await
         .unwrap();
     assert_eq!(status["status"], "stopped");
+}
+
+#[tokio::test]
+async fn test_edgex_stream_e2e_data_pipeline() {
+    use rekuiper_connectors::EdgeXCodec;
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // 1. Create an EdgeX stream
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM edgex_demo () WITH (TYPE=\"edgex\", DATASOURCE=\"rules-events\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // 2. Create rule that filters on flattened readings:
+    // SELECT Temperature, Humidity FROM edgex_demo WHERE Temperature > 25.0
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_edgex_filter",
+            "sql": "SELECT Temperature, Humidity FROM edgex_demo WHERE Temperature > 25.0",
+            "actions": [
+                {"memory": {"topic": "edgex_out"}},
+                {"log": {}}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let mut out_rx = state.stream_bus.subscribe("edgex_out");
+
+    // 3. Simulate EdgeX payload incoming on the stream bus
+    let edgex_json = r#"{
+        "apiVersion": "v3",
+        "id": "evt-001",
+        "deviceName": "HVAC_01",
+        "profileName": "HVAC_Profile",
+        "sourceName": "SensorReading",
+        "origin": 1700000000,
+        "readings": [
+            {
+                "id": "r-1",
+                "deviceName": "HVAC_01",
+                "resourceName": "Temperature",
+                "valueType": "Float64",
+                "value": "28.5"
+            },
+            {
+                "id": "r-2",
+                "deviceName": "HVAC_01",
+                "resourceName": "Humidity",
+                "valueType": "Float64",
+                "value": "62.0"
+            }
+        ]
+    }"#;
+
+    let mut records = Vec::new();
+    EdgeXCodec::decode(edgex_json.as_bytes(), None, &mut records).expect("decode edgex event");
+    assert_eq!(records.len(), 1);
+
+    let tx = state.stream_bus.get_or_create("edgex_demo");
+    for r in records {
+        tx.send(r).await.expect("send record");
+    }
+
+    // 4. Verify rule received, processed, and matched record
+    let received = tokio::time::timeout(std::time::Duration::from_secs(3), out_rx.recv())
+        .await
+        .expect("rule should emit filtered output within 3s")
+        .expect("channel not closed");
+
+    assert_eq!(received.data.get("Temperature"), Some(&json!(28.5)));
+    assert_eq!(received.data.get("Humidity"), Some(&json!(62.0)));
+
+    // 5. Test EdgeX encoding on output record:
+    let encoded = EdgeXCodec::encode(&received.data, "kuiper_alert", "alert_profile", "rule_edgex_filter")
+        .expect("encode edgex output");
+    let out_event: serde_json::Value = serde_json::from_slice(&encoded).expect("parse encoded event");
+    assert_eq!(out_event["deviceName"], "kuiper_alert");
+    assert_eq!(out_event["sourceName"], "rule_edgex_filter");
+    assert!(out_event["readings"].as_array().unwrap().len() >= 2);
 }
 
 #[tokio::test]

@@ -467,6 +467,8 @@ pub enum PayloadFormat {
     Delimited(DelimitedCodec),
     /// Protobuf message resolved from the stream `SCHEMAID`.
     Protobuf(Arc<ProtoMessage>),
+    /// EdgeX Foundry event / reading DTO payload format.
+    EdgeX,
 }
 
 fn default_mqtt_server() -> String {
@@ -1010,6 +1012,7 @@ pub fn decode_payload_into(
             Value::Object(map) => out.push(StreamRecord::new(map.into_iter().collect())),
             _ => bail!("payload is not a valid '{}' protobuf message", message.name),
         },
+        PayloadFormat::EdgeX => EdgeXCodec::decode(payload, meta.clone(), out)?,
     }
     if let Some(meta) = meta {
         let end = out.len();

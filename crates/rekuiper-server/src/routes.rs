@@ -13,10 +13,11 @@ use axum::{
 use parking_lot::RwLock;
 use rekuiper_conf::KuiperConfig;
 use rekuiper_connectors::{
-    apply_data_template, parse_interval_ms, FileSink, FileSource, FileSourceConfig, HttpPullConfig,
-    HttpPullSource, KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink, MqttSource,
-    RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig, SimulatorSource, Sink,
-    SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink, WebSocketSource,
+    apply_data_template, parse_interval_ms, EdgeXCodec, FileSink, FileSource, FileSourceConfig,
+    HttpPullConfig, HttpPullSource, KafkaConfig, KafkaSink, KafkaSource, MqttConfig, MqttSink,
+    MqttSource, PayloadFormat, RedisSink, RedisSinkConfig, RedisSubSource, SimulatorConfig,
+    SimulatorSource, Sink, SqlConnectorConfig, SqlSink, SqlSource, WebSocketConfig, WebSocketSink,
+    WebSocketSource,
 };
 use rekuiper_core::{
     model::{
@@ -548,7 +549,85 @@ pub async fn load_config_maps(state: &AppState) -> anyhow::Result<()> {
             }
         }
     }
+    load_default_source_file("etc/sources/edgex.yaml", "edgex", &state.source_configs);
+    apply_edgex_env_overlays(&state.source_configs);
     Ok(())
+}
+
+fn load_default_source_file(
+    path_str: &str,
+    prefix: &str,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+) {
+    let path = std::path::Path::new(path_str);
+    if !path.exists() {
+        return;
+    }
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(val) = serde_yaml::from_str::<Value>(&content) else {
+        return;
+    };
+    if let Value::Object(sections) = val {
+        let mut guard = source_configs.write();
+        for (sec_name, sec_val) in sections {
+            let key = format!("{}/{}", prefix, sec_name);
+            guard.entry(key).or_insert(sec_val);
+        }
+    }
+}
+
+fn apply_edgex_env_overlays(source_configs: &Arc<RwLock<HashMap<String, Value>>>) {
+    let mut guard = source_configs.write();
+    let default_key = "edgex/default".to_string();
+    let entry = guard.entry(default_key).or_insert_with(|| {
+        serde_json::json!({
+            "protocol": "tcp",
+            "server": "edgex-mqtt-broker",
+            "port": 1883,
+            "topic": "edgex/rules-events",
+            "type": "mqtt",
+            "messageType": "event"
+        })
+    });
+
+    if let Value::Object(ref mut map) = entry {
+        for (env_k, env_v) in std::env::vars() {
+            if let Some(rest) = env_k.strip_prefix("EDGEX__") {
+                let mut parts = rest.split("__");
+                let (Some(section), Some(field)) = (parts.next(), parts.next()) else {
+                    continue;
+                };
+                if section.eq_ignore_ascii_case("DEFAULT") {
+                    let field_lower = field.to_ascii_lowercase();
+                    match field_lower.as_str() {
+                        "port" => {
+                            if let Ok(p) = env_v.parse::<u64>() {
+                                map.insert("port".to_string(), Value::from(p));
+                            }
+                        }
+                        "server" => {
+                            map.insert("server".to_string(), Value::String(env_v));
+                        }
+                        "topic" => {
+                            map.insert("topic".to_string(), Value::String(env_v));
+                        }
+                        "protocol" => {
+                            map.insert("protocol".to_string(), Value::String(env_v));
+                        }
+                        "type" => {
+                            map.insert("type".to_string(), Value::String(env_v));
+                        }
+                        "messagetype" => {
+                            map.insert("messageType".to_string(), Value::String(env_v));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// JWT authorization guard for deployments with `basic.authentication:
@@ -1707,6 +1786,111 @@ fn resolve_mqtt_source(
     Some(config)
 }
 
+/// Resolve the MQTT configuration and EdgeX payload codec for a stream declaring
+/// `TYPE="edgex"`. Default server is `tcp://edgex-mqtt-broker:1883` and default topic
+/// is `edgex/rules-events`, configured via `etc/sources/edgex.yaml` or `EDGEX__*` overlays.
+fn resolve_edgex_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    _schemas: &SchemaManager,
+    stream_name: &str,
+    rule_id: &str,
+) -> Option<MqttConfig> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let kind = def.options.get("TYPE")?;
+    if !kind.eq_ignore_ascii_case("edgex") {
+        return None;
+    }
+
+    let mut config = MqttConfig::default();
+    config.server = "tcp://edgex-mqtt-broker:1883".to_string();
+    config.topic = "edgex/rules-events".to_string();
+    config.format = PayloadFormat::EdgeX;
+
+    let conf_key = def
+        .options
+        .iter()
+        .find(|(k, _)| {
+            k.eq_ignore_ascii_case("CONF_KEY")
+                || k.eq_ignore_ascii_case("confKey")
+                || k.eq_ignore_ascii_case("connectionSelector")
+        })
+        .map(|(_, v)| v.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default");
+
+    let lookup = format!("edgex/{}", conf_key);
+    let configs_guard = source_configs.read();
+    let conf_val = configs_guard
+        .get(&lookup)
+        .or_else(|| configs_guard.get(&lookup.to_ascii_lowercase()))
+        .or_else(|| configs_guard.get("edgex/default"))
+        .or_else(|| configs_guard.get(conf_key))
+        .cloned();
+    drop(configs_guard);
+
+    if let Some(val) = conf_val {
+        let srv = val.get("server").and_then(|v| v.as_str()).unwrap_or("edgex-mqtt-broker");
+        let port = val
+            .get("port")
+            .and_then(|v| {
+                if let Some(n) = v.as_u64() {
+                    Some(n)
+                } else if let Some(s) = v.as_str() {
+                    s.parse::<u64>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(1883);
+        let proto = val.get("protocol").and_then(|v| v.as_str()).unwrap_or("tcp");
+
+        if srv.contains("://") {
+            config.server = srv.to_string();
+        } else {
+            config.server = format!("{}://{}:{}", proto, srv, port);
+        }
+
+        if let Some(t) = val.get("topic").and_then(|v| v.as_str()) {
+            if !t.is_empty() {
+                config.topic = t.to_string();
+            }
+        }
+        if let Some(opt) = val.get("optional") {
+            if let Some(u) = opt.get("Username").or_else(|| opt.get("username")).and_then(|v| v.as_str()) {
+                config.username = Some(u.to_string());
+            }
+            if let Some(p) = opt.get("Password").or_else(|| opt.get("password")).and_then(|v| v.as_str()) {
+                config.password = Some(p.to_string());
+            }
+            if let Some(cid) = opt.get("ClientId").or_else(|| opt.get("clientId")).and_then(|v| v.as_str()) {
+                config.client_id = Some(cid.to_string());
+            }
+        }
+    }
+
+    // Direct stream options take precedence
+    if let Some(srv) = def.options.get("SERVER").filter(|s| !s.trim().is_empty()) {
+        if srv.contains("://") {
+            config.server = srv.to_string();
+        } else {
+            config.server = format!("tcp://{}", srv);
+        }
+    }
+    if let Some(ds) = def.options.get("DATASOURCE").filter(|s| !s.trim().is_empty()) {
+        config.topic = ds.trim().to_string();
+    }
+
+    tracing::info!(
+        "[RULE {}] resolved edgex source for '{}': broker '{}', topic '{}'",
+        rule_id,
+        stream_name,
+        config.server,
+        config.topic
+    );
+    Some(config)
+}
+
 /// Payload decoding for a message source from the stream `FORMAT` (eKuiper
 /// names: json, binary, delimited, protobuf with `SCHEMAID`). A protobuf
 /// stream whose schema cannot be resolved yields `None` so the stream fails
@@ -1794,6 +1978,28 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     // MQTT is the default streaming source: typeless streams and TYPE="mqtt"
     // subscribe to the broker topic and feed the rule pipeline.
     if let Some(mut config) = resolve_mqtt_source(
+        &state.stream_manager,
+        &state.source_configs,
+        &state.schema_manager,
+        stream_name,
+        rule_id,
+    ) {
+        config.attach_meta = needs_meta;
+        let stream_tx = state.stream_bus.get_or_create(stream_name);
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(cancel_tx);
+        MqttSource::new(config, stream_tx)
+            .with_rule_counters(state.rule_manager.rule_counters(rule_id))
+            .spawn(cancel_rx);
+    }
+
+    // EdgeX source streams connect to EdgeX MQTT message bus and decode Event / Reading DTOs.
+    if let Some(mut config) = resolve_edgex_source(
         &state.stream_manager,
         &state.source_configs,
         &state.schema_manager,
@@ -2425,12 +2631,23 @@ enum PreparedAction {
     Memory {
         topic: String,
     },
+    EdgeX {
+        device_name: String,
+        profile_name: String,
+        source_name: String,
+        config: Box<MqttConfig>,
+        template: Option<String>,
+    },
     Unknown {
         kind: String,
     },
 }
 
-fn prepare_actions(actions: &[HashMap<String, Value>]) -> Vec<PreparedAction> {
+fn prepare_actions(
+    actions: &[HashMap<String, Value>],
+    rule_id: &str,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+) -> Vec<PreparedAction> {
     let mut out = Vec::new();
     for action in actions {
         for (kind, opts) in action {
@@ -2522,6 +2739,128 @@ fn prepare_actions(actions: &[HashMap<String, Value>]) -> Vec<PreparedAction> {
                         .unwrap_or("default")
                         .to_string(),
                 }),
+                "edgex" => {
+                    let mut config = MqttConfig::default();
+                    config.format = PayloadFormat::EdgeX;
+
+                    let conf_key = opts
+                        .get("confKey")
+                        .or_else(|| opts.get("CONF_KEY"))
+                        .or_else(|| opts.get("connectionSelector"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default");
+
+                    let lookup = format!("edgex/{}", conf_key);
+                    let configs_guard = source_configs.read();
+                    let default_conf = configs_guard
+                        .get(&lookup)
+                        .or_else(|| configs_guard.get(&lookup.to_ascii_lowercase()))
+                        .or_else(|| configs_guard.get("edgex/default"))
+                        .or_else(|| configs_guard.get(conf_key))
+                        .cloned();
+                    drop(configs_guard);
+
+                    let def_srv = default_conf
+                        .as_ref()
+                        .and_then(|c| c.get("server"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("edgex-mqtt-broker");
+                    let def_port = default_conf
+                        .as_ref()
+                        .and_then(|c| c.get("port"))
+                        .and_then(|v| {
+                            if let Some(n) = v.as_u64() {
+                                Some(n)
+                            } else if let Some(s) = v.as_str() {
+                                s.parse::<u64>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(1883);
+                    let def_proto = default_conf
+                        .as_ref()
+                        .and_then(|c| c.get("protocol"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tcp");
+
+                    let srv = opts
+                        .get("server")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(def_srv);
+                    let port = opts
+                        .get("port")
+                        .and_then(|v| {
+                            if let Some(n) = v.as_u64() {
+                                Some(n)
+                            } else if let Some(s) = v.as_str() {
+                                s.parse::<u64>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(def_port);
+                    let proto = opts
+                        .get("protocol")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(def_proto);
+
+                    if srv.contains("://") {
+                        config.server = srv.to_string();
+                    } else {
+                        config.server = format!("{}://{}:{}", proto, srv, port);
+                    }
+
+                    config.topic = opts
+                        .get("topic")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("edgex/alerts")
+                        .to_string();
+
+                    let opt_sec = opts
+                        .get("optional")
+                        .or_else(|| default_conf.as_ref().and_then(|c| c.get("optional")));
+                    if let Some(opt) = opt_sec {
+                        if let Some(u) = opt.get("Username").or_else(|| opt.get("username")).and_then(|v| v.as_str()) {
+                            config.username = Some(u.to_string());
+                        }
+                        if let Some(p) = opt.get("Password").or_else(|| opt.get("password")).and_then(|v| v.as_str()) {
+                            config.password = Some(p.to_string());
+                        }
+                        if let Some(cid) = opt.get("ClientId").or_else(|| opt.get("clientId")).and_then(|v| v.as_str()) {
+                            config.client_id = Some(cid.to_string());
+                        }
+                    }
+
+                    let device_name = opts
+                        .get("deviceName")
+                        .or_else(|| opts.get("device_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("kuiper")
+                        .to_string();
+
+                    let profile_name = opts
+                        .get("profileName")
+                        .or_else(|| opts.get("profile_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("kuiperProfile")
+                        .to_string();
+
+                    let source_name = opts
+                        .get("sourceName")
+                        .or_else(|| opts.get("source_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(rule_id)
+                        .to_string();
+
+                    out.push(PreparedAction::EdgeX {
+                        device_name,
+                        profile_name,
+                        source_name,
+                        config: Box::new(config),
+                        template: action_template(opts).map(|s| s.to_string()),
+                    });
+                }
                 other => out.push(PreparedAction::Unknown {
                     kind: other.to_string(),
                 }),
@@ -2710,7 +3049,7 @@ fn spawn_rule_task(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(buffer_len);
-    let prepared = prepare_actions(&actions);
+    let prepared = prepare_actions(&actions, &rule_id, &source_configs);
     let cache_configs = action_cache_configs(&actions);
     let sink_rule_id = rule_id.clone();
     let sink_rule_mgr = rule_manager.clone();
@@ -3340,6 +3679,38 @@ async fn send_action(
                 Err(SendError::Dropped)
             }
         },
+        PreparedAction::EdgeX {
+            device_name,
+            profile_name,
+            source_name,
+            config,
+            template,
+        } => {
+            if rt.mqtt.is_none() {
+                let sink = MqttSink::new((**config).clone()).map_err(|e| {
+                    SendError::Permanent(format!("edgex action configuration invalid: {}", e))
+                })?;
+                rt.mqtt = Some(sink);
+            }
+            let Some(sink) = rt.mqtt.as_ref() else {
+                return Err(SendError::Permanent("edgex sink unavailable".to_string()));
+            };
+            let payload = match template {
+                Some(tpl) => {
+                    apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
+                }
+                None => EdgeXCodec::encode(
+                    &output.data,
+                    device_name,
+                    profile_name,
+                    source_name,
+                )
+                .map_err(|e| SendError::Permanent(format!("edgex payload encode: {}", e)))?,
+            };
+            sink.send_raw_to(destination.unwrap_or(&config.topic), payload)
+                .await
+                .map_err(|e| SendError::Retry(format!("edgex action failed: {}", e)))
+        }
         PreparedAction::Unknown { kind } => {
             tracing::debug!("[RULE {}] unknown action '{}', ignoring", ctx.rule_id, kind);
             Ok(())
@@ -3663,6 +4034,90 @@ async fn dispatch_rule_actions_legacy(
                     // Broadcast send fails only when nobody listens; the data
                     // has still been produced, so never count it as an exception.
                     let _ = stream_bus.publish(topic, output.clone());
+                }
+                "edgex" => {
+                    let mut config = MqttConfig::default();
+                    config.format = PayloadFormat::EdgeX;
+                    let srv = opts
+                        .get("server")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("edgex-mqtt-broker");
+                    let port = opts
+                        .get("port")
+                        .and_then(|v| {
+                            if let Some(n) = v.as_u64() {
+                                Some(n)
+                            } else if let Some(s) = v.as_str() {
+                                s.parse::<u64>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(1883);
+                    let proto = opts
+                        .get("protocol")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tcp");
+
+                    if srv.contains("://") {
+                        config.server = srv.to_string();
+                    } else {
+                        config.server = format!("{}://{}:{}", proto, srv, port);
+                    }
+                    config.topic = opts
+                        .get("topic")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("edgex/alerts")
+                        .to_string();
+
+                    let device_name = opts
+                        .get("deviceName")
+                        .or_else(|| opts.get("device_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("kuiper");
+                    let profile_name = opts
+                        .get("profileName")
+                        .or_else(|| opts.get("profile_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("kuiperProfile");
+                    let source_name = opts
+                        .get("sourceName")
+                        .or_else(|| opts.get("source_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(rule_id);
+
+                    match MqttSink::new(config) {
+                        Ok(sink) => {
+                            let payload = match action_template(opts) {
+                                Some(tpl) => apply_data_template(
+                                    tpl,
+                                    &record_template_map(&output.data),
+                                )
+                                .into_bytes(),
+                                None => match EdgeXCodec::encode(
+                                    &output.data,
+                                    device_name,
+                                    profile_name,
+                                    source_name,
+                                ) {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        tracing::warn!("[RULE {}] edgex encode failed: {}", rule_id, e);
+                                        rule_mgr.inc_exceptions(rule_id, 1);
+                                        continue;
+                                    }
+                                },
+                            };
+                            if let Err(e) = sink.send_raw(payload).await {
+                                tracing::warn!("[RULE {}] edgex action failed: {}", rule_id, e);
+                                rule_mgr.inc_exceptions(rule_id, 1);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("[RULE {}] edgex action connect failed: {}", rule_id, e);
+                            rule_mgr.inc_exceptions(rule_id, 1);
+                        }
+                    }
                 }
                 other => {
                     tracing::debug!("[RULE {}] unknown action '{}', ignoring", rule_id, other);
@@ -9818,5 +10273,64 @@ mod tests {
             verify_jwt_raw(&tampered, &key),
             Err("Invalid token signature\n")
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_edgex_source_defaults_and_options() {
+        let manager = test_stream_manager(&[("TYPE", "edgex")]).await;
+        let confs = test_source_configs(&[]);
+        let schemas = SchemaManager::new();
+        let cfg = resolve_edgex_source(&manager, &confs, &schemas, "demo", "rule1")
+            .expect("resolves edgex stream");
+        assert_eq!(cfg.server, "tcp://edgex-mqtt-broker:1883");
+        assert_eq!(cfg.topic, "edgex/rules-events");
+        assert_eq!(cfg.format, PayloadFormat::EdgeX);
+
+        // Custom SERVER and DATASOURCE override defaults
+        let manager_custom = test_stream_manager(&[
+            ("TYPE", "edgex"),
+            ("SERVER", "192.168.1.50:1883"),
+            ("DATASOURCE", "custom/bus"),
+        ])
+        .await;
+        let cfg_custom = resolve_edgex_source(&manager_custom, &confs, &schemas, "demo", "rule2")
+            .expect("resolves custom edgex stream");
+        assert_eq!(cfg_custom.server, "tcp://192.168.1.50:1883");
+        assert_eq!(cfg_custom.topic, "custom/bus");
+    }
+
+    #[test]
+    fn prepare_actions_parses_edgex_action() {
+        let confs = test_source_configs(&[]);
+        let mut action_map = HashMap::new();
+        action_map.insert(
+            "edgex".to_string(),
+            serde_json::json!({
+                "topic": "edgex/alerts",
+                "deviceName": "testDevice",
+                "profileName": "testProfile"
+            }),
+        );
+        let actions = vec![action_map];
+        let prepared = prepare_actions(&actions, "rule100", &confs);
+        assert_eq!(prepared.len(), 1);
+        match &prepared[0] {
+            PreparedAction::EdgeX {
+                device_name,
+                profile_name,
+                source_name,
+                config,
+                template,
+            } => {
+                assert_eq!(device_name, "testDevice");
+                assert_eq!(profile_name, "testProfile");
+                assert_eq!(source_name, "rule100");
+                assert_eq!(config.server, "tcp://edgex-mqtt-broker:1883");
+                assert_eq!(config.topic, "edgex/alerts");
+                assert_eq!(config.format, PayloadFormat::EdgeX);
+                assert!(template.is_none());
+            }
+            _ => panic!("expected PreparedAction::EdgeX"),
+        }
     }
 }

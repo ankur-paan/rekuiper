@@ -184,6 +184,9 @@ fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
         "PORT" => {
             if let Ok(v) = val.trim().parse() {
                 basic.port = v;
+                if basic.rest_port == 9081 && v != 20498 {
+                    basic.rest_port = v;
+                }
             }
         }
         "RESTIP" => basic.rest_ip = val.to_string(),
@@ -244,6 +247,14 @@ where
     I: IntoIterator<Item = (String, String)>,
 {
     for (key, val) in vars {
+        if key == "PORT" {
+            if let Ok(p) = val.trim().parse() {
+                if config.basic.rest_port == 9081 {
+                    config.basic.rest_port = p;
+                }
+            }
+            continue;
+        }
         let rest = if let Some(r) = key.strip_prefix("REKUIPER__") {
             r
         } else if let Some(r) = key.strip_prefix("KUIPER__") {
@@ -303,5 +314,19 @@ mod tests {
         apply_env_overrides_from_iter(&mut config, vars);
         assert_eq!(config.basic.rest_port, 19082);
         assert_eq!(config.basic.log_level, "warn");
+    }
+
+    #[test]
+    fn edgex_port_env_override_takes_effect() {
+        let vars = vec![("PORT".to_string(), "59720".to_string())];
+        let mut config = KuiperConfig::default();
+        apply_env_overrides_from_iter(&mut config, vars);
+        assert_eq!(config.basic.rest_port, 59720);
+
+        let vars_kuiper = vec![("KUIPER__BASIC__PORT".to_string(), "59720".to_string())];
+        let mut config2 = KuiperConfig::default();
+        apply_env_overrides_from_iter(&mut config2, vars_kuiper);
+        assert_eq!(config2.basic.rest_port, 59720);
+        assert_eq!(config2.basic.port, 59720);
     }
 }

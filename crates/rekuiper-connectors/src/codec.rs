@@ -973,3 +973,326 @@ impl ProtobufCodec {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// EdgeX Foundry Codec (v2, v3, v4 event / reading flattening & packing)
+// ---------------------------------------------------------------------------
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeXMessageEnvelope {
+    #[serde(default)]
+    pub api_version: String,
+    #[serde(default)]
+    pub correlation_id: String,
+    #[serde(default)]
+    pub content_type: String,
+    pub payload: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeXEvent {
+    #[serde(default)]
+    pub api_version: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub device_name: String,
+    #[serde(default)]
+    pub profile_name: String,
+    #[serde(default)]
+    pub source_name: String,
+    #[serde(default)]
+    pub origin: i64,
+    #[serde(default)]
+    pub readings: Vec<EdgeXReading>,
+    #[serde(default)]
+    pub tags: HashMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeXReading {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub device_name: String,
+    #[serde(default)]
+    pub resource_name: String,
+    #[serde(default)]
+    pub profile_name: String,
+    #[serde(default)]
+    pub value_type: String,
+    pub value: Option<Value>,
+    #[serde(default)]
+    pub binary_value: Option<String>,
+    #[serde(default)]
+    pub origin: i64,
+}
+
+pub struct EdgeXCodec;
+
+fn parse_edgex_value(val: Option<&Value>, binary: Option<&str>, value_type: &str) -> Value {
+    if let Some(b) = binary {
+        return Value::String(b.to_string());
+    }
+    let Some(v) = val else {
+        return Value::Null;
+    };
+    match v {
+        Value::String(s) => {
+            let s_trim = s.trim();
+            let vt = value_type.to_ascii_lowercase();
+            if vt.starts_with("int") || vt.starts_with("uint") {
+                if let Ok(i) = s_trim.parse::<i64>() {
+                    return Value::from(i);
+                }
+            } else if vt.starts_with("float") || vt == "double" {
+                if let Ok(f) = s_trim.parse::<f64>() {
+                    if let Some(num) = serde_json::Number::from_f64(f) {
+                        return Value::Number(num);
+                    }
+                }
+            } else if vt == "bool" || vt == "boolean" {
+                if let Ok(b) = s_trim.parse::<bool>() {
+                    return Value::Bool(b);
+                }
+            }
+            if let Ok(i) = s_trim.parse::<i64>() {
+                return Value::from(i);
+            }
+            if let Ok(f) = s_trim.parse::<f64>() {
+                if let Some(num) = serde_json::Number::from_f64(f) {
+                    return Value::Number(num);
+                }
+            }
+            if let Ok(b) = s_trim.parse::<bool>() {
+                return Value::Bool(b);
+            }
+            Value::String(s.clone())
+        }
+        Value::Number(_) | Value::Bool(_) | Value::Array(_) | Value::Object(_) => v.clone(),
+        Value::Null => Value::Null,
+    }
+}
+
+fn edgex_value_to_string_and_type(v: &Value) -> (String, String) {
+    match v {
+        Value::Number(n) => {
+            if n.is_i64() || n.is_u64() {
+                ("Int64".to_string(), n.to_string())
+            } else {
+                ("Float64".to_string(), n.to_string())
+            }
+        }
+        Value::Bool(b) => ("Bool".to_string(), b.to_string()),
+        Value::String(s) => ("String".to_string(), s.clone()),
+        other => ("String".to_string(), other.to_string()),
+    }
+}
+
+impl EdgeXCodec {
+    /// Decodes an EdgeX event / message envelope into flattened StreamRecord tuples.
+    pub fn decode(
+        payload: &[u8],
+        meta: Option<Value>,
+        out: &mut Vec<rekuiper_core::StreamRecord>,
+    ) -> Result<()> {
+        let root: Value = serde_json::from_slice(payload)?;
+
+        // If it's a MessageEnvelope, resolve inner payload
+        let event_val = if let Some(p) = root.get("payload") {
+            if let Some(s) = p.as_str() {
+                serde_json::from_str::<Value>(s).unwrap_or_else(|_| p.clone())
+            } else {
+                p.clone()
+            }
+        } else if let Some(ev) = root.get("event") {
+            // AddEventRequest format
+            ev.clone()
+        } else {
+            root.clone()
+        };
+
+        let correlation_id = root
+            .get("correlationId")
+            .or_else(|| root.get("correlationid"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+
+        let event: EdgeXEvent = serde_json::from_value(event_val)?;
+        let mut row_data = HashMap::with_capacity(event.readings.len() + 1);
+        let mut meta_map = serde_json::Map::new();
+
+        if !event.device_name.is_empty() {
+            meta_map.insert("deviceName".to_string(), Value::String(event.device_name.clone()));
+        }
+        if !event.profile_name.is_empty() {
+            meta_map.insert("profileName".to_string(), Value::String(event.profile_name.clone()));
+        }
+        if !event.source_name.is_empty() {
+            meta_map.insert("sourceName".to_string(), Value::String(event.source_name.clone()));
+        }
+        if !event.id.is_empty() {
+            meta_map.insert("id".to_string(), Value::String(event.id.clone()));
+        }
+        if event.origin != 0 {
+            meta_map.insert("origin".to_string(), Value::from(event.origin));
+        }
+        if !correlation_id.is_empty() {
+            meta_map.insert("correlationid".to_string(), Value::String(correlation_id.to_string()));
+        }
+        if !event.tags.is_empty() {
+            meta_map.insert(
+                "tags".to_string(),
+                serde_json::to_value(&event.tags).unwrap_or(Value::Null),
+            );
+        }
+
+        for r in event.readings {
+            let key = if !r.resource_name.is_empty() {
+                r.resource_name
+            } else {
+                continue;
+            };
+
+            let parsed_val = parse_edgex_value(r.value.as_ref(), r.binary_value.as_deref(), &r.value_type);
+            row_data.insert(key.clone(), parsed_val);
+
+            // Record reading metadata
+            let mut r_meta = serde_json::Map::new();
+            if !r.id.is_empty() {
+                r_meta.insert("id".to_string(), Value::String(r.id));
+            }
+            if !r.device_name.is_empty() {
+                r_meta.insert("deviceName".to_string(), Value::String(r.device_name));
+            }
+            if !r.profile_name.is_empty() {
+                r_meta.insert("profileName".to_string(), Value::String(r.profile_name));
+            }
+            if !r.value_type.is_empty() {
+                r_meta.insert("valueType".to_string(), Value::String(r.value_type));
+            }
+            if r.origin != 0 {
+                r_meta.insert("origin".to_string(), Value::from(r.origin));
+            }
+            meta_map.insert(key, Value::Object(r_meta));
+        }
+
+        // Merge incoming external metadata (e.g. MQTT topic, qos)
+        if let Some(Value::Object(ext)) = meta {
+            for (k, v) in ext {
+                meta_map.insert(k, v);
+            }
+        }
+
+        if !row_data.is_empty() {
+            let mut record = rekuiper_core::StreamRecord::new(row_data);
+            record.data.insert("__meta__".to_string(), Value::Object(meta_map));
+            out.push(record);
+        }
+        Ok(())
+    }
+
+    /// Encodes a tuple output record into an EdgeX Event DTO.
+    pub fn encode(
+        record_data: &HashMap<String, Value>,
+        device_name: &str,
+        profile_name: &str,
+        source_name: &str,
+    ) -> Result<Vec<u8>> {
+        let now_nanos = chrono::Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() * 1_000_000);
+        let event_id = uuid::Uuid::new_v4().to_string();
+
+        let mut readings = Vec::with_capacity(record_data.len());
+        for (k, v) in record_data {
+            if k == "__meta__" || k.starts_with('_') {
+                continue;
+            }
+            let (v_type, v_str) = edgex_value_to_string_and_type(v);
+            readings.push(EdgeXReading {
+                id: uuid::Uuid::new_v4().to_string(),
+                device_name: device_name.to_string(),
+                resource_name: k.clone(),
+                profile_name: profile_name.to_string(),
+                value_type: v_type,
+                value: Some(Value::String(v_str)),
+                binary_value: None,
+                origin: now_nanos,
+            });
+        }
+
+        let event = EdgeXEvent {
+            api_version: "v3".to_string(),
+            id: event_id,
+            device_name: device_name.to_string(),
+            profile_name: profile_name.to_string(),
+            source_name: source_name.to_string(),
+            origin: now_nanos,
+            readings,
+            tags: HashMap::new(),
+        };
+
+        Ok(serde_json::to_vec(&event)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_edgex_decode_event() {
+        let json = r#"{
+            "apiVersion": "v3",
+            "id": "evt-123",
+            "deviceName": "Sensor01",
+            "profileName": "SensorProfile",
+            "sourceName": "Temperature",
+            "origin": 1700000000,
+            "readings": [
+                {
+                    "id": "r-1",
+                    "deviceName": "Sensor01",
+                    "resourceName": "Temperature",
+                    "valueType": "Float64",
+                    "value": "28.5"
+                },
+                {
+                    "id": "r-2",
+                    "deviceName": "Sensor01",
+                    "resourceName": "Status",
+                    "valueType": "String",
+                    "value": "NORMAL"
+                }
+            ]
+        }"#;
+
+        let mut out = Vec::new();
+        EdgeXCodec::decode(json.as_bytes(), None, &mut out).unwrap();
+        assert_eq!(out.len(), 1);
+        let record = &out[0];
+        assert_eq!(record.data.get("Temperature"), Some(&Value::from(28.5)));
+        assert_eq!(record.data.get("Status"), Some(&Value::from("NORMAL")));
+        let meta = record.data.get("__meta__").unwrap();
+        assert_eq!(meta.get("deviceName"), Some(&Value::from("Sensor01")));
+    }
+
+    #[test]
+    fn test_edgex_encode_event() {
+        let mut data = HashMap::new();
+        data.insert("Temperature".to_string(), Value::from(32.1));
+        data.insert("Alert".to_string(), Value::from("CRITICAL"));
+
+        let bytes = EdgeXCodec::encode(&data, "kuiper", "kuiperProfile", "rule1").unwrap();
+        let event: EdgeXEvent = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(event.device_name, "kuiper");
+        assert_eq!(event.source_name, "rule1");
+        assert_eq!(event.readings.len(), 2);
+    }
+}

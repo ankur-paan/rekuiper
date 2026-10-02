@@ -52,10 +52,10 @@ USER ${KUIPER_USER}
 
 VOLUME ["/kuiper/etc", "/kuiper/data", "/kuiper/log"]
 
-EXPOSE 9081 20498 20499
+EXPOSE 9081 20498 20499 59720
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:9081/ || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:9081/ || wget --no-verbose --tries=1 --spider http://127.0.0.1:59720/ || exit 1
 
 ENTRYPOINT ["/kuiper/bin/rekuiperd"]
 CMD ["--etc", "/kuiper/etc"]
