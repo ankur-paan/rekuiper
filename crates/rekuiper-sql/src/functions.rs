@@ -1723,7 +1723,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 214, "catalog must list 214 functions");
+        assert_eq!(catalog.len(), 217, "catalog must list 217 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(
