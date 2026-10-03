@@ -2,8 +2,8 @@
 
 > [!NOTE]
 > **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 16:35:50 UTC**.  
-> **Scorecard**: **25 / 25 Array Functions Fully Verified with Live Data (100% Parity)**:  
-> `cardinality`, `array_position`, `element_at`, `array_contains`, `array_create`, `array_remove`, `array_last_position`, `array_contains_any`, `array_intersect`, `array_union`, `array_max`, `array_avg`, `array_min`, `array_except`, `repeat`, `sequence`, `array_cardinality`, `array_flatten`, `array_distinct`, `array_map`, `array_join`, `array_shuffle`, `array_concat`, `array_sort`, `kvpair_array_to_obj`.
+> **Scorecard**: **26 / 26 Array Functions Fully Verified with Live Data (100% Parity)**:  
+> `cardinality`, `array_position`, `array_positions`, `element_at`, `array_contains`, `array_create`, `array_remove`, `array_last_position`, `array_contains_any`, `array_intersect`, `array_union`, `array_max`, `array_avg`, `array_min`, `array_except`, `repeat`, `sequence`, `array_cardinality`, `array_flatten`, `array_distinct`, `array_map`, `array_join`, `array_shuffle`, `array_concat`, `array_sort`, `kvpair_array_to_obj`.
 
 Array functions manipulate arrays or return metadata about array elements.
 
@@ -22,6 +22,27 @@ array_position(array, value)
 ```
 
 Returns the zero-based index of the first occurrence of `value` in the array. Returns -1 if the value is not present or if `array` is nil.
+
+## ARRAY_POSITIONS
+
+```text
+array_positions(array, value)
+```
+
+Returns an array of zero-based indexes for all occurrences of `value` in `array`.
+Returns an empty array `[]` when `value` is not present or when `array` is nil.
+
+### Example
+
+```sql
+array_positions(["a", "b", "a", "c"], "a")
+```
+
+Result:
+
+```json
+[0, 2]
+```
 
 ## ELEMENT_AT
 

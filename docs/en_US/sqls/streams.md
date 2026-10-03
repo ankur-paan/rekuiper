@@ -18,8 +18,22 @@ For detailed property definitions and stream options, refer to the [Stream Overv
 
 ```sql
 CREATE STREAM my_stream ()
-WITH ( DATASOURCE = "topic/temperature", FORMAT = "json", KEY = "id" );
+WITH (
+    DATASOURCE = "topic/temperature",
+    FORMAT = "json",
+    KEY = "id",
+    BUFFER_FULL_POLICY = "block"
+);
 ```
+
+### Buffer Policy
+
+Use the `BUFFER_FULL_POLICY` property to control ingestion when the input buffer is full.
+
+- `block`: The source pauses reading until the buffer has available space.
+- `dropOldest`: The source deletes the oldest record to accept the incoming record.
+
+The server rejects other values with an error during stream creation and update.
 
 ## DESCRIBE STREAM
 

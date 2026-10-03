@@ -16,10 +16,33 @@ The file sink writes analysis results to a specified file. It overwrites the fil
 | compression | true | Compresses the file payload with the specified method: `gzip` or `zstd`. |
 | rollingHook | true | Defines an action executed after a file rolls over. |
 | rollingHookProps | true | Configuration properties required by the `rollingHook` action. |
+| allowExternalFileAccess | true | Permits writing to paths outside the local workspace root. Default: `false`. Refer to [File Path Security](#file-path-security). |
 
 Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
 
 The `format` property defines the encoding of data inside the file. Specific file types require specific formats. Refer to [File Types](#file-types).
+
+### File Path Security
+
+By default, the file sink blocks relative path traversal.
+The engine rejects paths containing parent directory segments (`..`):
+
+```json
+{"error": "path traversal detected in file sink path: '../logs/out.json'"}
+```
+
+To permit writes to relative external paths that contain `..`, set `allowExternalFileAccess` to `true`:
+
+```json
+{
+  "file": {
+    "path": "../external_logs/out.json",
+    "allowExternalFileAccess": true
+  }
+}
+```
+
+Do not enable `allowExternalFileAccess` unless your deployment explicitly requires external directory access.
 
 ### File Types
 

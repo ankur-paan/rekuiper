@@ -69,6 +69,30 @@ pub fn get_resource_definitions() -> Vec<ResourceDefinition> {
             description: Some("Catalog of built-in mathematical, string, aggregate, conversion, and temporal SQL functions available in rekuiper SQL.".to_string()),
             mime_type: Some("application/json".to_string()),
         },
+        ResourceDefinition {
+            uri: "rekuiper://plugins/wasm".to_string(),
+            name: "WebAssembly Plugins".to_string(),
+            description: Some("Installed WebAssembly (.wasm) plugins and their exported UDF signatures.".to_string()),
+            mime_type: Some("application/json".to_string()),
+        },
+        ResourceDefinition {
+            uri: "rekuiper://schemas/rabbitmq".to_string(),
+            name: "RabbitMQ Action Schema".to_string(),
+            description: Some("Configuration template for RabbitMQ AMQP 0-9-1 source and sink actions with exchange, queue, and TLS options.".to_string()),
+            mime_type: Some("application/json".to_string()),
+        },
+        ResourceDefinition {
+            uri: "rekuiper://schemas/parquet".to_string(),
+            name: "Parquet Columnar Sink Schema".to_string(),
+            description: Some("Configuration template for Apache Parquet columnar sink actions with compression and row group sizing.".to_string()),
+            mime_type: Some("application/json".to_string()),
+        },
+        ResourceDefinition {
+            uri: "rekuiper://schemas/edgex".to_string(),
+            name: "EdgeX Dual-Port Config Schema".to_string(),
+            description: Some("Configuration template for EdgeX Foundry dual-port listening (59880 / 59881) for legacy and modern deployments.".to_string()),
+            mime_type: Some("application/json".to_string()),
+        },
     ]
 }
 
@@ -100,6 +124,7 @@ pub async fn read_resource(
         "rekuiper://connections" => fetch_endpoint(client, base_url, "/connections").await?,
         "rekuiper://udfs" => fetch_endpoint(client, base_url, "/udf/javascript").await?,
         "rekuiper://plugins" => fetch_endpoint(client, base_url, "/plugins/sources").await?,
+        "rekuiper://plugins/wasm" => fetch_endpoint(client, base_url, "/plugins/wasm").await?,
         "rekuiper://configs" => fetch_endpoint(client, base_url, "/configs").await?,
         "rekuiper://metadata/sources" => {
             fetch_endpoint(client, base_url, "/metadata/sources").await?
@@ -108,6 +133,44 @@ pub async fn read_resource(
         "rekuiper://metadata/functions" => {
             fetch_endpoint(client, base_url, "/metadata/functions").await?
         }
+        "rekuiper://schemas/rabbitmq" => serde_json::to_string_pretty(&json!({
+            "connector": "rabbitmq",
+            "type": "sink",
+            "properties": {
+                "server": "amqp://guest:guest@localhost:5672/%2f",
+                "exchange": "events.topic",
+                "routingKey": "telemetry.processed",
+                "durable": true,
+                "autoDelete": false,
+                "deliveryMode": 2,
+                "expiration": "60000"
+            }
+        }))
+        .unwrap_or_default(),
+        "rekuiper://schemas/parquet" => serde_json::to_string_pretty(&json!({
+            "connector": "file",
+            "format": "parquet",
+            "fileType": "parquet",
+            "path": "data/parquet/telemetry.parquet",
+            "properties": {
+                "compression": "snappy",
+                "rowGroupSize": 10000,
+                "hasHeader": true
+            }
+        }))
+        .unwrap_or_default(),
+        "rekuiper://schemas/edgex" => serde_json::to_string_pretty(&json!({
+            "connector": "edgex",
+            "properties": {
+                "protocol": "tcp",
+                "server": "localhost",
+                "port": 59880,
+                "port_alt": 59881,
+                "topic": "edgex/events/#",
+                "type": "redis"
+            }
+        }))
+        .unwrap_or_default(),
         "rekuiper://metrics" => {
             let url = format!("{}/rules", base_url.trim_end_matches('/'));
             let resp = client.get(&url).send().await;

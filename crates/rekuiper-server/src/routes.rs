@@ -1182,6 +1182,21 @@ async fn create_stream(
         let mut parser = Parser::new(&sql);
         match parser.parse_create_stream() {
             Ok(stmt) => {
+                for (k, v) in &stmt.options {
+                    if k.eq_ignore_ascii_case("buffer_full_policy")
+                        && !v.eq_ignore_ascii_case("block")
+                        && !v.eq_ignore_ascii_case("dropOldest")
+                    {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            format!(
+                                "Invalid buffer_full_policy: '{}', must be 'block' or 'dropOldest'",
+                                v
+                            ),
+                        )
+                            .into_response();
+                    }
+                }
                 let stream_def = StreamDefinition {
                     name: stmt.name.clone(),
                     sql: sql.clone(),
@@ -1287,6 +1302,21 @@ async fn update_stream(
         Ok(s) => s,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid SQL: {}", e)).into_response(),
     };
+    for (k, v) in &stmt.options {
+        if k.eq_ignore_ascii_case("buffer_full_policy")
+            && !v.eq_ignore_ascii_case("block")
+            && !v.eq_ignore_ascii_case("dropOldest")
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Invalid buffer_full_policy: '{}', must be 'block' or 'dropOldest'",
+                    v
+                ),
+            )
+                .into_response();
+        }
+    }
     let stream_def = StreamDefinition {
         name: name.clone(),
         sql: sql.clone(),

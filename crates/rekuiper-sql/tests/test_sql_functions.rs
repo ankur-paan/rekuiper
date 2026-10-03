@@ -2554,3 +2554,93 @@ fn test_wasm_function_plugin_sql_execution() {
     let r2 = eval_one("SELECT add(15, 25) AS v FROM demo", &empty);
     assert_eq!(r2, json!(40));
 }
+
+#[test]
+fn test_array_positions() {
+    let empty = rec(&[]);
+    // Matching indexes: [1, 2, 2, 3, 2] target 2 -> [1, 2, 4] (0-based)
+    let r1 = eval_one("SELECT array_positions([1, 2, 2, 3, 2], 2) AS v FROM demo", &empty);
+    assert_eq!(r1, json!([1, 2, 4]));
+
+    // No match -> empty array
+    let r2 = eval_one("SELECT array_positions([1, 2, 3], 99) AS v FROM demo", &empty);
+    assert_eq!(r2, json!([]));
+
+    // String elements
+    let r3 = eval_one("SELECT array_positions(['a', 'b', 'a'], 'a') AS v FROM demo", &empty);
+    assert_eq!(r3, json!([0, 2]));
+
+    // Null input
+    let r4 = eval_one("SELECT array_positions(null, 1) AS v FROM demo", &empty);
+    assert_eq!(r4, json!([]));
+}
+
+#[test]
+fn test_acc_distinct_collect_and_alias() {
+    let mut parser = Parser::new("SELECT acc_distinct_collect(val) AS v FROM demo");
+    let stmt = parser.parse_select().expect("parse acc_distinct_collect");
+    let state = RuleState::default();
+
+    let step = |v: serde_json::Value| {
+        let mut r = HashMap::new();
+        r.insert("val".to_string(), v);
+        Evaluator::eval_select_stateful(&stmt, &r, &state)
+            .expect("eval")
+            .remove("v")
+            .unwrap()
+    };
+
+    assert_eq!(step(json!(1)), json!([1]));
+    assert_eq!(step(json!(2)), json!([1, 2]));
+    assert_eq!(step(json!(2)), json!([1, 2])); // duplicate ignored
+    assert_eq!(step(json!(3)), json!([1, 2, 3]));
+    assert_eq!(step(serde_json::Value::Null), json!([1, 2, 3])); // null ignored
+    assert_eq!(step(json!(1)), json!([1, 2, 3])); // duplicate ignored
+
+    // Test alias distinct_acc
+    let mut parser_alias = Parser::new("SELECT distinct_acc(val) AS v FROM demo");
+    let stmt_alias = parser_alias.parse_select().expect("parse distinct_acc");
+    let state_alias = RuleState::default();
+
+    let step_alias = |v: serde_json::Value| {
+        let mut r = HashMap::new();
+        r.insert("val".to_string(), v);
+        Evaluator::eval_select_stateful(&stmt_alias, &r, &state_alias)
+            .expect("eval")
+            .remove("v")
+            .unwrap()
+    };
+
+    assert_eq!(step_alias(json!("apple")), json!(["apple"]));
+    assert_eq!(step_alias(json!("banana")), json!(["apple", "banana"]));
+    assert_eq!(step_alias(json!("apple")), json!(["apple", "banana"]));
+}
+
+#[test]
+fn test_lead_with_ignore_null() {
+    let rows = vec![
+        rec(&[("temp", json!(10))]),
+        rec(&[("temp", serde_json::Value::Null)]),
+        rec(&[("temp", json!(20))]),
+        rec(&[("temp", json!(30))]),
+    ];
+
+    // ignoreNull = true (default): skips null row, so offset 1 from row 0 is 20
+    assert_eq!(
+        eval_agg_one("SELECT lead(temp, 1, -1, true) AS v FROM demo", &rows),
+        json!(20)
+    );
+
+    // ignoreNull = false: counts raw rows, so offset 1 is null
+    assert_eq!(
+        eval_agg_one("SELECT lead(temp, 1, -1, false) AS v FROM demo", &rows),
+        serde_json::Value::Null
+    );
+
+    // Out of bounds with default
+    assert_eq!(
+        eval_agg_one("SELECT lead(temp, 10, -1, true) AS v FROM demo", &rows),
+        json!(-1)
+    );
+}
+

@@ -65,6 +65,17 @@ Configure stream properties in the `WITH` clause:
 | `TIMESTAMP_FORMAT` | True | Default format string used to parse or convert datetime fields. |
 | `VERSION` | True | Version identifier for update management. Refer to [Versioning](#versioning). |
 | `TEMP` | True | Specifies whether the stream is temporary. Temporary streams reside in memory only. Default is `false`. Refer to [Temporary Streams](#temporary-streams). |
+| `BUFFER_FULL_POLICY` | True | Controls queue behavior when the buffer is full: `"block"` or `"dropOldest"`. Refer to [Buffer Full Policy](#buffer-full-policy). |
+
+### Buffer Full Policy
+
+When an input stream receives records faster than the rule can process them, the internal buffer fills up.
+Use the `BUFFER_FULL_POLICY` property to configure buffer behavior:
+
+- `"block"`: Pauses stream ingestion. The source waits until downstream processing frees buffer space.
+- `"dropOldest"`: Drops the oldest record from the queue to store the newly arrived record.
+
+If you specify any other value, the server rejects the request with a validation error.
 
 #### Example 1: MQTT Stream with Basic Types
 

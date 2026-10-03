@@ -81,22 +81,7 @@ tinygo build -o fibonacci.wasm -target wasm fibonacci.go
 
 ## 2. Plugin Installation
 
-Package your plugin into a `.zip` file with:
-- `fibonacci.wasm`: The compiled WebAssembly bytecode.
-- `fibonacci.json`: The plugin metadata file.
-
-Example `fibonacci.json`:
-
-```json
-{
-  "version": "v1.0.0",
-  "functions": [
-    "fib"
-  ]
-}
-```
-
-Install the plugin using the REST API:
+Install the plugin with the REST API using a file path or base64 bytecode:
 
 ```http
 POST http://localhost:9081/plugins/wasm
@@ -104,11 +89,54 @@ Content-Type: application/json
 
 {
   "name": "fibonacci",
-  "file": "file:///plugins/wasm/fibonacci.zip"
+  "file": "file:///plugins/wasm/fibonacci.wasm"
 }
 ```
 
-You can also place `.wasm` files directly into the `plugins/wasm` directory. `rekuiper` loads them automatically on startup.
+Or provide raw bytecode encoded with base64:
+
+```http
+POST http://localhost:9081/plugins/wasm
+Content-Type: application/json
+
+{
+  "name": "fibonacci",
+  "bytecode": "AGFzbQEAAAA..."
+}
+```
+
+The engine registers all exported functions as SQL functions automatically.
+
+### List WebAssembly Plugins
+
+Send a `GET` request to list all installed WebAssembly plugins:
+
+```http
+GET http://localhost:9081/plugins/wasm
+```
+
+Response sample:
+
+```json
+[
+  {
+    "name": "fibonacci",
+    "functions": ["fib"]
+  }
+]
+```
+
+### Delete a WebAssembly Plugin
+
+Send a `DELETE` request to remove an installed WebAssembly plugin:
+
+```http
+DELETE http://localhost:9081/plugins/wasm/fibonacci
+```
+
+The engine unloads the module and removes all registered functions immediately.
+
+You can also place `.wasm` files directly into the `plugins/wasm` directory. `rekuiper` loads them on startup.
 
 ---
 
