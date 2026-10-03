@@ -1,53 +1,69 @@
 # InfluxDB Sink
 
-The InfluxDB sink publishes output messages to an InfluxDB v1.x database.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The InfluxDB sink was implemented as a Go C-shared dynamic plugin (`.so`) in legacy eKuiper.
 
-## Properties
+**rekuiper is written in Rust and does NOT support or load Go dynamic plugins (`.so`).** The native InfluxDB v1.x plugin is not implemented in rekuiper.
 
-### Connection Properties
+**Supported Alternatives in rekuiper**:
+- **REST Sink (Direct HTTP API)**: Write points directly to the InfluxDB v1.x HTTP API (`/write?db=mydb`) using the built-in [REST Sink](../builtin/rest.md).
+- **SQL Sink**: Store timeseries points in PostgreSQL (with TimescaleDB) or SQLite using the built-in [SQL Sink](../builtin/sql.md).
+- **MQTT / Telegraf**: Publish telemetry via the built-in [MQTT Sink](../builtin/mqtt.md) to Telegraf, which writes to InfluxDB.
+:::
 
-| Property name | Optional | Description |
-|---|---|---|
-| addr | false | The network address of the InfluxDB server. |
-| username | true | The username for InfluxDB authentication. |
-| password | true | The password for InfluxDB authentication. |
-| database | false | The target InfluxDB database name. |
-| certificationPath | true | The certificate file path. Can be an absolute path or a relative path. For a relative path, the base path is the execution directory of the `kuiperd` command. For example, if you run `bin/kuiperd` from `/var/kuiper`, the base path is `/var/kuiper`. If you run `./kuiperd` from `/var/kuiper/bin`, the base path is `/var/kuiper/bin`. |
-| privateKeyPath | true | The private key file path. Can be an absolute path or a relative path, same as `certificationPath`. |
-| rootCaPath | true | The root CA file path. Can be an absolute path or a relative path, same as `certificationPath`. |
-| tlsMinVersion | true | Specifies the minimum TLS protocol version negotiated with the client. Accepted values: `tls1.0`, `tls1.1`, `tls1.2`, and `tls1.3`. Default: `tls1.2`. |
-| renegotiationSupport | true | Controls how the client handles server-initiated renegotiation requests. Supported values: `never`, `once`, or `freely`. Default: `never`. |
-| insecureSkipVerify | true | If `true`, TLS accepts any certificate presented by the server and any host name in that certificate. In this mode, TLS is vulnerable to man-in-the-middle attacks. Default: `false`. Use only with TLS connections. |
+## Direct HTTP Write Example with Built-in REST Sink
 
-### Write Options
-
-| Property name | Optional | Description |
-|---|---|---|
-| measurement | false | The InfluxDB measurement name. |
-| tags | true | Key-value tags to write, formatted as a JSON string such as `{"tag1":"value1"}`. Supports data template syntax such as <span v-pre>`{"tag1":"{{.temperature}}"}`</span>. |
-| fields | true | Array of field names to write, such as `["field1", "field2"]`. If omitted, rekuiper writes all fields selected by the SQL query. |
-| precision | true | The timestamp precision: `ns`, `us`, `ms`, or `s`. Default: `ms`. |
-| tsFieldName | true | The field name containing the record timestamp. If set, rekuiper uses the value from this field. Ensure that the timestamp value matches the configured `precision`. If omitted, rekuiper uses the current timestamp. |
-
-Other common sink properties, including batch settings, are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
-
-## Sample Usage
-
-The following rule filters records where temperature exceeds 50 and writes the results to InfluxDB:
+You can write data to InfluxDB v1.x without any plugins by using the built-in REST sink:
 
 ```json
 {
-  "id": "influx",
-  "sql": "SELECT * from demo_stream where temperature > 50",
+  "id": "rule_influx_rest",
+  "sql": "SELECT concat('cpu_usage,host=', host, ' value=', usage) AS line FROM sensor_stream",
   "actions": [
     {
-      "log": {},
+      "rest": {
+        "url": "http://influxdb.internal:8086/write?db=telemetry",
+        "method": "POST",
+        "dataTemplate": "{{.line}}",
+        "sendSingle": true
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Overview (Legacy Reference Only)
+
+In legacy eKuiper (Go), the InfluxDB sink wrote records directly to an InfluxDB v1.x database using Go client libraries. This section is preserved only as an architectural reference.
+
+### Legacy Configuration Properties
+
+| Property Name | Optional | Description |
+| :--- | :--- | :--- |
+| `addr` | False | Network address of the InfluxDB server (such as `http://127.0.0.1:8086`). |
+| `database` | False | Target InfluxDB database name. |
+| `measurement` | False | Target measurement name. |
+| `username` | True | Authentication username. |
+| `password` | True | Authentication password. |
+| `tags` | True | JSON mapping of tag key-values. |
+| `fields` | True | Array of field names to write. |
+| `precision` | True | Timestamp precision (`ns`, `us`, `ms`, `s`). |
+| `tsFieldName` | True | Field name containing the timestamp. |
+
+### Legacy Rule Example
+
+```json
+{
+  "id": "influx_legacy",
+  "sql": "SELECT * FROM demo_stream WHERE temperature > 50",
+  "actions": [
+    {
       "influx": {
         "addr": "http://192.168.100.245:8086",
-        "username": "",
-        "password": "",
-        "measurement": "test",
         "database": "databasename",
+        "measurement": "test",
         "tags": "{\"tag1\":\"value1\"}",
         "fields": ["humidity", "temperature", "pressure"]
       }

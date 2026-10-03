@@ -1,84 +1,59 @@
 # TDengine 3 Sink
 
-The TDengine 3 sink writes query results to a TDengine database.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The native `tdengine3` sink was a Cgo/Go dynamic plugin (`Tdengine3.so`) in legacy eKuiper that required the TDengine C client library (`libtaos.so`). **rekuiper is implemented in Rust and does not load Go dynamic plugins.**
 
-## Compile the Plugin
+To write data into TDengine from rekuiper, use the supported alternative below:
+- **[REST Sink](../builtin/rest.md)**: Send SQL insert statements directly to the TDengine RESTful connector API endpoint (`POST /rest/sql`).
+:::
 
-In the rekuiper source code root directory, run the following command:
+## Overview
 
-```shell
-go build -trimpath --buildmode=plugin -o plugins/sinks/Tdengine3.so extensions/sinks/tdengine3/*.go
-```
+The legacy TDengine sink used Cgo bindings to invoke the native client library for data ingestion into regular tables or super tables.
 
-Restart the rekuiper server to activate the plugin.
+## Recommended Alternative: TDengine REST Connector
 
-## Action Configuration
+TDengine provides a built-in RESTful service running on port `6041`. You can post standard SQL statements directly using rekuiper's built-in [REST Sink](../builtin/rest.md).
 
-TDengine requires a timestamp column in every table. You must specify the timestamp field name in `tsFieldName`. If your data contains timestamp values, set `provideTs` to `true`. If `provideTs` is `false`, TDengine generates the timestamp automatically.
+### Example REST Sink Action for TDengine
 
-| Property name | Type | Optional | Description |
-|---|---|---|---|
-| host | string | false | Database server hostname or IP address. Default: `localhost`. |
-| port | int | false | Database server port. Default: `6041`. |
-| user | string | false | Database username. Default: `root`. |
-| password | string | false | Database password. Default: `taosdata`. |
-| database | string | true | Target database name. |
-| table | string | true | Target table name. Supports [dynamic properties](../overview.md#dynamic-properties). |
-| fields | []string | false | Array of fields to insert. Both the result record and the database table must contain these fields. |
-| provideTs | bool | false | Controls whether the record provides a timestamp field value. Default: `false`. |
-| tsFieldName | string | true | Name of the timestamp column in the table. |
-| sTable | string | false | Name of the super table. Supports [dynamic properties](../overview.md#dynamic-properties). |
-| tagFields | []string | false | Result fields used as tag values in order. Required when `sTable` is specified. |
-
-Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
-
-## Sample Usage
-
-### Create a Stream
-
-```bash
-curl --location --request POST 'http://127.0.0.1:9081/streams' \
-  --header 'Content-Type:application/json' \
-  --data '{"sql":"create stream demoStream(time string, age BIGINT) WITH ( DATASOURCE = \"device/+/message\", FORMAT = \"json\");"}'
-```
-
-### Create a Rule
-
-```bash
-curl --location --request POST 'http://127.0.0.1:9081/rules' \
-  --header 'Content-Type:application/json' \
-  --data '{"id":"demoRule","sql":"SELECT * FROM demoStream;","actions":[{"tdengine3":{"provideTs":true,"tsFieldName":"time","user":"root","password":"taosdata","database":"dbName","table":"tableName","fields":["time","age"]}}]}'
-```
-
-### Write to a Fixed Table
+The following rule formats an `INSERT` statement and submits it to TDengine via HTTP:
 
 ```json
 {
-  "tdengine3": {
-    "host": "127.0.0.1",
-    "port": 6041,
-    "user": "root",
-    "password": "taosdata",
-    "database": "db",
-    "table": "table1",
-    "tsFieldName": "ts"
-  }
+  "id": "rule_tdengine_rest",
+  "sql": "SELECT deviceId, temperature, humidity, ts FROM sensorStream",
+  "actions": [
+    {
+      "rest": {
+        "url": "http://127.0.0.1:6041/rest/sql",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Basic cm9vdDp0YW9zZGF0YQ==",
+          "Content-Type": "text/plain"
+        },
+        "dataTemplate": "INSERT INTO test_db.meters USING test_db.meters_st TAGS('{{.deviceId}}') VALUES ({{.ts}}, {{.temperature}}, {{.humidity}})",
+        "sendSingle": true
+      }
+    }
+  ]
 }
 ```
 
-### Write to a Dynamic Table
+## Legacy Configuration Reference
 
-```json
-{
-  "tdengine3": {
-    "sendSingle": true,
-    "host": "hostname",
-    "port": 6041,
-    "user": "root",
-    "password": "taosdata",
-    "database": "db",
-    "table": "{{.tName}}",
-    "tsFieldName": "ts"
-  }
-}
-```
+For teams migrating legacy eKuiper rule configurations, the former properties are preserved below for reference:
+
+| Property Name | Type | Description |
+|---|---|---|
+| `host` | String | TDengine server hostname or IP address (default: `localhost`). |
+| `port` | Integer | TDengine server port (default: `6041`). |
+| `user` | String | Database username (default: `root`). |
+| `password` | String | Database password (default: `taosdata`). |
+| `database` | String | Target database name. |
+| `table` | String | Target table name. |
+| `fields` | Array | Field names to insert. |
+| `provideTs` | Boolean | Whether the record provides an explicit timestamp column. |
+| `tsFieldName` | String | Name of the timestamp column. |
+| `sTable` | String | Target super table name. |
+| `tagFields` | Array | Fields mapped to super table tag columns. |

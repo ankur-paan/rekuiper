@@ -1,7 +1,13 @@
 # Sink Extension
 
-::: tip Note
-Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run through [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved as a technical reference for legacy eKuiper installations.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Reference Only)
+Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. rekuiper is implemented in Rust and does not load Go dynamic plugins.
+
+Core sink connectors (MQTT, REST/HTTP, WebSocket, Kafka, SQL, Redis, File) are compiled directly into the rekuiper engine binary. To stream data to custom external destinations, use:
+- **[REST Sink](../../../guide/sinks/builtin/rest.md)** for HTTP webhooks or RESTful endpoints.
+- **[MQTT Sink](../../../guide/sinks/builtin/mqtt.md)** or **[Kafka Sink](../../../guide/sinks/plugin/kafka.md)** for message streaming.
+
+This guide is preserved as a technical reference for legacy eKuiper installations.
 :::
 
 Sinks forward processed stream data to external storage, message brokers, or network endpoints.

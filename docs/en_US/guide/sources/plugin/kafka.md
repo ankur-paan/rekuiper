@@ -1,52 +1,66 @@
 # Kafka Source Connector
 
+::: tip Status: Supported as Built-in Connector in rekuiper
+rekuiper includes a built-in Kafka source connector implemented directly in Rust with `rskafka`. You do not need to compile or deploy Go dynamic plugins (`.so` files).
+:::
+
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
 
 The Kafka source connector consumes streaming records from Apache Kafka topics into the rekuiper stream processing engine.
 
-## Configuration Overview
+## Configuration Properties
 
-Configure the Kafka source in `$rekuiper/etc/sources/kafka.yaml`:
+Configure the Kafka source in `$rekuiper/etc/sources/kafka.yaml` or directly in the stream definition properties:
 
-```yaml
-default:
-  brokers: "127.0.0.1:9091,127.0.0.1:9092"
-  groupID: ""
-  partition: 0
-  maxBytes: 1000000
-```
+| Property Name | Optional | Default Value | Description |
+|---|---|---|---|
+| `brokers` | True | `"127.0.0.1:9092"` | Comma-separated list of Kafka broker addresses (`host:port`). |
+| `topic` | True | Stream `DATASOURCE` | Target Kafka topic name. If omitted, rekuiper uses the stream `DATASOURCE`. |
+| `partition` | True | `0` | Specific topic partition index consumed by the connector. |
+| `groupId` | True | None | Kafka consumer group identifier. |
 
-Verify broker reachability before runtime using the [Connectivity Check API](../../../api/restapi/connection.md#connectivity-check).
-
-### Configuration Properties
-
-| Property Name | Optional | Description |
-|---|---|---|
-| `brokers` | False | Comma-separated list of Kafka broker addresses (`host:port`). |
-| `saslAuthType` | True | SASL authentication mechanism: `"none"`, `"plain"`, or `"scram"`. Default is `"none"`. |
-| `saslUserName` | True | SASL username credential. |
-| `password` | True | SASL password credential. |
-| `insecureSkipVerify` | True | Boolean. Set to `true` to skip TLS certificate verification. |
-| `certificationPath` | True | Path to client certificate file for mTLS. |
-| `privateKeyPath` | True | Path to client private key file for mTLS. |
-| `rootCaPath` | True | Path to Root CA certificate file. |
-| `certficationRaw` | True | Base64-encoded client certificate string. |
-| `privateKeyRaw` | True | Base64-encoded client private key string. |
-| `rootCARaw` | True | Base64-encoded Root CA certificate string. |
-| `maxBytes` | True | Maximum bytes fetched per Kafka message batch. Default is `1000000` (1 MB). |
-| `groupID` | True | Kafka consumer group identifier. |
-| `partition` | True | Specific partition index consumed by the connector. |
+rekuiper ingests messages from the configured topic partition and decodes JSON objects or arrays into stream records automatically.
 
 ## Create a Stream Source
 
-Define a stream using SQL DDL. Set `DATASOURCE` to the target Kafka topic:
+### Using In-line Stream DDL
+
+Define a stream pointing to a Kafka topic directly in SQL:
 
 ```sql
-CREATE STREAM kafka_stream () WITH (
+CREATE STREAM kafka_telemetry () WITH (
   TYPE = "kafka",
-  DATASOURCE = "telemetry_topic",
+  DATASOURCE = "sensor_events",
   FORMAT = "json"
 );
 ```
 
-For REST API and CLI management procedures, refer to [Streams Management with REST API](../../../api/restapi/streams.md) and [Streams Management with CLI](../../../api/cli/streams.md).
+### Using a Named Configuration Key
+
+Define broker connection settings in `$rekuiper/etc/sources/kafka.yaml`:
+
+```yaml
+production_cluster:
+  brokers: "10.0.1.10:9092,10.0.1.11:9092"
+  partition: 0
+  groupId: "rekuiper_analytics_consumer"
+```
+
+Reference the configuration key in your stream definition:
+
+```sql
+CREATE STREAM clusterStream () WITH (
+  TYPE = "kafka",
+  DATASOURCE = "production_telemetry",
+  CONF_KEY = "production_cluster",
+  FORMAT = "json"
+);
+```
+
+Run streaming queries against the Kafka topic:
+
+```sql
+SELECT deviceId, AVG(temperature) AS avgTemp
+FROM clusterStream
+GROUP BY deviceId, TumblingWindow(ss, 10);
+```

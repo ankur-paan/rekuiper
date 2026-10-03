@@ -1,6 +1,16 @@
 # Go SDK for Portable Plugins
 
-The Go SDK allows developers to build portable plugins in the Go programming language. It provides interfaces for source, sink, and function extensions, as well as runtime startup routines to manage the plugin lifecycle.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper SDK Only)
+The legacy Go SDK for portable plugins is unsupported in rekuiper because portable plugin execution is not implemented (HTTP 501).
+
+To write Go extensions for rekuiper:
+- **Compile to WebAssembly (Wasm)** using TinyGo and run with rekuiper's embedded [WebAssembly Runtime](../wasm/overview.md).
+- **Run as a gRPC/REST Microservice** and integrate using [External Services](../external/external_func.md).
+
+This SDK guide is preserved as a technical reference for legacy eKuiper installations.
+:::
+
+The Go SDK allowed developers to build portable plugins in Go in legacy eKuiper.
 
 ## Development
 

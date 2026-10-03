@@ -1,6 +1,12 @@
 # Execute OpenVINO Algorithms with Python Function Plugins
 
-[OpenVINO](https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html) is an open-source toolkit that optimizes and deploys machine learning models across heterogeneous hardware environments. It converts and accelerates models trained in frameworks such as TensorFlow, PyTorch, and Caffe.
+::: danger Status: Unsupported in rekuiper (Returns 501 Not Implemented)
+Portable Python plugins (`pynng`/IPC) are unsupported in rekuiper (`501 Not Implemented`).
+
+To execute OpenVINO model inference with rekuiper, deploy an external Python microservice (e.g. using FastAPI or gRPC) and invoke it using **[External Functions](../../extension/external/external_func.md)**.
+
+This tutorial is preserved as a technical reference for legacy eKuiper installations.
+:::
 
 This tutorial demonstrates how to build an edge defect detection system using rekuiper and OpenVINO, based on the [Intel Industrial Surface Defect Detection Reference Implementation](https://www.intel.com/content/www/us/en/developer/articles/reference-implementation/industrial-surface-defect-detection.html).
 

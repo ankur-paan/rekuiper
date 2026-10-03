@@ -1,6 +1,16 @@
 # Portable Plugins
 
-Portable plugins provide an out-of-process extension mechanism that supports multiple programming languages. Like native plugins, portable plugins support custom source, sink, and function extensions.
+::: danger Status: Unsupported in rekuiper (Returns 501 Not Implemented)
+Portable plugin execution is not implemented in rekuiper. All `/plugins/portables` REST API endpoints return HTTP `501 Not Implemented` (`"portable plugin execution is not implemented"`).
+
+To integrate multi-language custom logic (Python, Go, Node.js) with rekuiper, use the supported modern alternatives:
+- **[External Services](../external/external_func.md)**: Deploy your logic as an independent microservice communicating over standard **gRPC** or **REST**.
+- **[WebAssembly (Wasm)](../wasm/overview.md)**: Compile Go (TinyGo), Rust, C, or Zig into sandboxed `.wasm` modules executed by the embedded `wasmi` interpreter.
+
+This documentation is preserved as a technical reference for legacy eKuiper installations.
+:::
+
+Portable plugins provided an out-of-process extension mechanism that supported multiple programming languages in legacy eKuiper.
 
 ## Architecture
 

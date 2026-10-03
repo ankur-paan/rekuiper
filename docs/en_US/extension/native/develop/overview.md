@@ -1,7 +1,14 @@
 # Native Plugin Development
 
-::: tip Notice
-Go native `.so` dynamic plugin compilation is unsupported in the current version of rekuiper. rekuiper is implemented in Rust and uses portable plugin architectures through [WebAssembly (Wasm)](../../wasm/overview.md) and [External Services](../../external/external_func.md). This documentation is preserved as a technical reference for legacy eKuiper compatibility.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Reference Only)
+Go native `.so` dynamic plugin compilation is unsupported in rekuiper. rekuiper is implemented in Rust and does not load Go dynamic plugins.
+
+For modern extensibility, use:
+- **[WebAssembly (Wasm)](../../wasm/overview.md)** for in-process analytical and scalar functions.
+- **[External Services](../../external/external_func.md)** for microservices over gRPC or REST.
+- **[Script Functions](../../script/overview.md)** for runtime JavaScript functions.
+
+This documentation is preserved as a technical reference for migrating legacy eKuiper installations.
 :::
 
 In legacy eKuiper, developers used the Go plugin mechanism to build Source, Sink, and Function extensions:

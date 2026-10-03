@@ -1,15 +1,47 @@
 # Random Source Connector
 
-<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
-<span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
+::: warning Status: Replaced by Built-in Simulator Source in rekuiper
+The legacy `random` source plugin is replaced by the native **[Simulator Source Connector](../builtin/simulator.md)** in rekuiper.
 
-The Random source connector generates mock random events following a defined schema pattern.
+rekuiper includes a built-in Simulator source that generates synthetic sensor telemetry with configurable intervals, data payloads, and repetition loops without external plugins.
+:::
 
-Use this connector for functional testing, rule validation, and performance benchmarking.
+## Overview (Legacy Reference Only)
 
-## Configuration Overview
+In legacy eKuiper (Go), the Random source plugin generated synthetic mock records based on a pattern configuration. This page is preserved only as a reference for existing rules.
 
-Configure the connector in `$rekuiper/etc/sources/random.yaml`:
+## Recommended Migration: Use the Simulator Source
+
+To generate mock data in rekuiper, use the built-in `simulator` connector.
+
+### Define a Simulated Stream in rekuiper
+
+```sql
+CREATE STREAM mock_sensor_stream () WITH (
+  TYPE = "simulator"
+);
+```
+
+Configure mock payloads and emission intervals in `$rekuiper/etc/sources/simulator.yaml`:
+
+```yaml
+default:
+  data:
+    - temperature: 22.5
+      humidity: 50.2
+    - temperature: 25.1
+      humidity: 48.9
+  interval: 500
+  loop: true
+```
+
+For full details, refer to the [Simulator Source Connector](../builtin/simulator.md) documentation.
+
+---
+
+## Legacy Configuration (eKuiper Go)
+
+In legacy eKuiper, configuration was defined in `etc/sources/random.yaml`:
 
 ```yaml
 default:
@@ -18,43 +50,14 @@ default:
   pattern:
     count: 50
   deduplicate: 0
-
-ext:
-  interval: 100
-
-dedup:
-  interval: 100
-  deduplicate: 50
 ```
 
-### Configuration Parameters
-
-- `interval`: Generation interval in milliseconds between emitted events.
-- `seed`: Maximum integer value generated for randomized fields.
-- `pattern`: Schema template for generated records. In the example above, the connector generates records such as `{"count": 50}`.
-- `deduplicate`: Controls duplicate filtering:
-  - Positive integer $N$: Discards messages that duplicate any of the previous $N$ messages.
-  - `0`: Disables deduplication checks.
-  - Negative integer: Compares against all historical messages. Avoid negative values during long test runs to prevent high memory usage.
-
-## Custom Configurations
-
-Define custom configuration blocks in `random.yaml` to override global defaults:
-
-```yaml
-ext:
-  interval: 100
-```
-
-Reference the configuration with `CONF_KEY="ext"` when creating a stream:
+### Legacy Stream Definition
 
 ```sql
 CREATE STREAM demo () WITH (
   DATASOURCE = "demo",
   FORMAT = "JSON",
-  CONF_KEY = "ext",
   TYPE = "random"
 );
 ```
-
-For stream syntax and management details, refer to [Streams Management](../../streams/overview.md).

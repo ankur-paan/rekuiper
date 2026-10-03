@@ -169,28 +169,28 @@
           "collapsed": true,
           "children": [
             {
-              "title": "Running AI Algorithms with Native Plugin",
+              "title": "TensorFlow Lite with External Functions",
+              "path": "guide/ai/tensorflow_lite_external_function_tutorial"
+            },
+            {
+              "title": "AI with Native Plugins (Legacy Reference)",
               "path": "guide/ai/tensorflow_lite_tutorial"
             },
             {
-              "title": "Running AI Algorithms with Python Function Plugin",
+              "title": "TensorFlow Lite with Python (Legacy Reference)",
               "path": "guide/ai/python_tensorflow_lite_tutorial"
             },
             {
-              "title": "Running OpenVINO Algorithms with Python Function Plugin",
+              "title": "OpenVINO with Python (Legacy Reference)",
               "path": "guide/ai/python_openvino_tutorial"
             },
             {
-              "title": "Running AI Model with TensorFlow Lite Function Plugin",
+              "title": "TensorFlow Lite Plugin (Legacy Reference)",
               "path": "guide/ai/tensorflow_lite"
             },
             {
-              "title": "Running AI Model with Onnx Function Plugin",
+              "title": "ONNX Plugin (Legacy Reference)",
               "path": "guide/ai/onnx"
-            },
-            {
-              "title": "Running tensorflow_lite AI Model with External Function",
-              "path": "guide/ai/tensorflow_lite_external_function_tutorial"
             }
           ]
         }
@@ -259,28 +259,28 @@
               ]
             },
             {
-              "title": "Predefined Source Plugins",
+              "title": "Extended & Plugin Sources",
               "collapsed": true,
               "children": [
                 {
-                  "title": "SQL Source",
+                  "title": "SQL Source (Built-in)",
                   "path": "guide/sources/plugin/sql"
                 },
                 {
-                  "title": "Video Source",
-                  "path": "guide/sources/plugin/video"
+                  "title": "Kafka Source (Built-in)",
+                  "path": "guide/sources/plugin/kafka"
                 },
                 {
-                  "title": "Zero MQ Source",
-                  "path": "guide/sources/plugin/zmq"
-                },
-                {
-                  "title": "Random Source",
+                  "title": "Random Source (Replaced)",
                   "path": "guide/sources/plugin/random"
                 },
                 {
-                  "title": "Kafka Source",
-                  "path": "guide/sources/plugin/kafka"
+                  "title": "Video Source (Legacy/Unsupported)",
+                  "path": "guide/sources/plugin/video"
+                },
+                {
+                  "title": "ZeroMQ Source (Legacy/Unsupported)",
+                  "path": "guide/sources/plugin/zmq"
                 }
               ]
             }
@@ -345,36 +345,40 @@
               ]
             },
             {
-              "title": "Predefined Sink Plugins",
+              "title": "Extended & Plugin Sinks",
               "collapsed": true,
               "children": [
                 {
-                  "title": "SQL Sink",
+                  "title": "SQL Sink (Built-in)",
                   "path": "guide/sinks/plugin/sql"
                 },
                 {
-                  "title": "InfluxDB Sink",
+                  "title": "Kafka Sink (Built-in)",
+                  "path": "guide/sinks/plugin/kafka"
+                },
+                {
+                  "title": "InfluxDB Sink (Legacy/Unsupported)",
                   "path": "guide/sinks/plugin/influx"
                 },
                 {
-                  "title": "InfluxDBV2 Sink",
+                  "title": "InfluxDBV2 Sink (Legacy/Unsupported)",
                   "path": "guide/sinks/plugin/influx2"
                 },
                 {
-                  "title": "IoTDB Sink",
+                  "title": "IoTDB Sink (Legacy/Unsupported)",
                   "path": "guide/sinks/plugin/iotdb"
                 },
                 {
-                  "title": "Image Sink",
+                  "title": "TDengine 3 Sink (Legacy/Unsupported)",
+                  "path": "guide/sinks/plugin/tdengine3"
+                },
+                {
+                  "title": "Image Sink (Legacy/Unsupported)",
                   "path": "guide/sinks/plugin/image"
                 },
                 {
-                  "title": "ZeroMQ Sink",
+                  "title": "ZeroMQ Sink (Legacy/Unsupported)",
                   "path": "guide/sinks/plugin/zmq"
-                },
-                {
-                  "title": "Kafka Sink",
-                  "path": "guide/sinks/plugin/kafka"
                 }
               ]
             }
@@ -629,20 +633,32 @@
       "path": "mcp/overview"
     },
     {
-      "title": "Extension Develop Guide",
+      "title": "Extension Architecture",
       "path": "extension/overview",
       "children": [
         {
-          "title": "Native Plugin Develop",
+          "title": "WebAssembly (Wasm) Functions",
+          "path": "extension/wasm/overview"
+        },
+        {
+          "title": "External Services (gRPC / REST)",
+          "path": "extension/external/external_func"
+        },
+        {
+          "title": "Script Functions (JavaScript / Boa)",
+          "path": "extension/script/overview"
+        },
+        {
+          "title": "Native Plugins (Legacy Reference)",
           "path": "extension/native/overview",
           "collapsed": true,
           "children": [
             {
-              "title": "Develop",
+              "title": "Develop Overview",
               "path": "extension/native/develop/overview"
             },
             {
-              "title": "Plugin Develop Tutorial",
+              "title": "Plugin Tutorial",
               "path": "extension/native/develop/plugins_tutorial"
             },
             {
@@ -660,12 +676,12 @@
           ]
         },
         {
-          "title": "Portable Plugin Development",
+          "title": "Portable Plugins (Legacy Reference)",
           "path": "extension/portable/overview",
           "collapsed": true,
           "children": [
             {
-              "title": "GO SDK for Portable Plugin",
+              "title": "Go SDK for Portable Plugin",
               "path": "extension/portable/go_sdk"
             },
             {
@@ -675,16 +691,8 @@
           ]
         },
         {
-          "title": "Script Function",
-          "path": "extension/script/overview"
-        },
-        {
-          "title": "Plugin Management",
+          "title": "Plugin Management in UI",
           "path": "operation/manager-ui/plugins_in_manager"
-        },
-        {
-          "title": "Wasm Function",
-          "path": "extension/wasm/overview"
         }
       ]
     },

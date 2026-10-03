@@ -1,6 +1,16 @@
 # Python SDK for Portable Plugins
 
-The Python SDK allows developers to build portable plugins in Python. It provides interfaces for source, sink, and function extensions, as well as runtime entry points to manage the plugin lifecycle.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper SDK Only)
+The legacy Python SDK for portable plugins is unsupported in rekuiper because portable plugin execution is not implemented (HTTP 501).
+
+To integrate Python logic, machine learning models, or external processing into rekuiper:
+- **Run as a Python Service (FastAPI / gRPC)**: Expose endpoints and connect via rekuiper's [External Services](../external/external_func.md) or [REST Sink](../../guide/sinks/builtin/rest.md).
+- **Ingest via Message Broker**: Publish events over MQTT, RabbitMQ, or Kafka to rekuiper streams.
+
+This SDK guide is preserved as a technical reference for legacy eKuiper installations.
+:::
+
+The Python SDK allowed developers to build portable plugins in Python in legacy eKuiper.
 
 ## Prerequisites
 

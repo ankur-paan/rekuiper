@@ -1,8 +1,14 @@
 # Execute ONNX Models with the Function Plugin
 
-[Open Neural Network Exchange (ONNX)](https://onnx.ai/get-started.html) is an open format designed for machine learning models. It enables different machine learning frameworks to store model data and share inference formats.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The native ONNX function plugin was a Go dynamic plugin (`.so`) in legacy eKuiper. **rekuiper is implemented in Rust and does not load Go dynamic plugins.**
 
-By integrating rekuiper and ONNX, you can upload pre-trained ONNX models and invoke them in SQL rules to analyze streaming data. This tutorial demonstrates how to load and execute pre-trained ONNX models.
+To execute ONNX model inference from rekuiper SQL rules:
+- Deploy an ONNX Runtime server (e.g. Python FastAPI, Triton Inference Server, or C++ gRPC service).
+- Invoke the model in rekuiper SQL using **[External Functions](../../extension/external/external_func.md)**.
+
+This guide is preserved as a technical reference for legacy eKuiper installations.
+:::
 
 ## Prerequisites
 

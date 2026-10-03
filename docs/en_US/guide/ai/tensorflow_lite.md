@@ -1,8 +1,12 @@
 # Execute TensorFlow Lite Models with the Function Plugin
 
-[TensorFlow Lite](https://www.tensorflow.org/lite/guide) provides tools to execute machine learning models on mobile, embedded, and IoT devices with low latency and small binary sizes.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The native TensorFlow Lite function plugin was a Go dynamic plugin (`.so`) in legacy eKuiper. **rekuiper is implemented in Rust and does not load Go dynamic plugins.**
 
-By integrating rekuiper and TensorFlow Lite, you can upload pre-trained models and invoke them in SQL rules to analyze data streams. This tutorial demonstrates how to load and execute pre-trained TensorFlow Lite models.
+To execute TensorFlow Lite models with rekuiper, deploy an external gRPC or REST microservice and invoke it using **[External Functions](./tensorflow_lite_external_function_tutorial.md)**.
+
+This tutorial is preserved as a technical reference for legacy eKuiper installations.
+:::
 
 ## Prerequisites
 

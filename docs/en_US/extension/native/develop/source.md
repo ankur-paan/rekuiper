@@ -1,7 +1,14 @@
 # Source Extension
 
-::: tip Note
-Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run through [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This guide is preserved as a technical reference for legacy eKuiper installations.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Reference Only)
+Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. rekuiper is implemented in Rust and does not load Go dynamic plugins.
+
+Core source connectors (MQTT, HTTP Pull/Push, WebSocket, Kafka, SQL, Redis, File, Simulator) are compiled directly into the rekuiper engine binary. To ingest data from other systems, push events into:
+- **[HTTP Push Source](../../../guide/sources/builtin/httppush.md)** for RESTful ingestion.
+- **[MQTT Source](../../../guide/sources/builtin/mqtt.md)** for lightweight messaging.
+- **[WebSocket Source](../../../guide/sources/builtin/websocket.md)** for bidirectional streaming.
+
+This guide is preserved as a technical reference for legacy eKuiper installations.
 :::
 
 Sources ingest data from external systems into rekuiper streams and tables.

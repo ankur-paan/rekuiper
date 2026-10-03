@@ -1,6 +1,12 @@
 # Execute AI Algorithms with Python Function Plugins
+ 
+::: danger Status: Unsupported in rekuiper (Returns 501 Not Implemented)
+Portable Python plugins (`pynng`/IPC) are unsupported in rekuiper (`501 Not Implemented`).
 
-By integrating rekuiper and TensorFlow Lite, you can analyze streaming data by using pre-trained machine learning models. This tutorial explains how to build a Python portable plugin that classifies streaming images captured by edge devices.
+To execute Python TensorFlow Lite inference with rekuiper, wrap your inference code in a gRPC or REST microservice as documented in **[Execute TensorFlow Lite Models with External Functions](./tensorflow_lite_external_function_tutorial.md)**.
+
+This tutorial is preserved as a technical reference for legacy eKuiper installations.
+:::
 
 You can download the completed plugin archive and source code from the [eKuiper resources repository](https://github.com/lf-edge/ekuiper/blob/master/docs/resources/pyai.zip).
 

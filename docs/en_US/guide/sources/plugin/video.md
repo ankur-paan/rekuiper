@@ -1,63 +1,62 @@
 # Video Source Connector
 
-<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
-<span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The Video source connector was implemented as a Go plugin in legacy eKuiper.
 
-The Video source connector extracts image frames from video streams (such as RTSP streams) using the `ffmpeg` utility.
+**rekuiper is written in Rust and does NOT support or load Go dynamic plugins (`.so`).** The Video source connector is not implemented in rekuiper.
 
-## Configuration Overview
+**Supported Alternatives in rekuiper**:
+- Ingest image frame telemetry or computer vision results through the built-in [HTTP Push Source](../builtin/http_push.md) or [WebSocket Source](../builtin/websocket.md).
+- For edge computer vision workflows, extract RTSP frames in an external process (such as a GStreamer or OpenCV pipeline) and send inferred metadata to rekuiper via [MQTT](../builtin/mqtt.md).
+:::
 
-Configure the video connector in `$rekuiper/etc/sources/video.yaml`:
+## Overview (Legacy Reference Only)
 
-```yaml
-default:
-  url: http://localhost:8080
-  interval: 1000
-  codec: mjpeg
-  debugResp: false
+In legacy eKuiper (Go), the Video source connector extracted image frames from RTSP video streams by spawning an internal `ffmpeg` process. This page is preserved only as an architectural reference for users who migrate from legacy Go eKuiper deployments.
 
-ext:
-  interval: 10000
-```
+## Legacy Configuration Overview
 
-> [!NOTE]
-> Since version 2.4.0, the connector removes the `vformat` property and automatically uses `image2pipe` streaming mode. Existing `vformat` settings are ignored.
-
-### Configuration Parameters
-
-- `url`: Target streaming video URL (for example, `rtsp://localhost:8554/stream`).
-- `interval`: Frame extraction interval in milliseconds.
-- `codec`: Target video frame codec. Default is `'mjpeg'`.
-- `debugResp`: Boolean. Set to `true` to log FFmpeg process output for diagnostic debugging. Default is `false`.
-- `inputArgs`: Mapping of custom command arguments passed to FFmpeg input options (such as `-rtsp_transport` or `-fflags`).
-
-Example with custom FFmpeg input arguments:
+In legacy eKuiper, the connector configuration resided in `etc/sources/video.yaml`:
 
 ```yaml
 default:
   url: rtsp://localhost:8554/stream
-  inputArgs:
-    rtsp_transport: tcp
-    fflags: nobuffer
+  interval: 1000
+  codec: mjpeg
+  debugResp: false
 ```
 
-## Custom Configurations
+### Legacy Parameters
 
-Define custom configuration blocks in `video.yaml`:
+- `url`: Streaming video URL (such as `rtsp://localhost:8554/stream`).
+- `interval`: Frame extraction interval in milliseconds.
+- `codec`: Target video frame codec. Default was `'mjpeg'`.
+- `debugResp`: Boolean flag to log FFmpeg process output.
+- `inputArgs`: Map of custom arguments passed to the FFmpeg process.
 
-```yaml
-ext:
-  interval: 10000
-```
-
-Reference the configuration using `CONF_KEY="ext"`:
+## Legacy Stream Definition
 
 ```sql
-CREATE STREAM demo () WITH (
+CREATE STREAM video_stream () WITH (
   FORMAT = "JSON",
-  CONF_KEY = "ext",
+  CONF_KEY = "default",
   TYPE = "video"
 );
 ```
 
-For stream syntax and management details, refer to [Streams Management](../../streams/overview.md).
+## Migration Path to rekuiper
+
+In rekuiper, run your frame extraction or computer vision model in a dedicated container or process. Publish the extracted telemetry (for example, bounding boxes, counts, or classifications) directly to rekuiper via MQTT:
+
+```sql
+CREATE STREAM detection_stream (
+  camera_id STRING,
+  object_class STRING,
+  confidence FLOAT,
+  ts BIGINT
+) WITH (
+  TYPE = "mqtt",
+  DATASOURCE = "cameras/+/detections",
+  FORMAT = "json"
+);
+```

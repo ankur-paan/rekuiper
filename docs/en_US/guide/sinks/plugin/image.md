@@ -1,41 +1,38 @@
 # Image Sink
 
-The image sink saves binary image data to a specified directory.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The Image sink was implemented as a Go C-shared dynamic plugin (`.so`) in legacy eKuiper.
 
-## Compile and Deploy the Plugin
+**rekuiper is written in Rust and does NOT support or load Go dynamic plugins (`.so`).** The Image sink is not implemented in rekuiper.
 
-Run the following commands to compile and install the plugin:
+**Supported Alternatives in rekuiper**:
+- To write binary payloads to disk, use the built-in [File Sink](../builtin/file.md) with raw binary encoding.
+- To transmit image payloads across networks, use the built-in [REST Sink](../builtin/rest.md) or [MQTT Sink](../builtin/mqtt.md).
+:::
 
-```shell
-cd $rekuiper_src
-go build -trimpath --buildmode=plugin -o plugins/sinks/Image.so extensions/sinks/image/image.go
-cp plugins/sinks/Image.so $rekuiper_install/plugins/sinks
-```
+## Overview (Legacy Reference Only)
 
-Restart the rekuiper server to activate the plugin.
+In legacy eKuiper (Go), the Image sink stored raw binary image data (JPEG or PNG) to a local directory with automated age and count retention policies. This page is preserved only as an architectural reference for users who migrate from legacy Go eKuiper deployments.
 
-## Properties
+## Legacy Configuration Parameters
 
-| Property name | Optional | Description |
-|---|---|---|
-| path | false | Target directory path for saved images, such as `./tmp`. Do not use the same directory across different rules to prevent file deletion conflicts. |
-| format | false | Image file format: `jpeg` or `png`. |
-| maxAge | true | Maximum retention time in hours. Default: `72` (3 days). |
-| maxCount | true | Maximum number of stored image files. Default: `1000`. rekuiper deletes older images when this threshold is exceeded. Evaluated with `maxAge` by using logical OR. |
+| Property Name | Optional | Description |
+| :--- | :--- | :--- |
+| `path` | False | Target directory path for saved images (such as `./tmp`). |
+| `format` | False | Image format: `jpeg` or `png`. |
+| `maxAge` | True | Maximum retention time in hours. Default was `72`. |
+| `maxCount` | True | Maximum number of stored image files. Default was `1000`. |
 
-Other common sink properties are supported. Refer to [sink common properties](../overview.md#common-properties) for more information.
-
-## Usage Example
-
-The following rule receives images and saves them to the `/tmp` directory. If the image count exceeds 1000, rekuiper deletes the oldest images. If images remain for more than 72 hours, rekuiper deletes expired files:
+## Legacy Rule Example
 
 ```json
 {
-  "sql": "SELECT * from demo",
+  "id": "rule_legacy_image",
+  "sql": "SELECT * FROM camera_stream",
   "actions": [
     {
       "image": {
-        "path": "/tmp",
+        "path": "/tmp/images",
         "format": "png",
         "maxCount": 1000,
         "maxAge": 72
@@ -45,12 +42,21 @@ The following rule receives images and saves them to the `/tmp` directory. If th
 }
 ```
 
-## Demonstration
+## Migration Path to rekuiper
 
-The following example uses the `zmq` source to receive image data and the `image` sink to store images in the specified directory:
+In rekuiper, write binary records to disk using the built-in File sink or post them to an external storage service using the REST sink:
 
-```shell
-curl http://127.0.0.1:9081/streams -X POST -d '{"sql":"create stream s(image bytea) WITH (DATASOURCE = \"\", FORMAT = \"binary\", TYPE = \"zmq\");"}'
-
-curl http://127.0.0.1:9081/rules -X POST -d '{"id":"r","sql":"SELECT * FROM s","actions":[{"image":{"path":"./tmp","format":"png"}}]}'
+```json
+{
+  "id": "rule_image_file",
+  "sql": "SELECT image_bytes FROM camera_stream",
+  "actions": [
+    {
+      "file": {
+        "path": "data/images/capture.bin",
+        "format": "binary"
+      }
+    }
+  ]
+}
 ```

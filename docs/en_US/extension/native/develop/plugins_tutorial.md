@@ -1,7 +1,11 @@
 # Native Plugin Development Tutorial
 
-::: tip Note
-Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. High-performance connectors are compiled directly into the rekuiper Rust binary. Custom function extensions run through [WebAssembly (Wasm)](../../wasm/overview.md) or [External Services](../../external/external_func.md). This tutorial is preserved as a technical reference for legacy eKuiper installations.
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Reference Only)
+Go C-shared native `.so` dynamic plugins are unsupported in rekuiper. rekuiper is implemented in Rust and does not load Go dynamic plugins.
+
+For database sinks (such as MySQL or PostgreSQL), rekuiper provides a high-performance **[Built-in SQL Sink](../../../guide/sinks/plugin/sql.md)** and **[REST Sink](../../../guide/sinks/builtin/rest.md)**. For custom algorithms, use **[WebAssembly (Wasm)](../../wasm/overview.md)**.
+
+This tutorial is preserved as a technical reference for legacy eKuiper installations.
 :::
 
 ## Overview

@@ -1,153 +1,117 @@
 # SQL Source Connector
 
+::: tip Status: Supported as Built-in Connector in rekuiper
+rekuiper includes a built-in SQL source connector implemented directly in Rust with `sqlx`. You do not need to compile or deploy Go dynamic plugins (`.so` files).
+:::
+
 <span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
-<span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
 <span style="background:green;color:white;padding:1px;margin:2px">lookup table source</span>
 
-The SQL source connector queries relational databases periodically to ingest streaming data or to perform on-demand lookup joins.
+The SQL source connector queries relational databases periodically to ingest streaming records or perform on-demand lookup table joins.
 
-## Supported Database Drivers
+## Supported Database Engines
 
-The SQL source supports these database engines:
+rekuiper supports the following relational database engines natively:
 
-- MySQL
-- PostgreSQL
-- SQLite
-- Microsoft SQL Server (requires exposed port 1434)
-- Oracle Database
+- **PostgreSQL**: `postgres://username:password@hostname:5432/database` or `postgresql://...`
+- **SQLite**: `sqlite:///path/to/database.db` or in-memory `sqlite::memory:`
 
-## Configuration Overview
+## Configuration Properties
 
-Configure database connections in `$rekuiper/etc/sources/sql.yaml`:
+Configure database sources in `$rekuiper/etc/sources/sql.yaml` or directly in the stream definition properties:
 
-```yaml
-default:
-  interval: 10000
-  url: mysql://user:test@140.210.204.147/user?parseTime=true
-  internalSqlQueryCfg:
-    table: test
-    limit: 1
-    indexField: registerTime
-    indexValue: "2022-04-21 10:23:55"
-    indexFieldType: "DATETIME"
-    dateTimeFormat: "YYYY-MM-dd HH:mm:ss"
+| Property Name | Optional | Default Value | Description |
+|---|---|---|---|
+| `url` (or `dburl`) | False | None | Connection URL string for the target database. |
+| `interval` | True | `10000` | Polling interval in milliseconds between periodic queries. |
+| `internalSqlQueryCfg` | True | None | Structured query configuration with automatic index offsets. |
+| `templateSqlQueryCfg` | True | None | Custom SQL query template with parameter interpolation. |
 
-sqlserver_config:
-  url: sqlserver://username:password@140.210.204.147/testdb
-  internalSqlQueryCfg:
-    table: Student
-    limit: 10
-    indexField: id
-    indexValue: 1000
+### Structured Query Configuration (`internalSqlQueryCfg`)
 
-template_config:
-  templateSqlQueryCfg:
-    TemplateSql: "select * from table where entry_data > {{.entry_data}}"
-    indexField: entry_data
-    indexValue: "2022-04-13 06:22:32.233"
-    indexFieldType: "DATETIME"
-    dateTimeFormat: "YYYY-MM-dd HH:mm:ssSSS"
-```
+The `internalSqlQueryCfg` object generates polling queries automatically:
 
-Verify database connectivity using the [Connectivity Check API](../../../api/restapi/connection.md#connectivity-check).
+| Field Name | Type | Description |
+|---|---|---|
+| `table` | String | Target table name to query. |
+| `limit` | Integer | Maximum number of rows returned per polling query. |
+| `indexField` | String | Column name used as an offset watermark. |
+| `indexValue` | Any | Initial index offset value. Subsequent queries update the offset with retrieved maximum values. |
+| `indexFields` | Array | Array of composite index fields for multi-column ordering. |
 
-### Global Parameters
-
-- `interval`: Polling interval in milliseconds between queries.
-- `url`: Database connection URL.
-
-| Database | URL Example |
-|---|---|
-| MySQL | `mysql://user:test@140.210.204.147/user?parseTime=true` |
-| SQL Server | `sqlserver://username:password@140.210.204.147/testdb` |
-| PostgreSQL | `postgres://user:pass@localhost/dbname` |
-| SQLite | `sqlite:/path/to/file.db` |
-
-### Query Generation via internalSqlQueryCfg
-
-Configure structured query generation parameters:
-
-- `table`: Target table name.
-- `limit`: Maximum row count returned per query.
-- `indexField`: Column name used as an offset index.
-- `indexValue`: Initial index value. Subsequent queries update the offset with the maximum retrieved value.
-- `indexFieldType`: Data type of `indexField`. Set to `"DATETIME"` for temporal columns.
-- `dateTimeFormat`: Timestamp format string for datetime columns.
-- `indexFields`: Array of multiple index columns for composite ordering.
-
-#### Query Examples
-
-| Table | Limit | Index Field | Initial Value | Index Type | Date Format | Generated SQL Statement |
-|---|---|---|---|---|---|---|
-| `Student` | 10 | (None) | (None) | (None) | (None) | `SELECT * FROM Student LIMIT 10` |
-| `Student` | 10 | `stun` | `100` | (None) | (None) | `SELECT * FROM Student WHERE stun > 100 LIMIT 10` |
-| `Student` | 10 | `registerTime` | `"2022-04-21 10:23:55"` | `"DATETIME"` | `"YYYY-MM-dd HH:mm:ss"` | `SELECT * FROM Student WHERE registerTime > '2022-04-21 10:23:55' ORDER BY registerTime ASC LIMIT 10` |
-
-### Query Generation via templateSqlQueryCfg
-
-Use `templateSqlQueryCfg` to define custom SQL query templates:
-
-```yaml
-template_config:
-  templateSqlQueryCfg:
-    TemplateSql: "SELECT * FROM Student WHERE stun > {{.stun}} LIMIT 10"
-    indexField: stun
-    indexValue: 100
-```
-
-> [!NOTE]
-> Configure either `internalSqlQueryCfg` or `templateSqlQueryCfg`. If you configure both, `templateSqlQueryCfg` takes precedence.
-
-## Create a Stream Source
-
-Define a stream referencing the SQL configuration:
+When configured, rekuiper builds the following query structure automatically:
 
 ```sql
-CREATE STREAM demo () WITH (
-  DATASOURCE = "demo",
-  FORMAT = "JSON",
-  CONF_KEY = "template_config",
-  TYPE = "sql"
+SELECT * FROM <table> WHERE <indexField> > <indexValue> ORDER BY <indexField> ASC LIMIT <limit>
+```
+
+### Template Query Configuration (`templateSqlQueryCfg`)
+
+Use `templateSqlQueryCfg` when you need custom projection, custom joins, or specific filtering criteria:
+
+| Field Name | Type | Description |
+|---|---|---|
+| `templateSql` | String | Raw SQL statement containing <code v-pre>{{.fieldName}}</code> parameter markers. |
+| `indexField` | String | Column name supplying dynamic filter values. |
+| `indexValue` | Any | Initial value for the index field marker. |
+| `indexFields` | Array | Additional index columns for multi-field templates. |
+
+rekuiper substitutes parameter markers safely with literal SQL representations before query execution.
+
+::: note
+If you configure both `templateSqlQueryCfg` and `internalSqlQueryCfg`, `templateSqlQueryCfg` takes precedence.
+:::
+
+## Stream Source Configuration Example
+
+Create a streaming source that polls a table in PostgreSQL:
+
+```yaml
+# etc/sources/sql.yaml
+pg_stream_config:
+  url: "postgres://postgres:password@localhost:5432/telemetry"
+  interval: 5000
+  internalSqlQueryCfg:
+    table: "device_metrics"
+    limit: 100
+    indexField: "id"
+    indexValue: 0
+```
+
+Define the stream in rekuiper SQL:
+
+```sql
+CREATE STREAM deviceMetricsStream () WITH (
+  TYPE = "sql",
+  CONF_KEY = "pg_stream_config",
+  FORMAT = "json"
 );
 ```
 
-## Create a Lookup Table Source
+## Lookup Table Source Example
 
-Define a lookup table to query database records on demand:
+Define a lookup table to enrich streaming events with reference data from SQLite:
+
+```yaml
+# etc/sources/sql.yaml
+sqlite_lookup_config:
+  url: "sqlite:///var/data/metadata.db"
+  templateSqlQueryCfg:
+    templateSql: "SELECT name, location, department FROM devices WHERE device_id = {{.deviceId}}"
+    indexField: "deviceId"
+    indexValue: ""
+```
+
+Define the lookup table and execute a join query:
 
 ```sql
-CREATE TABLE alertTable () WITH (
-  DATASOURCE = "tableName",
-  CONF_KEY = "sqlite_config",
+CREATE TABLE deviceMetadata () WITH (
   TYPE = "sql",
+  CONF_KEY = "sqlite_lookup_config",
   KIND = "lookup"
 );
+
+SELECT stream.deviceId, stream.temperature, meta.location, meta.department
+FROM sensorStream AS stream
+LEFT JOIN deviceMetadata AS meta ON stream.deviceId = meta.deviceId;
 ```
-
-### Lookup Cache Configuration
-
-To reduce query latency, enable in-memory caching for lookup queries in `sql.yaml`:
-
-```yaml
-lookup:
-  cache: true
-  cacheTtl: 600
-  cacheMissingKey: true
-```
-
-- `cache`: Boolean. Enables or disables the lookup query cache.
-- `cacheTtl`: Cache entry time-to-live in seconds.
-- `cacheMissingKey`: Boolean. When set to `true`, caches missing key lookups to prevent duplicate database queries.
-
-### Query Pushdown with Template SQL
-
-Push calculations down to the database engine by defining custom lookup query templates:
-
-```yaml
-sqlite3_lookup:
-  url: example.db
-  templateSqlQueryCfg:
-    templateSql: "SELECT aid FROM t WHERE b2 + 1 = {{.bid}};"
-```
-
-The database executes the calculation <code v-pre>`b2 + 1 = {{.bid}}`</code> during the join query.

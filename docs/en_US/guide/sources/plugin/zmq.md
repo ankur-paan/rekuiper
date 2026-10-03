@@ -1,13 +1,24 @@
 # ZeroMQ Source Connector
 
-<span style="background:green;color:white;padding:1px;margin:2px">stream source</span>
-<span style="background:green;color:white;padding:1px;margin:2px">scan table source</span>
+::: danger Status: Unsupported in rekuiper (Legacy eKuiper Go Plugin)
+The ZeroMQ source was implemented as a Go C-shared dynamic plugin (`.so`) in legacy eKuiper.
 
-The ZeroMQ source connector subscribes to ZeroMQ publishers and channels messages into the rekuiper stream processing engine.
+**rekuiper is written in Rust and does NOT support or load Go dynamic plugins (`.so`).** The ZeroMQ source is not implemented in rekuiper.
 
-## Configuration Overview
+**Supported Alternatives in rekuiper**:
+- For publish-subscribe telemetry, use the built-in [MQTT Source](../builtin/mqtt.md).
+- For AMQP message ingestion, use the built-in [RabbitMQ Source](../builtin/rabbitmq.md).
+- For streaming network sockets, use the built-in [WebSocket Source](../builtin/websocket.md).
+- For high-throughput log streams, use the built-in [Kafka Source](../builtin/kafka.md).
+:::
 
-Configure the connector in `$rekuiper/etc/sources/zmq.yaml`:
+## Overview (Legacy Reference Only)
+
+In legacy eKuiper (Go), the ZeroMQ source connector subscribed to ZeroMQ publishers over TCP. This page is preserved only as an architectural reference for users who migrate from legacy Go eKuiper deployments.
+
+## Legacy Configuration Overview
+
+In legacy eKuiper, the connector configuration resided in `etc/sources/zmq.yaml`:
 
 ```yaml
 default:
@@ -17,20 +28,11 @@ test:
   server: tcp://127.0.0.1:5563
 ```
 
-### Configuration Parameters
+### Legacy Parameters
 
-- `server`: Target ZeroMQ publisher endpoint URL (such as `tcp://127.0.0.1:5563`).
+- `server`: ZeroMQ publisher endpoint URL (such as `tcp://127.0.0.1:5563`).
 
-## Custom Configurations
-
-Define custom configuration blocks in `zmq.yaml` to connect to distinct ZeroMQ endpoints:
-
-```yaml
-test:
-  server: tcp://127.0.0.1:5563
-```
-
-Reference the configuration using `CONF_KEY="test"`:
+## Legacy Stream Definition
 
 ```sql
 CREATE STREAM demo () WITH (
@@ -41,6 +43,18 @@ CREATE STREAM demo () WITH (
 );
 ```
 
-In this definition, `DATASOURCE` specifies the ZeroMQ subscription topic.
+## Migration Path to rekuiper
 
-For stream syntax and management details, refer to [Streams Management](../../streams/overview.md).
+To migrate streams that used ZeroMQ to rekuiper:
+
+1. Replace the `TYPE = "zmq"` stream definition with a supported built-in connector:
+
+```sql
+CREATE STREAM demo () WITH (
+  DATASOURCE = "demo/topic",
+  FORMAT = "JSON",
+  TYPE = "mqtt"
+);
+```
+
+2. If your producer emits data exclusively over ZeroMQ, forward the messages into MQTT or WebSocket using a proxy process outside rekuiper.
