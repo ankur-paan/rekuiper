@@ -1226,7 +1226,9 @@ impl Evaluator {
             }
         };
         if !args[0].is_null()
-            && !list.iter().any(|existing| Self::values_equal(existing, &args[0]))
+            && !list
+                .iter()
+                .any(|existing| Self::values_equal(existing, &args[0]))
         {
             list.push(args[0].clone());
             state

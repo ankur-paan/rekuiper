@@ -1309,7 +1309,14 @@ pub async fn execute_tool(
         }
 
         "list_wasm_plugins" => {
-            forward_request(client, base_url, reqwest::Method::GET, "/plugins/wasm", None).await
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::GET,
+                "/plugins/wasm",
+                None,
+            )
+            .await
         }
 
         "delete_wasm_plugin" => {

@@ -2559,15 +2559,24 @@ fn test_wasm_function_plugin_sql_execution() {
 fn test_array_positions() {
     let empty = rec(&[]);
     // Matching indexes: [1, 2, 2, 3, 2] target 2 -> [1, 2, 4] (0-based)
-    let r1 = eval_one("SELECT array_positions([1, 2, 2, 3, 2], 2) AS v FROM demo", &empty);
+    let r1 = eval_one(
+        "SELECT array_positions([1, 2, 2, 3, 2], 2) AS v FROM demo",
+        &empty,
+    );
     assert_eq!(r1, json!([1, 2, 4]));
 
     // No match -> empty array
-    let r2 = eval_one("SELECT array_positions([1, 2, 3], 99) AS v FROM demo", &empty);
+    let r2 = eval_one(
+        "SELECT array_positions([1, 2, 3], 99) AS v FROM demo",
+        &empty,
+    );
     assert_eq!(r2, json!([]));
 
     // String elements
-    let r3 = eval_one("SELECT array_positions(['a', 'b', 'a'], 'a') AS v FROM demo", &empty);
+    let r3 = eval_one(
+        "SELECT array_positions(['a', 'b', 'a'], 'a') AS v FROM demo",
+        &empty,
+    );
     assert_eq!(r3, json!([0, 2]));
 
     // Null input
@@ -2643,4 +2652,3 @@ fn test_lead_with_ignore_null() {
         json!(-1)
     );
 }
-
