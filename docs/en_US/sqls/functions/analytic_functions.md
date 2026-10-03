@@ -2,8 +2,8 @@
 
 > [!NOTE]
 > **Verification Status**: Tested and Verified against `rekuiper` engine with live telemetry stream load on **2026-10-01 17:58:30 UTC**.  
-> **Scorecard**: **15 Verified, 0 Unsupported, 0 Broken**:  
-> - **Verified (15)**: `lag`, `lead`, `latest`, `changed_col`, `had_changed`, `changed_cols`, `acc_sum`, `acc_max`, `acc_min`, `acc_count`, `acc_avg`, `acc_collect`, `acc_max_by`, `acc_min_by`, `acc_map_agg`.
+> **Scorecard**: **16 Verified, 0 Unsupported, 0 Broken**:  
+> - **Verified (16)**: `lag`, `lead`, `latest`, `changed_col`, `had_changed`, `changed_cols`, `acc_sum`, `acc_max`, `acc_min`, `acc_count`, `acc_avg`, `acc_collect`, `acc_distinct_collect`, `acc_max_by`, `acc_min_by`, `acc_map_agg`.
 
 Analytic functions use internal state to perform continuous data analysis. In stream processing, the system evaluates analytic functions before `WHERE` clause predicates. Therefore, `WHERE` filter conditions do not affect analytic function state.
 
@@ -78,7 +78,14 @@ lead(expr, [offset], [default value], [ignore null])
 
 Returns the result of `expr` from a future input row.
 
-`offset` defaults to 1, `default value` defaults to nil, and `ignore null` defaults to true. The offset counts qualifying future values. A value qualifies when its row satisfies `WHEN`, if present, and is not null when `ignore null` is true.
+**Parameters:**
+
+- `expr`: The expression to evaluate.
+- `offset` (optional): The lookahead count of qualifying values (default: 1).
+- `default_value` (optional): The value to return when no future row matches (default: nil).
+- `ignore_null` (optional): A boolean that controls if the function ignores null values during lookahead (default: true).
+
+The offset counts qualifying future values. A value qualifies when its row satisfies `WHEN`, if present, and is not null when `ignore null` is true.
 
 For example, `lead(expr, 2) OVER (WHEN condition)` returns the second future qualifying value. Rows that do not satisfy `WHEN` do not consume the offset.
 
@@ -408,6 +415,29 @@ acc_collect(a)
 ```
 
 Results: `[1]`, `[1,2]`, `[1,2,3]`.
+
+### ACC_DISTINCT_COLLECT
+
+```text
+acc_distinct_collect(expr)
+distinct_acc(expr)
+```
+
+Collects distinct non-nil expression results into an array.
+Preserves the order of first arrival.
+Ignores duplicate values.
+
+Example:
+
+```text
+acc_distinct_collect(a)
+```
+
+For input sequence `1`, `2`, `1`, `3`, the results are:
+- Event 1: `[1]`
+- Event 2: `[1, 2]`
+- Event 3: `[1, 2]`
+- Event 4: `[1, 2, 3]`
 
 ### ACC_MAX_BY
 

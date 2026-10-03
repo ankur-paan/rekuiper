@@ -67,6 +67,64 @@ pub fn get_prompt_definitions() -> Vec<PromptDefinition> {
                 required: true,
             }],
         },
+        PromptDefinition {
+            name: "generate_vector_search_rule".to_string(),
+            description: Some("Constructs an edge vector similarity search and anomaly detection rule using cosine_similarity, vector_l2, or vector_dot with real-time threshold filtering.".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "stream_name".to_string(),
+                    description: Some("The source stream providing incoming vector embeddings.".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "vector_field".to_string(),
+                    description: Some("Field name containing the embedding array (e.g. 'embedding', 'features').".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "similarity_threshold".to_string(),
+                    description: Some("Minimum similarity threshold between 0.0 and 1.0 (e.g. '0.85').".to_string()),
+                    required: true,
+                },
+            ],
+        },
+        PromptDefinition {
+            name: "configure_rabbitmq_pipeline".to_string(),
+            description: Some("Constructs an enterprise pipeline routing stream records to a RabbitMQ AMQP 0-9-1 exchange with durability and dynamic secret resolution.".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "rule_name".to_string(),
+                    description: Some("Name of the rule.".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "stream_name".to_string(),
+                    description: Some("Source stream name.".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "exchange".to_string(),
+                    description: Some("RabbitMQ exchange name (e.g. 'events.topic').".to_string()),
+                    required: true,
+                },
+            ],
+        },
+        PromptDefinition {
+            name: "create_wasm_plugin_rule".to_string(),
+            description: Some("Guides the registration of a compiled .wasm module and generates a streaming SQL query invoking the exported WebAssembly UDFs.".to_string()),
+            arguments: vec![
+                PromptArgument {
+                    name: "module_name".to_string(),
+                    description: Some("Unique name of the WASM module.".to_string()),
+                    required: true,
+                },
+                PromptArgument {
+                    name: "function_name".to_string(),
+                    description: Some("Exported function name inside the WASM module.".to_string()),
+                    required: true,
+                },
+            ],
+        },
     ]
 }
 
@@ -197,6 +255,97 @@ pub fn get_prompt_messages(name: &str, args: Option<Value>) -> Result<Vec<Prompt
                          3. Use `test_sql_expression` to test whether sample payloads satisfy the WHERE clause.\n\
                          4. If necessary, activate `start_rule_trace` to capture dropped payloads.",
                         rule_name
+                    )),
+                },
+            ])
+        }
+
+        "generate_vector_search_rule" => {
+            let stream = args
+                .as_ref()
+                .and_then(|a| a.get("stream_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("vector_stream");
+            let field = args
+                .as_ref()
+                .and_then(|a| a.get("vector_field"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("embedding");
+            let threshold = args
+                .as_ref()
+                .and_then(|a| a.get("similarity_threshold"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.85");
+
+            Ok(vec![
+                PromptMessage {
+                    role: "user".to_string(),
+                    content: ContentItem::text(format!(
+                        "Create a real-time vector similarity search rule for stream '{}':\n\
+                         1. Use `cosine_similarity({}, target_vector)` in the SELECT projection and WHERE filter.\n\
+                         2. Set the predicate `WHERE cosine_similarity({}, target_vector) >= {}`.\n\
+                         3. Test the query using `test_sql_expression` with mock embedding vectors.\n\
+                         4. Deploy using `create_rule`.",
+                        stream, field, field, threshold
+                    )),
+                },
+            ])
+        }
+
+        "configure_rabbitmq_pipeline" => {
+            let rule = args
+                .as_ref()
+                .and_then(|a| a.get("rule_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("rabbitmq_rule");
+            let stream = args
+                .as_ref()
+                .and_then(|a| a.get("stream_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("device_stream");
+            let exchange = args
+                .as_ref()
+                .and_then(|a| a.get("exchange"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("events.topic");
+
+            Ok(vec![
+                PromptMessage {
+                    role: "user".to_string(),
+                    content: ContentItem::text(format!(
+                        "Configure a RabbitMQ streaming pipeline for rule '{}' consuming from stream '{}':\n\
+                         1. Check the RabbitMQ sink action schema using `read_resource` ('rekuiper://schemas/rabbitmq').\n\
+                         2. Use dynamic secrets `{{{{env://RABBITMQ_URI}}}}` or `{{{{vault://secret/rabbitmq#url}}}}` for credentials.\n\
+                         3. Validate secret syntax using `validate_secrets`.\n\
+                         4. Create the rule sending events to exchange '{}'.",
+                        rule, stream, exchange
+                    )),
+                },
+            ])
+        }
+
+        "create_wasm_plugin_rule" => {
+            let module = args
+                .as_ref()
+                .and_then(|a| a.get("module_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("custom_wasm");
+            let func = args
+                .as_ref()
+                .and_then(|a| a.get("function_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("process");
+
+            Ok(vec![
+                PromptMessage {
+                    role: "user".to_string(),
+                    content: ContentItem::text(format!(
+                        "Configure a WebAssembly UDF streaming pipeline for module '{}' and function '{}':\n\
+                         1. Register the plugin using `register_wasm_plugin` (POST /plugins/wasm).\n\
+                         2. Verify the registration using `list_wasm_plugins`.\n\
+                         3. Construct a query calling `{}(...)` directly or `wasm_run('{}', '{}', ...)`. \n\
+                         4. Validate the SQL with `validate_sql`.",
+                        module, func, func, module, func
                     )),
                 },
             ])

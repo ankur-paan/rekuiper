@@ -11,7 +11,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // =========================================================================
         ToolDefinition {
             name: "validate_sql".to_string(),
-            description: "Zero-network offline AST parser and static validator for rekuiper streaming SQL dialect and DDL syntax. Performs lexical tokenization, grammar parsing, column projection validation, WHERE expression type-checking, window clause verification (TumblingWindow, HoppingWindow, SlidingWindow, SessionWindow, CountWindow), and DDL schema validation using native rekuiper-sql without connecting to or mutating a running daemon.".to_string(),
+            description: "Zero-network offline AST parser and static validator for rekuiper streaming SQL dialect and DDL syntax. Performs lexical tokenization, grammar parsing, column projection validation, WHERE expression type-checking, window clause verification (TumblingWindow, HoppingWindow, SlidingWindow, SessionWindow, CountWindow), and DDL schema validation (including BUFFER_FULL_POLICY='block|dropOldest', DATASOURCE, FORMAT) using native rekuiper-sql without connecting to or mutating a running daemon.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -25,17 +25,17 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "test_sql_expression".to_string(),
-            description: "In-memory streaming query simulator: parses and executes a rekuiper SQL SELECT query against a mock JSON event payload using the native rekuiper-sql evaluator. Tests projections, arithmetic expressions, string transformations, mathematical functions, array access, and WHERE filter predicates in isolation, returning either the transformed JSON projection or a filtered notification.".to_string(),
+            description: "In-memory streaming query simulator: parses and executes a rekuiper SQL SELECT query against a mock JSON event payload using the native rekuiper-sql evaluator. Tests vector similarity & distance functions (cosine_similarity, vector_l2, vector_dot, vector_match), array functions (array_positions, array_contains, deduplicate), streaming stateful analytics (lead, lag, acc_distinct_collect, distinct_acc, had_changed), mathematical transformations, and WHERE filter predicates in isolation, returning either the transformed JSON projection or a filtered notification.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "The rekuiper SQL SELECT query containing the projection expressions and optional WHERE filter clause. Example: 'SELECT abs(vibe) AS v, upper(status) AS s, temp * 1.8 + 32.0 AS fahrenheit FROM demo WHERE temp > 20'"
+                        "description": "The rekuiper SQL SELECT query containing the projection expressions and optional WHERE filter clause. Example: 'SELECT cosine_similarity(features, [0.1, 0.4, 0.9]) AS sim FROM demo WHERE cosine_similarity(features, [0.1, 0.4, 0.9]) > 0.85'"
                     },
                     "data": {
                         "type": "object",
-                        "description": "Mock input record represented as a JSON key-value object containing the simulated telemetry fields. Example: {\"vibe\": -4.2, \"status\": \"online\", \"temp\": 25.5}"
+                        "description": "Mock input record represented as a JSON key-value object containing the simulated telemetry fields. Example: {\"features\": [0.12, 0.39, 0.88], \"status\": \"online\"}"
                     }
                 },
                 "required": ["sql", "data"]
@@ -660,6 +660,68 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["method", "endpoint"]
             }),
         },
+
+        // =========================================================================
+        // 11. WebAssembly (Wasm) Plugin Management & Dynamic Secrets
+        // =========================================================================
+        ToolDefinition {
+            name: "register_wasm_plugin".to_string(),
+            description: "Registers a WebAssembly (.wasm) plugin module into rekuiper's embedded Wasm runtime via POST /plugins/wasm. The module's exported functions immediately become callable as native UDFs inside streaming SQL queries or via wasm_run(module, func, ...).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique module identifier for the WASM plugin (e.g. 'math_wasm', 'anomaly_detector')."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Filesystem path or file URL to the compiled .wasm binary file on the server (e.g. '/plugins/wasm/math.wasm')."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional human-readable description of the plugin and its exported UDFs."
+                    }
+                },
+                "required": ["name", "path"]
+            }),
+        },
+        ToolDefinition {
+            name: "list_wasm_plugins".to_string(),
+            description: "Lists all installed WebAssembly (.wasm) plugins and their exported function signatures registered in the rekuiper daemon via GET /plugins/wasm.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolDefinition {
+            name: "delete_wasm_plugin".to_string(),
+            description: "Unregisters and unloads a WebAssembly (.wasm) plugin module from the rekuiper daemon via DELETE /plugins/wasm/{name}.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The unique name of the WASM plugin module to remove."
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+        ToolDefinition {
+            name: "validate_secrets".to_string(),
+            description: "Statically scans and validates dynamic secret template expressions (such as {{vault://path/to/key}} or {{env://VAR_NAME}}) in pipeline configs, connector properties, or sink options without exposing sensitive credentials.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Configuration string, JSON snippet, or template to scan for dynamic secret references."
+                    }
+                },
+                "required": ["text"]
+            }),
+        },
     ]
 }
 
@@ -1232,6 +1294,72 @@ pub async fn execute_tool(
 
             let body = args.get("body").cloned();
             forward_request(client, base_url, method, endpoint, body).await
+        }
+
+        // --- 11. WebAssembly & Dynamic Secrets Tools ---
+        "register_wasm_plugin" => {
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::POST,
+                "/plugins/wasm",
+                Some(args),
+            )
+            .await
+        }
+
+        "list_wasm_plugins" => {
+            forward_request(
+                client,
+                base_url,
+                reqwest::Method::GET,
+                "/plugins/wasm",
+                None,
+            )
+            .await
+        }
+
+        "delete_wasm_plugin" => {
+            let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+                return CallToolResult::err("Missing required string parameter: 'name'");
+            };
+            let path = format!("/plugins/wasm/{}", name);
+            forward_request(client, base_url, reqwest::Method::DELETE, &path, None).await
+        }
+
+        "validate_secrets" => {
+            let Some(text) = args.get("text").and_then(|v| v.as_str()) else {
+                return CallToolResult::err("Missing required string parameter: 'text'");
+            };
+            let mut secrets_found = Vec::new();
+            let mut errors = Vec::new();
+            let mut remaining = text;
+            while let Some(start_idx) = remaining.find("{{") {
+                let rest = &remaining[start_idx + 2..];
+                if let Some(end_idx) = rest.find("}}") {
+                    let content = rest[..end_idx].trim();
+                    if content.starts_with("vault://") || content.starts_with("env://") {
+                        secrets_found.push(content.to_string());
+                    } else {
+                        errors.push(format!(
+                            "Unrecognized secret provider in template '{{{{{}}}}}': must start with 'vault://' or 'env://'",
+                            content
+                        ));
+                    }
+                    remaining = &rest[end_idx + 2..];
+                } else {
+                    errors.push("Unterminated secret template delimiter '{{'".to_string());
+                    break;
+                }
+            }
+            let valid = errors.is_empty();
+            let res = json!({
+                "valid": valid,
+                "secret_references_count": secrets_found.len(),
+                "secret_references": secrets_found,
+                "errors": errors,
+            });
+            CallToolResult::ok(serde_json::to_string_pretty(&res).unwrap_or_default())
         }
 
         other => CallToolResult::err(format!("Tool '{}' not recognized", other)),

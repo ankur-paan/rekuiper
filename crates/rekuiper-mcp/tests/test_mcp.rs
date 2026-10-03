@@ -100,6 +100,12 @@ async fn test_tools_list() {
     assert!(tool_names.contains(&"get_engine_metrics"));
     assert!(tool_names.contains(&"ping_engine"));
     assert!(tool_names.contains(&"execute_rekuiper_api"));
+
+    // WASM & Secrets tools
+    assert!(tool_names.contains(&"register_wasm_plugin"));
+    assert!(tool_names.contains(&"list_wasm_plugins"));
+    assert!(tool_names.contains(&"delete_wasm_plugin"));
+    assert!(tool_names.contains(&"validate_secrets"));
 }
 
 #[tokio::test]
@@ -278,16 +284,35 @@ async fn test_resources_and_prompts() {
     assert!(uris.contains(&"rekuiper://connections"));
     assert!(uris.contains(&"rekuiper://udfs"));
     assert!(uris.contains(&"rekuiper://plugins"));
+    assert!(uris.contains(&"rekuiper://plugins/wasm"));
     assert!(uris.contains(&"rekuiper://configs"));
     assert!(uris.contains(&"rekuiper://metrics"));
     assert!(uris.contains(&"rekuiper://metadata/sources"));
     assert!(uris.contains(&"rekuiper://metadata/sinks"));
     assert!(uris.contains(&"rekuiper://metadata/functions"));
+    assert!(uris.contains(&"rekuiper://schemas/rabbitmq"));
+    assert!(uris.contains(&"rekuiper://schemas/parquet"));
+    assert!(uris.contains(&"rekuiper://schemas/edgex"));
+
+    // Read static schema resource
+    let req_read_res = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(31)),
+        method: "resources/read".to_string(),
+        params: Some(json!({
+            "uri": "rekuiper://schemas/rabbitmq"
+        })),
+    };
+    let resp_read = handler.handle_request(req_read_res).await.unwrap();
+    let res_read = resp_read.result.unwrap();
+    let text = res_read["contents"][0]["text"].as_str().unwrap();
+    assert!(text.contains("amqp://"));
+    assert!(text.contains("rabbitmq"));
 
     // Prompts list
     let req_prompt = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
-        id: Some(json!(31)),
+        id: Some(json!(32)),
         method: "prompts/list".to_string(),
         params: None,
     };
@@ -304,4 +329,94 @@ async fn test_resources_and_prompts() {
     assert!(prompts.contains(&"generate_iot_alert_rule"));
     assert!(prompts.contains(&"create_end_to_end_pipeline"));
     assert!(prompts.contains(&"diagnose_data_drop"));
+    assert!(prompts.contains(&"generate_vector_search_rule"));
+    assert!(prompts.contains(&"configure_rabbitmq_pipeline"));
+    assert!(prompts.contains(&"create_wasm_plugin_rule"));
+}
+
+#[tokio::test]
+async fn test_vector_similarity_and_array_and_secret_tools() {
+    let handler = McpHandler::new("http://127.0.0.1:9081");
+
+    // 1. Vector similarity test_sql_expression
+    let req_vector = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(40)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "test_sql_expression",
+            "arguments": {
+                "sql": "SELECT cosine_similarity(v1, v2) AS sim, vector_dot(v1, v2) AS dot FROM demo",
+                "data": {
+                    "v1": [1.0, 0.0],
+                    "v2": [1.0, 0.0]
+                }
+            }
+        })),
+    };
+    let resp_vector = handler.handle_request(req_vector).await.unwrap();
+    let res_vector = resp_vector.result.unwrap();
+    assert_eq!(res_vector["isError"], false);
+    let text = res_vector["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("\"sim\": 1.0"));
+    assert!(text.contains("\"dot\": 1.0"));
+
+    // 2. Array positions test_sql_expression
+    let req_array = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(41)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "test_sql_expression",
+            "arguments": {
+                "sql": "SELECT array_positions(arr, 2) AS pos FROM demo",
+                "data": {
+                    "arr": [1, 2, 2, 3, 2]
+                }
+            }
+        })),
+    };
+    let resp_array = handler.handle_request(req_array).await.unwrap();
+    let res_array = resp_array.result.unwrap();
+    assert_eq!(res_array["isError"], false);
+    let text_arr = res_array["content"][0]["text"].as_str().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(text_arr).unwrap();
+    assert_eq!(parsed["output"]["pos"], json!([1, 2, 4]));
+
+    // 3. validate_secrets valid
+    let req_secret_valid = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(42)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "validate_secrets",
+            "arguments": {
+                "text": "amqp://{{vault://secret/creds#user}}:{{env://RABBITMQ_PASS}}@localhost:5672/"
+            }
+        })),
+    };
+    let resp_sec = handler.handle_request(req_secret_valid).await.unwrap();
+    let res_sec = resp_sec.result.unwrap();
+    assert_eq!(res_sec["isError"], false);
+    let sec_text = res_sec["content"][0]["text"].as_str().unwrap();
+    assert!(sec_text.contains("\"valid\": true"));
+    assert!(sec_text.contains("\"secret_references_count\": 2"));
+
+    // 4. validate_secrets invalid provider
+    let req_secret_invalid = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(43)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "validate_secrets",
+            "arguments": {
+                "text": "password: {{unknown://creds/pass}}"
+            }
+        })),
+    };
+    let resp_sec_inv = handler.handle_request(req_secret_invalid).await.unwrap();
+    let res_sec_inv = resp_sec_inv.result.unwrap();
+    let sec_inv_text = res_sec_inv["content"][0]["text"].as_str().unwrap();
+    assert!(sec_inv_text.contains("\"valid\": false"));
+    assert!(sec_inv_text.contains("Unrecognized secret provider"));
 }

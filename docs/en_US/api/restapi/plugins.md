@@ -227,6 +227,76 @@ Content-Type: application/json
 }
 ```
 
+## WebAssembly (Wasm) Plugins
+
+WebAssembly plugins provide sandboxed User-Defined Functions without server restarts.
+
+### Register a WebAssembly Plugin
+
+Use this endpoint to register a WebAssembly module:
+
+```http
+POST http://localhost:9081/plugins/wasm
+Content-Type: application/json
+```
+
+Request with a local file path:
+
+```json
+{
+  "name": "fibonacci",
+  "file": "file:///plugins/wasm/fibonacci.wasm"
+}
+```
+
+Request with base64 bytecode:
+
+```json
+{
+  "name": "fibonacci",
+  "bytecode": "AGFzbQEAAAA..."
+}
+```
+
+Response sample (201 Created):
+
+```json
+{
+  "name": "fibonacci",
+  "functions": ["fib"]
+}
+```
+
+### Show WebAssembly Plugins
+
+Use this endpoint to list all installed WebAssembly modules:
+
+```http
+GET http://localhost:9081/plugins/wasm
+```
+
+Response sample:
+
+```json
+[
+  {
+    "name": "fibonacci",
+    "functions": ["fib"]
+  }
+]
+```
+
+### Delete a WebAssembly Plugin
+
+Use this endpoint to unload and remove a WebAssembly module:
+
+```http
+DELETE http://localhost:9081/plugins/wasm/{name}
+```
+
+The engine removes all exported functions immediately.
+No server restart is necessary.
+
 ## Prebuilt Plugins (Legacy Compatibility)
 
 > [!NOTE]

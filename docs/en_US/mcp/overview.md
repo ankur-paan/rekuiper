@@ -77,7 +77,7 @@ When the rekuiper daemon runs inside WSL2 or Docker:
 
 ## Tool Capabilities
 
-`rekuiper-mcp` exposes 42 tools across six operational categories:
+`rekuiper-mcp` exposes 46 tools across seven operational categories:
 
 ### 1. SQL Intelligence and Offline Simulation
 
@@ -85,15 +85,15 @@ These tools use the embedded `rekuiper-sql` parser and evaluation engine in memo
 
 | Tool | Purpose |
 | :--- | :--- |
-| `validate_sql` | Parses SQL abstract syntax trees, checks keywords, and validates streaming DDL syntax offline. |
-| `test_sql_expression` | Executes queries and projections against mock JSON event payloads in memory. |
+| `validate_sql` | Parses SQL abstract syntax trees, checks keywords, and validates streaming DDL syntax (including `BUFFER_FULL_POLICY`) offline. |
+| `test_sql_expression` | Executes queries against mock JSON event payloads in memory, supporting vector search (`cosine_similarity`), array operations (`array_positions`), and stateful analytics (`acc_distinct_collect`, `lead`). |
 | `explain_sql` | Deconstructs a SQL query into sources, projections, joins, window clauses, and filters. |
 
 #### Example: Offline Simulation
 
 Ask your AI assistant:
 
-> "Test if `SELECT temperature * 1.8 + 32 AS temp_f FROM stream WHERE temperature > 20` works with payload `{\"temperature\": 25.0}`."
+> "Test if `SELECT cosine_similarity(embedding, [0.1, 0.4, 0.9]) AS sim FROM demo WHERE cosine_similarity(embedding, [0.1, 0.4, 0.9]) > 0.85` matches payload `{\"embedding\": [0.12, 0.39, 0.88]}`."
 
 The assistant invokes `test_sql_expression` and evaluates the output in memory without sending data to an external broker.
 
@@ -146,7 +146,16 @@ The assistant invokes `test_sql_expression` and evaluates the output in memory w
 | `create_javascript_udf` | Registers a custom scalar JavaScript function for streaming SQL queries. |
 | `delete_javascript_udf` | Deletes a JavaScript UDF. |
 
-### 6. Health and Universal REST Proxy
+### 6. WebAssembly (WASM) and Dynamic Secrets Management
+
+| Tool | Purpose |
+| :--- | :--- |
+| `register_wasm_plugin` | Registers a compiled `.wasm` module via `POST /plugins/wasm` with automatic UDF registration. |
+| `list_wasm_plugins` | Lists all installed WebAssembly plugins and their exported function signatures. |
+| `delete_wasm_plugin` | Unloads and deletes a WebAssembly module via `DELETE /plugins/wasm/{name}`. |
+| `validate_secrets` | Offline syntax validator for dynamic secret templates (<span v-pre>`{{vault://...}}`</span>, <span v-pre>`{{env://...}}`</span>). |
+
+### 7. Health and Universal REST Proxy
 
 | Tool | Purpose |
 | :--- | :--- |
@@ -158,7 +167,7 @@ The assistant invokes `test_sql_expression` and evaluates the output in memory w
 
 ## Live Resources
 
-`rekuiper-mcp` exposes engine state as readable MCP resources using `rekuiper://` URIs:
+`rekuiper-mcp` exposes engine state and schemas as readable MCP resources using `rekuiper://` URIs:
 
 | Resource URI | Content Description |
 | :--- | :--- |
@@ -167,10 +176,16 @@ The assistant invokes `test_sql_expression` and evaluates the output in memory w
 | `rekuiper://tables` | Registered lookup and dimension tables. |
 | `rekuiper://connections` | Active connection pool definitions. |
 | `rekuiper://udfs` | Custom JavaScript UDF definitions. |
+| `rekuiper://plugins` | Installed native and portable plugins. |
+| `rekuiper://plugins/wasm` | Installed WebAssembly plugins and exported UDF signatures. |
+| `rekuiper://configs` | Active global server configuration parameters. |
 | `rekuiper://metrics` | Engine telemetry, memory footprint, and throughput rates. |
 | `rekuiper://metadata/sources` | Catalog of available source connectors. |
 | `rekuiper://metadata/sinks` | Catalog of available sink connectors. |
 | `rekuiper://metadata/functions` | Catalog of built-in SQL mathematical, string, and window functions. |
+| `rekuiper://schemas/rabbitmq` | Configuration template for RabbitMQ AMQP 0-9-1 source and sink actions. |
+| `rekuiper://schemas/parquet` | Configuration template for Apache Parquet columnar sink actions. |
+| `rekuiper://schemas/edgex` | Configuration template for EdgeX Foundry dual-port listening (59880 / 59881). |
 
 ## Specialized Prompts
 
@@ -181,6 +196,9 @@ The assistant invokes `test_sql_expression` and evaluates the output in memory w
 - `generate_iot_alert_rule`: Generates complete industrial monitoring rules with deadbanding, windowing, and alert actions.
 - `create_end_to_end_pipeline`: Interactive pipeline generator linking streams, lookup tables, and multi-sink fanout.
 - `diagnose_data_drop`: Identifies discrepancies between source ingestion rates and sink output rates.
+- `generate_vector_search_rule`: Constructs an edge vector similarity search and anomaly detection rule using `cosine_similarity`.
+- `configure_rabbitmq_pipeline`: Constructs an enterprise pipeline routing stream records to RabbitMQ AMQP 0-9-1.
+- `create_wasm_plugin_rule`: Guides registration and stream query generation for compiled WebAssembly UDF modules.
 
 ## Build from Source
 

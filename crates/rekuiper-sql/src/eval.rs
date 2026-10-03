@@ -889,6 +889,8 @@ impl Evaluator {
                 | "acc_sum"
                 | "acc_avg"
                 | "acc_collect"
+                | "acc_distinct_collect"
+                | "distinct_acc"
         )
     }
 
@@ -923,6 +925,9 @@ impl Evaluator {
             "acc_sum" => Self::acc_sum(state, &state_key, args),
             "acc_avg" => Self::acc_avg(state, &state_key, args),
             "acc_collect" => Self::acc_collect(state, &state_key, args),
+            "acc_distinct_collect" | "distinct_acc" => {
+                Self::acc_distinct_collect(state, &state_key, args)
+            }
             _ => Value::Null,
         }
     }
@@ -1206,6 +1211,34 @@ impl Evaluator {
         Value::Array(list)
     }
 
+    /// `acc_distinct_collect(val)` / `distinct_acc(val)`: accumulates unique non-null
+    /// expression values into a running array, preserving insertion order.
+    fn acc_distinct_collect(state: &RuleState, state_key: &str, args: &[Value]) -> Value {
+        if args.is_empty() {
+            return Value::Null;
+        }
+        let mut list: Vec<Value> = {
+            let guard = state.state.read();
+            if let Some(Value::Array(arr)) = guard.get(state_key) {
+                arr.clone()
+            } else {
+                Vec::new()
+            }
+        };
+        if !args[0].is_null()
+            && !list
+                .iter()
+                .any(|existing| Self::values_equal(existing, &args[0]))
+        {
+            list.push(args[0].clone());
+            state
+                .state
+                .write()
+                .insert(state_key.to_string(), Value::Array(list.clone()));
+        }
+        Value::Array(list)
+    }
+
     fn agg_last_agg_hit_count(_records: &[HashMap<String, Value>]) -> Value {
         static COUNT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
         let cur = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1381,12 +1414,13 @@ impl Evaluator {
             .unwrap_or(Value::Null)
     }
 
-    /// `lead(col, [offset], [default])`: forward lookup within the window
+    /// `lead(col, [offset], [default], [ignoreNull])`: forward lookup within the window
     /// batch. The single output row represents the whole window, so `offset`
     /// (default 1) counts forward from the first row (0-based); out-of-range
-    /// offsets yield `default` (default `Null`).
+    /// offsets yield `default` (default `Null`). `ignoreNull` (default `true`)
+    /// skips null records while counting forward.
     fn agg_lead(args: &[Expr], records: &[HashMap<String, Value>]) -> Value {
-        if args.is_empty() || args.len() > 3 {
+        if args.is_empty() || args.len() > 4 {
             return Value::Null;
         }
         if matches!(args[0], Expr::Wildcard) {
@@ -1410,10 +1444,35 @@ impl Evaluator {
         if offset < 0 {
             return default;
         }
-        records
-            .get(offset as usize)
-            .map(|rec| Self::eval_val(&args[0], rec))
-            .unwrap_or(default)
+        let ignore_null: bool = if args.len() >= 4 {
+            first
+                .and_then(|rec| match Self::eval_val(&args[3], rec) {
+                    Value::Bool(b) => Some(b),
+                    _ => None,
+                })
+                .unwrap_or(true)
+        } else {
+            true
+        };
+
+        if ignore_null {
+            let mut count = 0i64;
+            for rec in records {
+                let v = Self::eval_val(&args[0], rec);
+                if !v.is_null() {
+                    if count == offset {
+                        return v;
+                    }
+                    count += 1;
+                }
+            }
+            default
+        } else {
+            records
+                .get(offset as usize)
+                .map(|rec| Self::eval_val(&args[0], rec))
+                .unwrap_or(default)
+        }
     }
 
     /// Sorted numeric column values across the window batch, skipping
@@ -2429,6 +2488,7 @@ impl Evaluator {
             // ---- Extended array ----
             "array_create" => Self::func_array_create(args),
             "array_position" => Self::func_array_position(args),
+            "array_positions" => Self::func_array_positions(args),
             "array_last_position" => Self::func_array_last_position(args),
             "array_shuffle" => Self::func_array_shuffle(args),
             "array_map" => Self::func_array_map(args),
@@ -5343,6 +5403,26 @@ impl Evaluator {
         }
     }
 
+    fn func_array_positions(args: &[Value]) -> Value {
+        if args.len() != 2 {
+            return Value::Null;
+        }
+        if args[0].is_null() {
+            return Value::Array(Vec::new());
+        }
+        let Some(arr) = args[0].as_array() else {
+            return Value::Null;
+        };
+        let target = &args[1];
+        let mut positions = Vec::new();
+        for (i, item) in arr.iter().enumerate() {
+            if Self::values_equal(item, target) {
+                positions.push(Value::from(i as i64));
+            }
+        }
+        Value::Array(positions)
+    }
+
     fn func_array_shuffle(args: &[Value]) -> Value {
         if args.len() != 1 {
             return Value::Null;
@@ -5747,7 +5827,7 @@ impl Evaluator {
     }
 
     fn func_lead_scalar(args: &[Value]) -> Value {
-        if args.is_empty() || args.len() > 3 {
+        if args.is_empty() || args.len() > 4 {
             return Value::Null;
         }
         // A single row has no future rows: resolve to the default.

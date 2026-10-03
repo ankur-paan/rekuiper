@@ -37,12 +37,16 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
   - Full or selective JSON catalog backup export and restore migrations.
   - Real-time engine health, memory/CPU consumption, and throughput metrics.
 
+- **WebAssembly (WASM) & Dynamic Secrets**:
+  - Full management of compiled `.wasm` modules (`register_wasm_plugin`, `list_wasm_plugins`, `delete_wasm_plugin`) with automatic UDF registration.
+  - Static scanning and validation of dynamic secret syntax (`{{vault://...}}`, `{{env://...}}`) via `validate_secrets`.
+
 - **Universal REST API Proxy (`execute_rekuiper_api`)**:
   - Allows executing arbitrary HTTP methods (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`) against any present or future `rekuiper` REST endpoint, ensuring 100% API coverage.
 
-- **11 First-Class Resources & 5 Interactive Prompts**:
-  - Live queryable resources via `rekuiper://` URIs.
-  - Expert troubleshooting, query optimization, and pipeline generation prompts.
+- **15 First-Class Resources & 8 Interactive Prompts**:
+  - Live queryable resources via `rekuiper://` URIs, including connector action schemas (`rabbitmq`, `parquet`, `edgex`) and Wasm plugins.
+  - Expert troubleshooting, query optimization, vector similarity search, and RabbitMQ pipeline generation prompts.
 
 ---
 
@@ -66,13 +70,13 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 
 ---
 
-## Tool Catalog (42 Tools)
+## Tool Catalog (46 Tools)
 
 ### 1. SQL Intelligence & Simulation
 | Tool | Description |
 | :--- | :--- |
-| `validate_sql` | Offline AST syntax parser and static validator for SQL and DDL statements. |
-| `test_sql_expression` | In-memory streaming query evaluator against mock JSON telemetry payloads. |
+| `validate_sql` | Offline AST syntax parser and static validator for SQL, window functions, and DDL statements (including `BUFFER_FULL_POLICY`). |
+| `test_sql_expression` | In-memory streaming query evaluator against mock JSON telemetry payloads, supporting vector search (`cosine_similarity`), array operations (`array_positions`), and stateful analytics (`acc_distinct_collect`, `lead`). |
 | `explain_sql` | Deconstructs streaming SQL into projections, sources, joins, and window clauses. |
 
 ### 2. Streams Management & Ingress
@@ -145,6 +149,14 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_engine_metrics` | Fetch engine uptime, memory/CPU consumption, and global throughput. |
 | `ping_engine` | Test daemon connectivity and response latency. |
 
+### 9. WebAssembly (WASM) & Dynamic Secrets Management
+| Tool | Description |
+| :--- | :--- |
+| `register_wasm_plugin` | Register a compiled `.wasm` module into rekuiper's embedded runtime via `POST /plugins/wasm`. |
+| `list_wasm_plugins` | Query all installed WebAssembly plugins and their exported UDF signatures. |
+| `delete_wasm_plugin` | Unload and delete a WebAssembly plugin from the engine via `DELETE /plugins/wasm/{name}`. |
+| `validate_secrets` | Offline syntax scanner and validator for dynamic secret templates (`{{vault://...}}`, `{{env://...}}`). |
+
 ### 10. Universal API Proxy
 | Tool | Description |
 | :--- | :--- |
@@ -162,11 +174,15 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `rekuiper://connections` | Shared connection resource definitions. |
 | `rekuiper://udfs` | Registered JavaScript UDFs. |
 | `rekuiper://plugins` | Installed native and portable plugins. |
+| `rekuiper://plugins/wasm` | Installed WebAssembly plugins and exported UDF signatures. |
 | `rekuiper://configs` | Active global server configuration parameters. |
 | `rekuiper://metrics` | Engine telemetry, memory usage, and throughput counters. |
 | `rekuiper://metadata/sources` | Catalog of available source connectors. |
 | `rekuiper://metadata/sinks` | Catalog of available sink connectors. |
 | `rekuiper://metadata/functions` | Catalog of built-in SQL mathematical, string, and window functions. |
+| `rekuiper://schemas/rabbitmq` | Configuration template for RabbitMQ AMQP 0-9-1 source and sink actions. |
+| `rekuiper://schemas/parquet` | Configuration template for Apache Parquet columnar sink actions. |
+| `rekuiper://schemas/edgex` | Configuration template for EdgeX Foundry dual-port listening (59880 / 59881). |
 
 ---
 
@@ -179,6 +195,9 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `generate_iot_alert_rule` | Generates end-to-end industrial IoT monitoring rules with deadbanding and alert sinks. |
 | `create_end_to_end_pipeline` | Complete pipeline builder: DDL source stream, enrichment joins, windowing, and multiple sinks. |
 | `diagnose_data_drop` | Root cause analysis for discrepancies between source message rate and sink throughput. |
+| `generate_vector_search_rule` | Constructs an edge vector similarity search and anomaly detection rule using `cosine_similarity`. |
+| `configure_rabbitmq_pipeline` | Constructs an enterprise pipeline routing stream records to RabbitMQ AMQP 0-9-1. |
+| `create_wasm_plugin_rule` | Guides registration and stream query generation for compiled WebAssembly UDF modules. |
 
 ---
 

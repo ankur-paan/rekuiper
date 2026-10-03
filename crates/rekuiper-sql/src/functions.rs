@@ -559,6 +559,14 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "array_position([1, 2], 2)"
         ),
         meta!(
+            "array_positions",
+            "array",
+            "All 0-based index positions of a value in an array.",
+            false,
+            "2",
+            "array_positions([1, 2, 2, 3, 2], 2)"
+        ),
+        meta!(
             "array_length",
             "array",
             "Number of elements in the array.",
@@ -1334,9 +1342,9 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
         meta!(
             "lead",
             "aggregate",
-            "Value n rows ahead with optional default.",
+            "Value n rows ahead with optional default and ignoreNull.",
             true,
-            "1-3",
+            "1-4",
             "lead(temp, 1)"
         ),
         meta!(
@@ -1556,6 +1564,22 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "1",
             "acc_collect(val)"
         ),
+        meta!(
+            "acc_distinct_collect",
+            "analytic",
+            "Collects unique non-nil expression results into an array preserving order.",
+            false,
+            "1",
+            "acc_distinct_collect(val)"
+        ),
+        meta!(
+            "distinct_acc",
+            "analytic",
+            "Alias of acc_distinct_collect.",
+            false,
+            "1",
+            "distinct_acc(val)"
+        ),
         // Contextual / system (6).
         meta!(
             "event_time",
@@ -1699,7 +1723,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 214, "catalog must list 214 functions");
+        assert_eq!(catalog.len(), 217, "catalog must list 217 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(

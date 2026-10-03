@@ -122,6 +122,8 @@ pub struct FileSink {
     pub has_header: bool,
     #[serde(default)]
     pub delimiter: Option<String>,
+    #[serde(default, rename = "allowExternalFileAccess")]
+    pub allow_external_file_access: bool,
 }
 
 impl FileSink {
@@ -132,7 +134,22 @@ impl FileSink {
             file_type: None,
             has_header: false,
             delimiter: None,
+            allow_external_file_access: false,
         }
+    }
+
+    pub fn validate_path(&self) -> Result<()> {
+        if !self.allow_external_file_access {
+            for component in self.path.components() {
+                if matches!(component, std::path::Component::ParentDir) {
+                    bail!(
+                        "Path traversal disallowed without allowExternalFileAccess: {:?}",
+                        self.path
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn path(&self) -> &Path {
@@ -175,6 +192,7 @@ impl FileSink {
 #[async_trait]
 impl Sink for FileSink {
     async fn send(&self, record: &StreamRecord) -> Result<()> {
+        self.validate_path()?;
         if let Some(parent) = self.path.parent() {
             if !parent.as_os_str().is_empty() {
                 tokio::fs::create_dir_all(parent)
@@ -197,6 +215,7 @@ impl Sink for FileSink {
 impl FileSink {
     /// Appends a pre-rendered line (e.g. a `dataTemplate` result).
     pub async fn send_text(&self, text: &str) -> Result<()> {
+        self.validate_path()?;
         if let Some(parent) = self.path.parent() {
             if !parent.as_os_str().is_empty() {
                 tokio::fs::create_dir_all(parent)
