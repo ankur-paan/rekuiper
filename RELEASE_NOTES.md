@@ -1,3 +1,20 @@
+# Release Notes - rekuiper v0.506-beta
+
+`rekuiper` v0.506-beta adds upstream SQL parity functions, stream ingestion buffer policy enforcement, file sink traversal hardening, and Model Context Protocol (MCP) server 2.0. This release also aligns all project documentation with the ASD-STE100 technical English standard.
+
+Key highlights:
+- **Upstream SQL Parity Functions**: Adds `array_positions(array, value)`, `acc_distinct_collect(expr)` (and alias `distinct_acc(expr)`), and four-argument `lead(expr, offset, default, ignore_null)`.
+- **Stream Ingestion Buffer Policy**: Validates `BUFFER_FULL_POLICY` configuration during stream creation, permitting `block` and `dropOldest`.
+- **File Sink Traversal Hardening**: Enforces path traversal prevention blocking `..` parent references unless `allowExternalFileAccess` is true.
+- **Model Context Protocol (MCP) Server 2.0**: Adds four tools, four resources, three prompts, and offline simulation for vector similarity and array analytics.
+- **ASD-STE100 Technical Documentation**: Standardizes all English documentation pages to the ASD-STE100 specification with verified static VitePress compilation.
+
+- MCP Documentation: [`crates/rekuiper-mcp/README.md`](crates/rekuiper-mcp/README.md)
+- Docker image: `ankurkrp/rekuiper:0.506-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.506-beta`)
+
+---
+
 # Release Notes - rekuiper v0.505-beta
 
 `rekuiper` v0.505-beta introduces six enterprise features: native RabbitMQ AMQP 0-9-1 source and sink connectors, vector similarity search and distance functions, WebAssembly (WASM) plugin runtime, dynamic secret interpolation with Vault and environment variables, Apache Parquet columnar storage, and EdgeX Foundry concurrent dual-port listening (59720 and 9081) with OpenZiti zero-trust architecture.

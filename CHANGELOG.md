@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
 > No latency-histogram p99 is claimed.
 
+## [0.506.0-beta] - 2026-10-03
+
+### Added
+- **Upstream SQL Parity Functions**: Implemented `array_positions(array, value)` returning zero-based match indexes, `acc_distinct_collect(expr)` (and alias `distinct_acc(expr)`) for distinct accumulator collections in arrival order, and 4-argument `lead(expr, offset, default, ignore_null)` with null skipping.
+- **Stream Ingestion Buffer Policy**: Validated `BUFFER_FULL_POLICY` property during stream creation and updates, permitting `block` and `dropOldest`.
+- **File Sink Traversal Hardening**: Enforced path traversal prevention blocking `..` parent references unless explicitly allowed via `allowExternalFileAccess`.
+- **Model Context Protocol (MCP) Server 2.0**: Added 4 new tools (`register_wasm_plugin`, `list_wasm_plugins`, `delete_wasm_plugin`, `validate_secrets`), 4 new resources (`rekuiper://plugins/wasm`, `rekuiper://schemas/rabbitmq`, `rekuiper://schemas/parquet`, `rekuiper://schemas/edgex`), 3 new prompts, and embedded offline support for vector similarity, array, and stateful analytics.
+
+### Changed
+- **Documentation Standards**: Rewrote and aligned all technical documentation in `docs/en_US/` to the ASD-STE100 Simplified Technical English standard with complete VitePress static build validation.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.506-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.506-beta`.
+
+---
+
 ## [0.505.0-beta] - 2026-10-02
 
 ### Added
