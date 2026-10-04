@@ -950,9 +950,10 @@ fn test_extended_math_functions() {
         json!(0.0)
     );
     assert_eq!(eval_expr("SELECT log10(100) FROM demo", &empty), json!(2.0));
-    // log(x) is the natural logarithm (use log10 for base 10).
+    // In eKuiper, log(x) is base-10; ln(x) is natural log.
+    assert_eq!(eval_expr("SELECT log(100) FROM demo", &empty), json!(2.0));
     assert_eq!(
-        eval_expr("SELECT log(100) FROM demo", &empty),
+        eval_expr("SELECT ln(100) FROM demo", &empty),
         json!(4.605170185988092)
     );
     assert_eq!(eval_expr("SELECT sign(42) FROM demo", &empty), json!(1));
@@ -1015,14 +1016,14 @@ fn test_extended_string_functions() {
         json!("cba")
     );
 
-    // Defaults and edge cases.
+    // Defaults and edge cases (eKuiper pads N spaces).
     assert_eq!(
         eval_expr("SELECT lpad('hi', 4) FROM demo", &empty),
-        json!("  hi")
+        json!("    hi")
     );
     assert_eq!(
         eval_expr("SELECT rpad('hi', 2) FROM demo", &empty),
-        json!("hi")
+        json!("hi  ")
     );
 }
 

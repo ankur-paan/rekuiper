@@ -86,7 +86,7 @@ impl Evaluator {
             match field {
                 Expr::Wildcard => {
                     for (k, v) in record {
-                        if k != META_KEY {
+                        if k != META_KEY && !k.starts_with("__") {
                             output.insert(k.clone(), v.clone());
                         }
                     }
@@ -162,7 +162,7 @@ impl Evaluator {
                 Expr::Wildcard => {
                     if let Some(rec) = first {
                         for (k, v) in rec {
-                            if k != META_KEY {
+                            if k != META_KEY && !k.starts_with("__") {
                                 output.entry(k.clone()).or_insert_with(|| v.clone());
                             }
                         }
@@ -458,7 +458,7 @@ impl Evaluator {
             match field {
                 Expr::Wildcard => {
                     for (k, v) in record {
-                        if k != META_KEY {
+                        if k != META_KEY && !k.starts_with("__") {
                             output.insert(k.clone(), v.clone());
                         }
                     }
@@ -821,8 +821,8 @@ impl Evaluator {
                     result_map.insert(format!("{}{}", prefix, col_name), (*val).clone());
                 }
             }
-            if result_map.len() == 1 && args.len() == 3 {
-                return result_map.values().next().cloned().unwrap_or(Value::Null);
+            if result_map.is_empty() {
+                return Value::Null;
             }
             return Value::Object(result_map);
         }
@@ -1342,12 +1342,25 @@ impl Evaluator {
         if matches!(args[0], Expr::Wildcard) {
             return Value::Null;
         }
-        let vals = Self::agg_numeric_values(&args[0], records);
+        let vals: Vec<Value> = records
+            .iter()
+            .map(|rec| Self::eval_val(&args[0], rec))
+            .filter(|v| !v.is_null())
+            .collect();
         if vals.is_empty() {
             return Value::Null;
         }
-        let mut best = &vals[0];
-        for v in &vals[1..] {
+        let has_numbers = vals.iter().any(|v| v.is_number());
+        let filtered: Vec<&Value> = if has_numbers {
+            vals.iter().filter(|v| v.is_number()).collect()
+        } else {
+            vals.iter().collect()
+        };
+        if filtered.is_empty() {
+            return Value::Null;
+        }
+        let mut best = filtered[0];
+        for v in &filtered[1..] {
             if let Some(ord) = Self::compare_values(v, best) {
                 if ord == std::cmp::Ordering::Less {
                     best = v;
@@ -1364,12 +1377,25 @@ impl Evaluator {
         if matches!(args[0], Expr::Wildcard) {
             return Value::Null;
         }
-        let vals = Self::agg_numeric_values(&args[0], records);
+        let vals: Vec<Value> = records
+            .iter()
+            .map(|rec| Self::eval_val(&args[0], rec))
+            .filter(|v| !v.is_null())
+            .collect();
         if vals.is_empty() {
             return Value::Null;
         }
-        let mut best = &vals[0];
-        for v in &vals[1..] {
+        let has_numbers = vals.iter().any(|v| v.is_number());
+        let filtered: Vec<&Value> = if has_numbers {
+            vals.iter().filter(|v| v.is_number()).collect()
+        } else {
+            vals.iter().collect()
+        };
+        if filtered.is_empty() {
+            return Value::Null;
+        }
+        let mut best = filtered[0];
+        for v in &filtered[1..] {
             if let Some(ord) = Self::compare_values(v, best) {
                 if ord == std::cmp::Ordering::Greater {
                     best = v;
@@ -1386,7 +1412,20 @@ impl Evaluator {
             return Value::Null;
         }
         if matches!(args[0], Expr::Wildcard) {
-            return Value::Null;
+            return Value::Array(
+                records
+                    .iter()
+                    .map(|rec| {
+                        let mut map = serde_json::Map::new();
+                        for (k, v) in rec {
+                            if k != META_KEY && !k.starts_with("__") {
+                                map.insert(k.clone(), v.clone());
+                            }
+                        }
+                        Value::Object(map)
+                    })
+                    .collect(),
+            );
         }
         Value::Array(
             records
@@ -2636,6 +2675,11 @@ impl Evaluator {
         // Unquoted identifiers name the key directly; anything else is
         // evaluated first and must yield a string.
         let key = match arg {
+            Expr::Wildcard => {
+                return meta_obj
+                    .map(|m| Value::Object(m.clone()))
+                    .unwrap_or(Value::Null);
+            }
             Expr::Identifier(name) => Some(name.clone()),
             other => match Self::eval_val(other, record) {
                 Value::String(s) => Some(s),
@@ -3116,9 +3160,26 @@ impl Evaluator {
             "boolean" | "bool" => Self::cast_to_bool(&args[0]),
             "datetime" => {
                 if let Some(ms) = Self::to_epoch_millis(&args[0]) {
-                    Value::from(ms)
+                    if let Some(dt) = Self::datetime_from_millis(ms) {
+                        let formatted = if dt.timestamp_subsec_millis() == 0 {
+                            dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+                        } else {
+                            dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+                        };
+                        Value::String(formatted)
+                    } else {
+                        Value::Null
+                    }
                 } else {
                     Value::Null
+                }
+            }
+            "bytea" => {
+                let s = Self::to_string_always(&args[0]);
+                if s.is_empty() {
+                    Value::String(String::new())
+                } else {
+                    Value::String(base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))
                 }
             }
             _ => Value::Null,
@@ -3336,7 +3397,7 @@ impl Evaluator {
         match args.len() {
             1 => match Self::to_f64(&args[0]) {
                 Some(v) if v > 0.0 => {
-                    let r = v.ln();
+                    let r = v.log10();
                     if r.is_nan() || r.is_infinite() {
                         return Value::Null;
                     }
@@ -3345,7 +3406,7 @@ impl Evaluator {
                 _ => Value::Null,
             },
             2 => match (Self::to_f64(&args[0]), Self::to_f64(&args[1])) {
-                (Some(base), Some(x)) if x > 0.0 => {
+                (Some(base), Some(x)) if x > 0.0 && base > 0.0 => {
                     let r = x.log(base);
                     if r.is_nan() || r.is_infinite() {
                         return Value::Null;
@@ -3625,6 +3686,14 @@ impl Evaluator {
             return Value::Null;
         }
         let total = total as usize;
+        if args.len() == 2 {
+            let mut out = String::with_capacity(total + s.len());
+            for _ in 0..total {
+                out.push(' ');
+            }
+            out.push_str(&s);
+            return Value::String(out);
+        }
         let len = s.chars().count();
         if len >= total {
             return Value::String(s);
@@ -3653,6 +3722,13 @@ impl Evaluator {
             return Value::Null;
         }
         let total = total as usize;
+        if args.len() == 2 {
+            let mut out = s;
+            for _ in 0..total {
+                out.push(' ');
+            }
+            return Value::String(out);
+        }
         let len = s.chars().count();
         if len >= total {
             return Value::String(s);
@@ -3891,13 +3967,16 @@ impl Evaluator {
     }
 
     fn func_array_join(args: &[Value]) -> Value {
-        if args.is_empty() || args.len() > 2 {
+        if args.is_empty() || args.len() > 3 {
             return Value::Null;
         }
         let Some(arr) = args[0].as_array() else {
             return Value::Null;
         };
-        let sep = if args.len() == 2 {
+        if arr.is_empty() {
+            return Value::Null;
+        }
+        let sep = if args.len() >= 2 {
             if args[1].is_null() {
                 return Value::Null;
             }
@@ -3905,12 +3984,22 @@ impl Evaluator {
         } else {
             ",".to_string()
         };
-        Value::String(
-            arr.iter()
-                .map(Self::to_string_always)
-                .collect::<Vec<_>>()
-                .join(&sep),
-        )
+        let null_replacement = if args.len() == 3 {
+            Some(Self::to_string_always(&args[2]))
+        } else {
+            None
+        };
+        let mut items = Vec::new();
+        for item in arr {
+            if item.is_null() {
+                if let Some(ref nr) = null_replacement {
+                    items.push(nr.clone());
+                }
+            } else {
+                items.push(Self::to_string_always(item));
+            }
+        }
+        Value::String(items.join(&sep))
     }
 
     fn func_indexof(args: &[Value]) -> Value {
@@ -3931,6 +4020,9 @@ impl Evaluator {
             return Value::Null;
         };
         let decimals = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0).max(0) as usize;
+        if args.len() <= 2 {
+            return Value::String(format!("{:.prec$}", num, prec = decimals));
+        }
         let locale = args.get(2).and_then(|v| v.as_str()).unwrap_or("en_US");
         let is_comma_decimal =
             locale.starts_with("de") || locale.starts_with("fr") || locale.starts_with("it");
@@ -4220,7 +4312,7 @@ impl Evaluator {
         if !args.is_empty() {
             return Value::Null;
         }
-        Value::from(chrono::Utc::now().timestamp_millis())
+        Value::String(chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string())
     }
 
     fn java_to_strftime(fmt: &str) -> String {
@@ -4628,15 +4720,8 @@ impl Evaluator {
         if args.len() != 1 {
             return Value::Null;
         }
-        let dt = match Self::to_epoch_millis(&args[0]).and_then(Self::datetime_from_millis) {
-            Some(dt) => dt.naive_utc(),
-            None => return Value::Null,
-        };
-        match (i64::from(dt.date().num_days_from_ce()) + 365)
-            .checked_mul(86_400)
-            .and_then(|days| days.checked_add(dt.time().num_seconds_from_midnight() as i64))
-        {
-            Some(total) => Value::from(total),
+        match Self::to_epoch_millis(&args[0]) {
+            Some(ms) => Value::from(ms / 1000),
             None => Value::Null,
         }
     }
@@ -4966,7 +5051,12 @@ impl Evaluator {
         if args[0].is_null() {
             return Value::Null;
         }
-        Value::from(crc32fast::hash(&Self::to_string_always(&args[0]).into_bytes()) as i64)
+        let s = Self::to_string_always(&args[0]);
+        if s.is_empty() {
+            return Value::String("0".to_string());
+        }
+        let hash = crc32fast::hash(s.as_bytes());
+        Value::String(format!("{:x}", hash))
     }
 
     fn func_regexp_matches(args: &[Value]) -> Value {
@@ -5531,21 +5621,25 @@ impl Evaluator {
         if args.len() != 2 {
             return Value::Null;
         }
+        if let Some(obj) = args[0].as_object() {
+            let key = match &args[1] {
+                Value::String(s) => s.as_str(),
+                _ => return Value::Null,
+            };
+            return obj.get(key).cloned().unwrap_or(Value::Null);
+        }
         let Some(arr) = args[0].as_array() else {
             return Value::Null;
         };
         let Some(index) = Self::to_i64_arg(&args[1]) else {
             return Value::Null;
         };
-        // 1-based indexing; negatives count back from the end (-1 is last).
-        // Index 0 and out-of-range positions yield Null.
+        // 0-based indexing for positive indices; negatives count back from the end (-1 is last).
         let len = arr.len() as i64;
-        let pos = if index > 0 {
-            index - 1
-        } else if index < 0 {
-            len + index
+        let pos = if index >= 0 {
+            index
         } else {
-            return Value::Null;
+            len + index
         };
         if pos < 0 || pos >= len {
             return Value::Null;
@@ -5879,22 +5973,44 @@ impl Evaluator {
         call_id: &str,
         partition_key: &str,
     ) -> Value {
-        if args.len() != 1 {
+        if args.is_empty() {
             return Value::Null;
         }
-        let current = &args[0];
-        let state_key = format!("{}:{}:{}", lowered_name, call_id, partition_key);
-        let previous = state.state.read().get(&state_key).cloned();
-        let changed = match (&previous, current) {
-            (None, _) => true,
-            (Some(p), c) if p.is_null() && c.is_null() => false,
-            (Some(p), c) => !Self::values_equal(p, c),
+        let (ignore_null, cols) = if args.len() >= 2 && args[0].is_boolean() {
+            (args[0].as_bool().unwrap_or(false), &args[1..])
+        } else {
+            (false, args)
         };
-        state.state.write().insert(state_key, current.clone());
+
+        let mut any_changed = false;
+        let mut first_val = Value::Null;
+
+        for (idx, current) in cols.iter().enumerate() {
+            let state_key = format!("{}:{}:{}:{}", lowered_name, call_id, idx, partition_key);
+            if current.is_null() {
+                if ignore_null {
+                    continue;
+                }
+                continue;
+            }
+            let previous = state.state.read().get(&state_key).cloned();
+            let changed = match &previous {
+                None => true,
+                Some(p) => !Self::values_equal(p, current),
+            };
+            if changed {
+                state.state.write().insert(state_key, current.clone());
+                any_changed = true;
+                if first_val.is_null() {
+                    first_val = current.clone();
+                }
+            }
+        }
+
         if lowered_name == "had_changed" {
-            Value::Bool(changed)
-        } else if changed {
-            current.clone()
+            Value::Bool(any_changed)
+        } else if any_changed {
+            first_val
         } else {
             Value::Null
         }

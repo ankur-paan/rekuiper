@@ -826,7 +826,12 @@ pub async fn run_qualification(
                     }
 
                     if let Ok(v) = serde_json::from_slice::<Value>(&publish.payload) {
-                        if let Some(seq) = v.get("seq").and_then(|s| s.as_u64()) {
+                        let item = if let Some(arr) = v.as_array() {
+                            arr.first()
+                        } else {
+                            Some(&v)
+                        };
+                        if let Some(seq) = item.and_then(|m| m.get("seq")).and_then(|s| s.as_u64()) {
                             trk_clone.lock().await.record(seq);
                         }
                     }

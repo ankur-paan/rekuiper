@@ -2890,6 +2890,96 @@ fn resolve_source_topic(stream_manager: &StreamManager, stream_name: &str) -> St
     stream_name.to_string()
 }
 
+#[derive(Debug, Clone, Default)]
+struct CommonSinkOpts {
+    send_single: bool,
+    send_nil_field: bool,
+    fields: Option<Vec<String>>,
+    exclude_fields: Option<Vec<String>>,
+    data_field: Option<String>,
+}
+
+fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
+    let send_single = opts.get("sendSingle").and_then(|v| v.as_bool()).unwrap_or(false);
+    let send_nil_field = opts.get("sendNilField").and_then(|v| v.as_bool()).unwrap_or(false);
+    let fields = opts.get("fields").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+    });
+    let exclude_fields = opts.get("excludeFields").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+    });
+    let data_field = opts.get("dataField").and_then(|v| v.as_str()).map(|s| s.to_string());
+    CommonSinkOpts {
+        send_single,
+        send_nil_field,
+        fields,
+        exclude_fields,
+        data_field,
+    }
+}
+
+fn clean_sink_value(v: &Value, send_nil_field: bool) -> Value {
+    match v {
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|item| clean_sink_value(item, send_nil_field)).collect())
+        }
+        Value::Object(obj) => {
+            let mut map = std::collections::BTreeMap::new();
+            for (k, val) in obj {
+                if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                    continue;
+                }
+                if val.is_null() && !send_nil_field {
+                    continue;
+                }
+                map.insert(k.clone(), clean_sink_value(val, send_nil_field));
+            }
+            serde_json::to_value(map).unwrap_or_else(|_| Value::Object(obj.clone()))
+        }
+        other => other.clone(),
+    }
+}
+
+fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) -> Value {
+    if let Some(ref df) = opts.data_field {
+        if let Some(val) = data.get(df) {
+            return clean_sink_value(val, opts.send_nil_field);
+        }
+        return Value::Null;
+    }
+    let mut map = std::collections::BTreeMap::new();
+    if let Some(ref fields) = opts.fields {
+        for f in fields {
+            let val = data.get(f).unwrap_or(&Value::Null);
+            map.insert(f.clone(), clean_sink_value(val, true));
+        }
+    } else {
+        for (k, v) in data {
+            if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                continue;
+            }
+            if let Some(ref ex) = opts.exclude_fields {
+                if ex.contains(k) {
+                    continue;
+                }
+            }
+            if v.is_null() && !opts.send_nil_field {
+                continue;
+            }
+            map.insert(k.clone(), clean_sink_value(v, opts.send_nil_field));
+        }
+    }
+    serde_json::to_value(map).unwrap_or(Value::Null)
+}
+
+fn to_sink_payload(val: Value, send_single: bool) -> Value {
+    if send_single {
+        val
+    } else {
+        Value::Array(vec![val])
+    }
+}
+
 /// One sink action parsed once at rule start (never per record).
 #[derive(Debug, Clone)]
 enum PreparedAction {
@@ -2902,18 +2992,29 @@ enum PreparedAction {
         parquet: bool,
         has_header: bool,
         delimiter: String,
+        opts: CommonSinkOpts,
     },
     Rest {
         url: String,
+        method: String,
+        headers: HashMap<String, String>,
+        body_type: String,
         template: Option<String>,
+        opts: CommonSinkOpts,
+        format: Option<String>,
+        delimiter: String,
     },
     Mqtt {
         config: Box<MqttConfig>,
         template: Option<String>,
+        opts: CommonSinkOpts,
+        format: Option<String>,
+        delimiter: String,
     },
     WebSocket {
         url: String,
         template: Option<String>,
+        opts: CommonSinkOpts,
     },
     Redis {
         config: Box<RedisSinkConfig>,
@@ -2926,6 +3027,7 @@ enum PreparedAction {
     },
     Memory {
         topic: String,
+        send_nil_field: bool,
     },
     RabbitMq {
         config: Box<RabbitMqConfig>,
@@ -2977,6 +3079,7 @@ fn prepare_actions(
                                 .extension()
                                 .and_then(|ext| ext.to_str())
                                 .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
+                        let common_opts = parse_common_opts(opts);
                         out.push(PreparedAction::File {
                             path: sink.path.clone(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -2988,34 +3091,87 @@ fn prepare_actions(
                                 .clone()
                                 .filter(|d| !d.is_empty())
                                 .unwrap_or_else(|| ",".to_string()),
+                            opts: common_opts,
                         });
                     }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "file".to_string(),
                     }),
                 },
-                "rest" | "http" => out.push(PreparedAction::Rest {
-                    url: opts
+                "rest" | "http" => {
+                    let url = opts
                         .get("url")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
-                        .to_string(),
-                    template: action_template(opts).map(|s| s.to_string()),
-                }),
-                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
-                    Ok(config) => out.push(PreparedAction::Mqtt {
-                        config: Box::new(config),
+                        .to_string();
+                    let method = opts
+                        .get("method")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("post")
+                        .to_uppercase();
+                    let body_type = opts
+                        .get("bodyType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("json")
+                        .to_lowercase();
+                    let mut headers = HashMap::new();
+                    if let Some(h) = opts.get("headers").and_then(|v| v.as_object()) {
+                        for (k, v) in h {
+                            if let Some(s) = v.as_str() {
+                                headers.insert(k.clone(), s.to_string());
+                            } else {
+                                headers.insert(k.clone(), v.to_string());
+                            }
+                        }
+                    }
+                    let format = opts.get("format").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let delimiter = opts
+                        .get("delimiter")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(",")
+                        .to_string();
+                    let common_opts = parse_common_opts(opts);
+                    out.push(PreparedAction::Rest {
+                        url,
+                        method,
+                        headers,
+                        body_type,
                         template: action_template(opts).map(|s| s.to_string()),
-                    }),
+                        opts: common_opts,
+                        format,
+                        delimiter,
+                    });
+                }
+                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
+                    Ok(config) => {
+                        let format = opts.get("format").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let delimiter = opts
+                            .get("delimiter")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(",")
+                            .to_string();
+                        let common_opts = parse_common_opts(opts);
+                        out.push(PreparedAction::Mqtt {
+                            config: Box::new(config),
+                            template: action_template(opts).map(|s| s.to_string()),
+                            opts: common_opts,
+                            format,
+                            delimiter,
+                        });
+                    }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "mqtt".to_string(),
                     }),
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
-                    Ok(ws_cfg) => out.push(PreparedAction::WebSocket {
-                        url: ws_cfg.target_url(),
-                        template: action_template(opts).map(|s| s.to_string()),
-                    }),
+                    Ok(ws_cfg) => {
+                        let common_opts = parse_common_opts(opts);
+                        out.push(PreparedAction::WebSocket {
+                            url: ws_cfg.target_url(),
+                            template: action_template(opts).map(|s| s.to_string()),
+                            opts: common_opts,
+                        });
+                    }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "websocket".to_string(),
                     }),
@@ -3046,13 +3202,17 @@ fn prepare_actions(
                         kind: "sql".to_string(),
                     }),
                 },
-                "memory" => out.push(PreparedAction::Memory {
-                    topic: opts
-                        .get("topic")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("default")
-                        .to_string(),
-                }),
+                "memory" => {
+                    let send_nil_field = opts.get("sendNilField").and_then(|v| v.as_bool()).unwrap_or(false);
+                    out.push(PreparedAction::Memory {
+                        topic: opts
+                            .get("topic")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default")
+                            .to_string(),
+                        send_nil_field,
+                    });
+                }
                 "rabbitmq" | "amqp" => {
                     match serde_json::from_value::<RabbitMqConfig>(opts.clone()) {
                         Ok(config) => out.push(PreparedAction::RabbitMq {
@@ -3251,8 +3411,9 @@ impl FileBatchWriter {
         Ok(())
     }
 
-    fn push_json(&mut self, data: &HashMap<String, Value>) {
-        if let Ok(mut line) = serde_json::to_string(data) {
+    fn push_json(&mut self, data: &HashMap<String, Value>, opts: &CommonSinkOpts) {
+        let formatted = format_record_for_sink(data, opts);
+        if let Ok(mut line) = serde_json::to_string(&formatted) {
             line.push('\n');
             self.buf.extend_from_slice(line.as_bytes());
             self.pending += 1;
@@ -3267,9 +3428,24 @@ impl FileBatchWriter {
         self.pending += 1;
     }
 
-    fn push_delimited(&mut self, data: &HashMap<String, Value>, delimiter: &str, header: bool) {
-        let mut keys: Vec<String> = data.keys().cloned().collect();
-        keys.sort();
+    fn push_delimited(
+        &mut self,
+        data: &HashMap<String, Value>,
+        delimiter: &str,
+        header: bool,
+        opts: &CommonSinkOpts,
+    ) {
+        let keys: Vec<String> = if let Some(ref f) = opts.fields {
+            f.clone()
+        } else {
+            let mut k: Vec<String> = data
+                .keys()
+                .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                .cloned()
+                .collect();
+            k.sort();
+            k
+        };
         if header && !self.has_header_written {
             let h = keys.join(delimiter);
             self.buf.extend_from_slice(h.as_bytes());
@@ -3905,6 +4081,7 @@ async fn send_action(
             parquet,
             has_header,
             delimiter,
+            opts,
         } => {
             if *parquet {
                 rekuiper_connectors::parquet_io::append_record_to_parquet(output, path)
@@ -3914,38 +4091,124 @@ async fn send_action(
                     .entry(path.clone())
                     .or_insert_with(|| FileBatchWriter::new(path.clone()));
                 if *delimited {
-                    writer.push_delimited(&output.data, delimiter, *has_header);
+                    writer.push_delimited(&output.data, delimiter, *has_header, opts);
                 } else if let Some(tpl) = template {
                     writer.push_text(&apply_data_template(
                         tpl,
                         &record_template_map(&output.data),
                     ));
                 } else {
-                    writer.push_json(&output.data);
+                    writer.push_json(&output.data, opts);
                 }
             }
             Ok(())
         }
-        PreparedAction::Rest { url, template } => {
-            let url = destination.unwrap_or(url);
-            if url.is_empty() {
+        PreparedAction::Rest {
+            url,
+            method,
+            headers,
+            body_type,
+            template,
+            opts,
+            format,
+            delimiter,
+        } => {
+            let base_url = destination.unwrap_or(url);
+            if base_url.is_empty() {
                 return Err(SendError::Permanent("rest action missing url".to_string()));
             }
-            let res = match template {
-                Some(tpl) => {
-                    ctx.http_client
-                        .post(url)
-                        .header(reqwest::header::CONTENT_TYPE, "application/json")
-                        .body(apply_data_template(tpl, &record_template_map(&output.data)))
-                        .send()
-                        .await
-                }
-                None => ctx.http_client.post(url).json(&output.data).send().await,
+            let final_url = if base_url.contains("{{") {
+                apply_data_template(base_url, &record_template_map(&output.data))
+            } else {
+                base_url.to_string()
             };
+
+            let req_method = match method.as_str() {
+                "GET" => reqwest::Method::GET,
+                "PUT" => reqwest::Method::PUT,
+                "DELETE" => reqwest::Method::DELETE,
+                "HEAD" => reqwest::Method::HEAD,
+                "PATCH" => reqwest::Method::PATCH,
+                _ => reqwest::Method::POST,
+            };
+
+            let mut req_builder = ctx.http_client.request(req_method.clone(), &final_url);
+
+            for (hk, hv) in headers {
+                let final_hv = if hv.contains("{{") {
+                    apply_data_template(hv, &record_template_map(&output.data))
+                } else {
+                    hv.clone()
+                };
+                req_builder = req_builder.header(hk.as_str(), final_hv);
+            }
+
+            if req_method == reqwest::Method::GET || body_type == "none" {
+                // No body, no content-type
+            } else if body_type == "text" {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        to_sink_payload(formatted, opts.send_single).to_string()
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            } else if body_type == "html" {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/html");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        to_sink_payload(formatted, opts.send_single).to_string()
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            } else if format.as_deref() == Some("delimited") {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
+                let keys = if let Some(ref f) = opts.fields {
+                    f.clone()
+                } else {
+                    let mut k: Vec<String> = output
+                        .data
+                        .keys()
+                        .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                        .cloned()
+                        .collect();
+                    k.sort();
+                    k
+                };
+                let row = keys
+                    .iter()
+                    .map(|k| csv_cell(output.data.get(k), delimiter))
+                    .collect::<Vec<_>>()
+                    .join(delimiter);
+                req_builder = req_builder.body(row);
+            } else {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "application/json");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
+                            .map_err(|e| SendError::Permanent(format!("json encode error: {}", e)))?
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            }
+
+            let res = req_builder.send().await;
             res.map(|_| ())
                 .map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
         }
-        PreparedAction::Mqtt { config, template } => {
+        PreparedAction::Mqtt {
+            config,
+            template,
+            opts,
+            format,
+            delimiter,
+        } => {
             if rt.mqtt.is_none() {
                 let sink = MqttSink::new((**config).clone()).map_err(|e| {
                     SendError::Permanent(format!("mqtt action configuration invalid: {}", e))
@@ -3959,14 +4222,48 @@ async fn send_action(
                 Some(tpl) => {
                     apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
                 }
-                None => serde_json::to_vec(&output.data)
-                    .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?,
+                None => {
+                    if format.as_deref() == Some("delimited") {
+                        let keys = if let Some(ref f) = opts.fields {
+                            f.clone()
+                        } else {
+                            let mut k: Vec<String> = output
+                                .data
+                                .keys()
+                                .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                                .cloned()
+                                .collect();
+                            k.sort();
+                            k
+                        };
+                        let row = keys
+                            .iter()
+                            .map(|k| csv_cell(output.data.get(k), delimiter))
+                            .collect::<Vec<_>>()
+                            .join(delimiter);
+                        row.into_bytes()
+                    } else {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
+                            .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?
+                    }
+                }
             };
-            sink.send_raw_to(destination.unwrap_or(&config.topic), payload)
+            let topic = match destination {
+                Some(d) => d.to_string(),
+                None => {
+                    if config.topic.contains("{{") {
+                        apply_data_template(&config.topic, &record_template_map(&output.data))
+                    } else {
+                        config.topic.clone()
+                    }
+                }
+            };
+            sink.send_raw_to(&topic, payload)
                 .await
                 .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
         }
-        PreparedAction::WebSocket { url, template } => {
+        PreparedAction::WebSocket { url, template, opts } => {
             let sink = WebSocketSink { url: url.clone() };
             let res = match template {
                 Some(tpl) => {
@@ -3976,7 +4273,12 @@ async fn send_action(
                     ))
                     .await
                 }
-                None => sink.send(output).await,
+                None => {
+                    let formatted = format_record_for_sink(&output.data, opts);
+                    let text = serde_json::to_string(&formatted)
+                        .map_err(|e| SendError::Permanent(format!("websocket payload encode: {}", e)))?;
+                    sink.send_text(&text).await
+                }
             };
             res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
         }
@@ -4007,23 +4309,41 @@ async fn send_action(
                 .await
                 .map_err(|e| SendError::Retry(format!("sql action failed: {}", e)))
         }
-        PreparedAction::Memory { topic } => match ctx.stream_bus.try_publish(topic, output.clone())
-        {
-            Ok(_) => Ok(()),
-            // Produced data with nobody listening: not an error.
-            Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
-            Err(rekuiper_core::PublishError::Full) => {
-                tracing::warn!(
-                    "[RULE {}] memory feedback queue full, dropping record",
-                    ctx.rule_id
-                );
-                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
-                Err(SendError::Dropped)
+        PreparedAction::Memory { topic, send_nil_field } => {
+            let final_topic = if topic.contains("{{") {
+                apply_data_template(topic, &record_template_map(&output.data))
+            } else {
+                topic.clone()
+            };
+            let mut clean_data = HashMap::new();
+            for (k, v) in &output.data {
+                if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                    continue;
+                }
+                if v.is_null() && !send_nil_field {
+                    continue;
+                }
+                clean_data.insert(k.clone(), clean_sink_value(v, *send_nil_field));
             }
-            Err(rekuiper_core::PublishError::Closed) => {
-                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                Err(SendError::Dropped)
+            let mut clean_rec = output.clone();
+            clean_rec.data = clean_data;
+            match ctx.stream_bus.try_publish(&final_topic, clean_rec) {
+                Ok(_) => Ok(()),
+                // Produced data with nobody listening: not an error.
+                Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
+                Err(rekuiper_core::PublishError::Full) => {
+                    tracing::warn!(
+                        "[RULE {}] memory feedback queue full, dropping record",
+                        ctx.rule_id
+                    );
+                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+                    Err(SendError::Dropped)
+                }
+                Err(rekuiper_core::PublishError::Closed) => {
+                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                    Err(SendError::Dropped)
+                }
             }
         },
         PreparedAction::RabbitMq { config, template } => {
@@ -6472,6 +6792,11 @@ async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> 
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
     }
+    if let Some(status) = state.rule_manager.get_rule_status(&name) {
+        if status.status == "running" {
+            return (StatusCode::OK, format!("Rule {} was started", name)).into_response();
+        }
+    }
     match state.rule_manager.start_rule(&name).await {
         Ok(_) => {
             activate_rule(&state, &name);
@@ -6487,6 +6812,11 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
     }
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
+    if let Some(status) = state.rule_manager.get_rule_status(&name) {
+        if status.status == "stopped" {
+            return (StatusCode::OK, format!("Rule {} was stopped.", name)).into_response();
+        }
     }
     match state.rule_manager.stop_rule(&name).await {
         Ok(_) => {

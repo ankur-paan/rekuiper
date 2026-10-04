@@ -2455,15 +2455,79 @@ pub fn apply_data_template(
     template: &str,
     data: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
-    let mut result = template.to_string();
-    for (k, v) in data {
-        let placeholder = format!("{{{{.{}}}}}", k);
-        let val_str = match v {
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
-        };
-        result = result.replace(&placeholder, &val_str);
+    use base64::Engine;
+    let mut result = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        result.push_str(&rest[..start]);
+        let after_start = &rest[start + 2..];
+        if let Some(end) = after_start.find("}}") {
+            let expr = after_start[..end].trim();
+            let replacement = if expr == "json ." {
+                let mut map = std::collections::BTreeMap::new();
+                for (k, v) in data {
+                    if !k.starts_with("__") {
+                        map.insert(k.clone(), v.clone());
+                    }
+                }
+                serde_json::to_string(&map).unwrap_or_default()
+            } else if let Some(stripped) = expr.strip_prefix("base64 ") {
+                let key = stripped.trim().trim_start_matches('.');
+                match data.get(key) {
+                    Some(serde_json::Value::String(s)) => {
+                        base64::prelude::BASE64_STANDARD.encode(s.as_bytes())
+                    }
+                    Some(v) => base64::prelude::BASE64_STANDARD.encode(v.to_string().as_bytes()),
+                    None => format!("{{{{{}}}}}", expr),
+                }
+            } else if let Some(stripped) = expr.strip_prefix("upper ") {
+                let key = stripped.trim().trim_start_matches('.');
+                match data.get(key) {
+                    Some(serde_json::Value::String(s)) => s.to_uppercase(),
+                    Some(v) => v.to_string().to_uppercase(),
+                    None => format!("{{{{{}}}}}", expr),
+                }
+            } else if let Some(stripped) = expr.strip_prefix("index . ") {
+                let key = stripped.trim().trim_matches('"');
+                match data.get(key) {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(v) => v.to_string(),
+                    None => format!("{{{{{}}}}}", expr),
+                }
+            } else if expr.starts_with('.') {
+                let parts: Vec<&str> = expr.trim_start_matches('.').split('.').collect();
+                let mut cur = Some(data);
+                let mut found_val: Option<&serde_json::Value> = None;
+                for (i, p) in parts.iter().enumerate() {
+                    if let Some(map) = cur {
+                        if i == parts.len() - 1 {
+                            found_val = map.get(*p);
+                        } else {
+                            cur = map.get(*p).and_then(|v| v.as_object());
+                        }
+                    } else {
+                        found_val = None;
+                        break;
+                    }
+                }
+                match found_val {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(serde_json::Value::Null) => "null".to_string(),
+                    Some(v) => v.to_string(),
+                    None => format!("{{{{{}}}}}", expr),
+                }
+            } else {
+                format!("{{{{{}}}}}", expr)
+            };
+            result.push_str(&replacement);
+            rest = &after_start[end + 2..];
+        } else {
+            result.push_str(&rest[start..]);
+            rest = "";
+            break;
+        }
     }
+    result.push_str(rest);
     result
 }
 
