@@ -348,70 +348,95 @@ fn get_process_rss_mb(pid: u32) -> f64 {
 }
 
 fn find_kuiperd_bin() -> PathBuf {
-    if let Ok(p) = std::env::var("REKUIPER_BIN") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return pb;
-        }
-    }
-    if let Ok(p) = std::env::var("CARGO_BIN_EXE_rekuiperd") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return pb;
-        }
-    }
-    if let Ok(p) = std::env::var("KUIPERD_BIN") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return pb;
-        }
-    }
-    if let Ok(p) = std::env::var("CARGO_BIN_EXE_kuiperd") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return pb;
-        }
-    }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
         .and_then(|p| p.parent())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    let candidates = [
-        workspace_root.join("target/debug/rekuiperd.exe"),
-        workspace_root.join("target/debug/rekuiperd"),
-        workspace_root.join("target/release/rekuiperd.exe"),
-        workspace_root.join("target/release/rekuiperd"),
-        workspace_root.join("target/debug/kuiperd.exe"),
-        workspace_root.join("target/debug/kuiperd"),
-        workspace_root.join("target/release/kuiperd.exe"),
-        workspace_root.join("target/release/kuiperd"),
-        PathBuf::from("target/debug/kuiperd.exe"),
-        PathBuf::from("target/debug/kuiperd"),
-        PathBuf::from("../../target/debug/kuiperd.exe"),
-        PathBuf::from("../../target/debug/kuiperd"),
-        PathBuf::from("../target/debug/kuiperd.exe"),
-        PathBuf::from("../target/debug/kuiperd"),
-        PathBuf::from("target/release/kuiperd.exe"),
-        PathBuf::from("target/release/kuiperd"),
-        PathBuf::from("../../target/release/kuiperd.exe"),
-        PathBuf::from("../../target/release/kuiperd"),
-    ];
-    for c in &candidates {
-        if c.exists() {
-            return c.canonicalize().unwrap_or_else(|_| c.clone());
+
+    let check_all = || -> Option<PathBuf> {
+        if let Ok(current_exe) = std::env::current_exe() {
+            if let Some(target_dir) = current_exe.parent().and_then(|p| p.parent()) {
+                for sub in ["kuiperd", "kuiperd.exe", "rekuiperd", "rekuiperd.exe"] {
+                    let candidate = target_dir.join(sub);
+                    if candidate.exists() {
+                        return Some(candidate.canonicalize().unwrap_or(candidate));
+                    }
+                }
+            }
         }
-    }
-    let _ = std::process::Command::new("cargo")
-        .args(["build", "-p", "kuiperd"])
-        .current_dir(&workspace_root)
-        .status();
-    for c in &candidates {
-        if c.exists() {
-            return c.canonicalize().unwrap_or_else(|_| c.clone());
+        for env_var in [
+            "REKUIPER_BIN",
+            "CARGO_BIN_EXE_rekuiperd",
+            "KUIPERD_BIN",
+            "CARGO_BIN_EXE_kuiperd",
+        ] {
+            if let Ok(p) = std::env::var(env_var) {
+                let pb = PathBuf::from(p);
+                if pb.exists() {
+                    return Some(pb.canonicalize().unwrap_or(pb));
+                }
+            }
         }
+        if let Ok(td) = std::env::var("CARGO_TARGET_DIR") {
+            let p = PathBuf::from(td);
+            for sub in [
+                "debug/kuiperd",
+                "debug/kuiperd.exe",
+                "release/kuiperd",
+                "release/kuiperd.exe",
+            ] {
+                let candidate = p.join(sub);
+                if candidate.exists() {
+                    return Some(candidate.canonicalize().unwrap_or(candidate));
+                }
+            }
+        }
+        let candidates = [
+            workspace_root.join("target/debug/rekuiperd.exe"),
+            workspace_root.join("target/debug/rekuiperd"),
+            workspace_root.join("target/release/rekuiperd.exe"),
+            workspace_root.join("target/release/rekuiperd"),
+            workspace_root.join("target/debug/kuiperd.exe"),
+            workspace_root.join("target/debug/kuiperd"),
+            workspace_root.join("target/release/kuiperd.exe"),
+            workspace_root.join("target/release/kuiperd"),
+            PathBuf::from("target/debug/kuiperd.exe"),
+            PathBuf::from("target/debug/kuiperd"),
+            PathBuf::from("../../target/debug/kuiperd.exe"),
+            PathBuf::from("../../target/debug/kuiperd"),
+            PathBuf::from("../target/debug/kuiperd.exe"),
+            PathBuf::from("../target/debug/kuiperd"),
+            PathBuf::from("target/release/kuiperd.exe"),
+            PathBuf::from("target/release/kuiperd"),
+            PathBuf::from("../../target/release/kuiperd.exe"),
+            PathBuf::from("../../target/release/kuiperd"),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return Some(c.canonicalize().unwrap_or_else(|_| c.clone()));
+            }
+        }
+        None
+    };
+
+    if let Some(found) = check_all() {
+        return found;
     }
+
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.args(["build", "-p", "kuiperd"])
+        .current_dir(&workspace_root);
+    if let Ok(td) = std::env::var("CARGO_TARGET_DIR") {
+        cmd.env("CARGO_TARGET_DIR", td);
+    }
+    let _ = cmd.status();
+
+    if let Some(found) = check_all() {
+        return found;
+    }
+
     panic!("kuiperd binary not found. Build it with `cargo build -p kuiperd` first.");
 }
 

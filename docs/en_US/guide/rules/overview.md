@@ -34,6 +34,7 @@ The table below describes rule definition parameters:
 | :--- | :--- | :--- |
 | `id` | false | Unique identifier of the rule within the rekuiper instance. |
 | `name` | true | Display name or description of the rule. |
+| `version` | true | Semantic or revision version tag of the rule definition. |
 | `sql` | Required if `graph` is omitted | SQL query that defines data processing logic. |
 | `actions` | Required if `graph` is omitted | Array of target sink actions. |
 | `graph` | Required if `sql` is omitted | JSON representation of the Directed Acyclic Graph (DAG). |

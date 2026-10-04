@@ -58,9 +58,13 @@ pub struct TableDefinition {
     pub options: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuleDefinition {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
     #[serde(default)]
     pub sql: String,
     #[serde(default)]
@@ -387,6 +391,12 @@ pub struct RuleStatus {
     #[serde(default)]
     pub message: String,
     #[serde(default)]
+    pub last_start_timestamp: i64,
+    #[serde(default)]
+    pub last_stop_timestamp: i64,
+    #[serde(default)]
+    pub next_start_timestamp: i64,
+    #[serde(default)]
     pub source_records_in_total: u64,
     #[serde(default)]
     pub sink_records_out_total: u64,
@@ -419,6 +429,9 @@ impl Default for RuleStatus {
         Self {
             status: "running".to_string(),
             message: "".to_string(),
+            last_start_timestamp: chrono::Utc::now().timestamp_millis(),
+            last_stop_timestamp: 0,
+            next_start_timestamp: 0,
             source_records_in_total: 0,
             sink_records_out_total: 0,
             exceptions_total: 0,

@@ -697,7 +697,11 @@ impl RuleManager {
         self.persist_rule(id, &snapshot, "running").await?;
         {
             if let Some(rule_arc) = self.rules.read().get(id) {
-                rule_arc.read().status.write().status = "running".to_string();
+                let active = rule_arc.read();
+                let mut st = active.status.write();
+                st.status = "running".to_string();
+                st.last_start_timestamp = chrono::Utc::now().timestamp_millis();
+                st.message.clear();
             }
         }
         Ok(())
@@ -719,7 +723,10 @@ impl RuleManager {
                 if let Some(handle) = rule.handle.take() {
                     handle.abort();
                 }
-                rule.status.write().status = "stopped".to_string();
+                let mut st = rule.status.write();
+                st.status = "stopped".to_string();
+                st.last_stop_timestamp = chrono::Utc::now().timestamp_millis();
+                st.message = "canceled manually".to_string();
             }
         }
         Ok(())
@@ -742,7 +749,10 @@ impl RuleManager {
             if let Some(handle) = rule.handle.take() {
                 handle.abort();
             }
-            rule.status.write().status = "running".to_string();
+            let mut st = rule.status.write();
+            st.status = "running".to_string();
+            st.last_start_timestamp = chrono::Utc::now().timestamp_millis();
+            st.message.clear();
         }
         Ok(())
     }
