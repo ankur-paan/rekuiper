@@ -47,6 +47,8 @@ fn table_def(name: &str) -> TableDefinition {
 fn rule_def(id: &str) -> RuleDefinition {
     RuleDefinition {
         id: id.to_string(),
+        name: None,
+        version: None,
         sql: "SELECT * FROM demo".to_string(),
         actions: vec![],
         options: None,

@@ -1051,7 +1051,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/data/import/status", get(import_status))
         .route("/metrics/dump", get(metrics_dump))
-        .route("/metrics/dump/check", get(metrics_dump))
+        .route("/metrics/dump/check", get(metrics_dump_check))
         .route("/metrics", get(prometheus_metrics_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -1061,7 +1061,7 @@ pub fn create_router(state: AppState) -> Router {
 }
 
 async fn ping_handler() -> impl IntoResponse {
-    (StatusCode::OK, "pong")
+    StatusCode::OK
 }
 
 async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -1077,14 +1077,22 @@ async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
     let memory_used = sys.used_memory();
     let memory_total = sys.total_memory();
 
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "x86" => "386",
+        "arm" => "arm",
+        other => other,
+    };
+
     let info = json!({
         "version": state.version,
         "os": std::env::consts::OS,
-        "arch": std::env::consts::ARCH,
+        "arch": arch,
         "upTimeSeconds": uptime,
-        "cpuUsage": cpu_usage,
-        "memoryUsed": memory_used,
-        "memoryTotal": memory_total,
+        "cpuUsage": format!("{:.2}%", cpu_usage),
+        "memoryUsed": memory_used.to_string(),
+        "memoryTotal": memory_total.to_string(),
     });
 
     (StatusCode::OK, Json(info))
@@ -1114,7 +1122,8 @@ fn describe_stream(def: &StreamDefinition) -> Value {
         "Name": def.name,
         "StreamFields": def.stream_fields,
         "Options": def.options,
-        "StreamType": "stream",
+        "StreamType": 0,
+        "Statement": serde_json::Value::Null,
     })
 }
 
@@ -1124,7 +1133,8 @@ fn describe_table(def: &TableDefinition) -> Value {
         "Name": def.name,
         "StreamFields": def.stream_fields,
         "Options": def.options,
-        "StreamType": "table",
+        "StreamType": 1,
+        "Statement": serde_json::Value::Null,
     })
 }
 
@@ -1209,7 +1219,7 @@ async fn create_stream(
                 state.stream_bus.get_or_create(&stmt.name);
                 (
                     StatusCode::CREATED,
-                    format!("Stream {} is created.\n", stmt.name),
+                    format!("Stream {} is created.", stmt.name),
                 )
                     .into_response()
             }
@@ -1226,11 +1236,7 @@ async fn create_stream(
             return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
         }
         state.stream_bus.get_or_create(&name);
-        (
-            StatusCode::CREATED,
-            format!("Stream {} is created.\n", name),
-        )
-            .into_response()
+        (StatusCode::CREATED, format!("Stream {} is created.", name)).into_response()
     } else {
         (StatusCode::BAD_REQUEST, "Missing sql or name in request").into_response()
     }
@@ -1262,7 +1268,7 @@ async fn delete_stream(State(state): State<AppState>, Path(name): Path<String>) 
         return resp;
     }
     match state.stream_manager.delete_stream(&name).await {
-        Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.\n", name)).into_response(),
+        Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -1327,7 +1333,7 @@ async fn update_stream(
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
     state.stream_bus.get_or_create(&name);
-    (StatusCode::OK, format!("Stream {} is updated.\n", name)).into_response()
+    (StatusCode::OK, format!("Stream {} is replaced.", name)).into_response()
 }
 
 /// HTTP push source following the eKuiper REST API.
@@ -1464,7 +1470,7 @@ async fn create_table(
             }
             (
                 StatusCode::CREATED,
-                format!("Table {} is created.\n", stmt.name),
+                format!("Table {} is created.", stmt.name),
             )
                 .into_response()
         }
@@ -1498,7 +1504,7 @@ async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -
         return resp;
     }
     match state.table_manager.delete_table(&name).await {
-        Ok(_) => (StatusCode::OK, format!("Table {} is dropped.\n", name)).into_response(),
+        Ok(_) => (StatusCode::OK, format!("Table {} is dropped.", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -1547,22 +1553,62 @@ async fn update_table(
     if let Err(e) = state.table_manager.update_table(table_def).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
-    (StatusCode::OK, format!("Table {} is updated.\n", name)).into_response()
+    (StatusCode::OK, format!("Table {} is replaced.", name)).into_response()
 }
 
 async fn get_table_details(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.table_manager.list_table_definitions())
+    let defs = state.table_manager.list_table_definitions();
+    let summaries: Vec<Value> = defs
+        .into_iter()
+        .map(|def| {
+            let table_type = def
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+                .map(|(_, v)| v.to_ascii_lowercase())
+                .unwrap_or_else(|| "memory".to_string());
+            let format = def
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("FORMAT"))
+                .map(|(_, v)| v.to_ascii_lowercase())
+                .unwrap_or_else(|| "json".to_string());
+            json!({
+                "name": def.name,
+                "type": table_type,
+                "format": format,
+            })
+        })
+        .collect();
+    Json(summaries)
 }
 
 async fn get_stream_details(State(state): State<AppState>) -> impl IntoResponse {
-    let defs: Vec<StreamDefinition> = {
-        let names = state.stream_manager.list_streams();
-        names
-            .iter()
-            .filter_map(|n| state.stream_manager.get_stream(n))
-            .collect()
-    };
-    Json(defs)
+    let names = state.stream_manager.list_streams();
+    let summaries: Vec<Value> = names
+        .iter()
+        .filter_map(|n| state.stream_manager.get_stream(n))
+        .map(|def| {
+            let stream_type = def
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+                .map(|(_, v)| v.to_ascii_lowercase())
+                .unwrap_or_else(|| "mqtt".to_string());
+            let format = def
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("FORMAT"))
+                .map(|(_, v)| v.to_ascii_lowercase())
+                .unwrap_or_else(|| "json".to_string());
+            json!({
+                "name": def.name,
+                "type": stream_type,
+                "format": format,
+            })
+        })
+        .collect();
+    Json(summaries)
 }
 
 /// Field-type map for a describe subject: `{name: {type, index}}`.
@@ -1621,10 +1667,28 @@ async fn list_rules(State(state): State<AppState>) -> impl IntoResponse {
     let summaries: Vec<Value> = rules
         .into_iter()
         .map(|r| {
+            let status_str = match state.rule_manager.get_rule_status(&r.id) {
+                Some(st) => st.status,
+                None => "stopped".to_string(),
+            };
+            let name = r
+                .name
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| r.id.clone());
+            let tags = if r.tags.is_empty() {
+                Value::Null
+            } else {
+                json!(r.tags)
+            };
+            let trace = state.trace_manager.is_tracing(&r.id);
+            let version = r.version.unwrap_or_default();
             json!({
                 "id": r.id,
-                "name": r.id,
-                "sql": r.sql,
+                "name": name,
+                "status": status_str,
+                "tags": tags,
+                "trace": trace,
+                "version": version,
             })
         })
         .collect();
@@ -1692,7 +1756,7 @@ async fn create_rule(
 
     (
         StatusCode::CREATED,
-        format!("Rule {} was created successfully.\n", rule_id),
+        format!("Rule {} was created successfully.", rule_id),
     )
         .into_response()
 }
@@ -5788,7 +5852,14 @@ async fn get_all_rule_status(State(state): State<AppState>) -> impl IntoResponse
     let mut all = HashMap::new();
     for rule in state.rule_manager.list_rules() {
         if let Some(status) = state.rule_manager.get_rule_status(&rule.id) {
-            all.insert(rule.id, status);
+            all.insert(
+                rule.id,
+                json!({
+                    "status": status.status,
+                    "last_exception": status.message,
+                    "exceptions_total": status.exceptions_total,
+                }),
+            );
         }
     }
     Json(all)
@@ -6313,7 +6384,7 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
         Ok(_) => {
             cancel_rule_source(&state, &name);
             state.trace_manager.stop_trace(&name);
-            (StatusCode::OK, format!("Rule {} was stopped", name)).into_response()
+            (StatusCode::OK, format!("Rule {} was stopped.", name)).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -6348,7 +6419,7 @@ async fn delete_rule(State(state): State<AppState>, Path(name): Path<String>) ->
         Ok(_) => {
             cancel_rule_source(&state, &name);
             state.trace_manager.stop_trace(&name);
-            (StatusCode::OK, format!("Rule {} is dropped.\n", name)).into_response()
+            (StatusCode::OK, format!("Rule {} is dropped.", name)).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -6426,7 +6497,7 @@ async fn update_rule(
     }
     (
         StatusCode::OK,
-        format!("Rule {} was updated successfully.\n", name),
+        format!("Rule {} was updated successfully.", name),
     )
         .into_response()
 }
@@ -9121,11 +9192,7 @@ async fn create_connection(State(state): State<AppState>, Json(payload): Json<Va
             .into_response();
     }
     state.connections.write().insert(id.clone(), payload);
-    (
-        StatusCode::CREATED,
-        format!("Connection {} is created.\n", id),
-    )
-        .into_response()
+    (StatusCode::CREATED, "success").into_response()
 }
 
 async fn get_connection(State(state): State<AppState>, Path(id): Path<String>) -> Response {
@@ -9220,7 +9287,7 @@ async fn delete_connection(State(state): State<AppState>, Path(id): Path<String>
     conns.remove(&id);
     conns.remove(&canonical);
     conns.remove(&dot);
-    (StatusCode::OK, format!("Connection {} is dropped.\n", id)).into_response()
+    (StatusCode::OK, "success").into_response()
 }
 
 /// Update-or-insert connection properties (eKuiper `PUT /connections/:id`):
@@ -9310,7 +9377,7 @@ async fn reset_rule_state(State(state): State<AppState>, Path(name): Path<String
         return resp;
     }
     match state.rule_manager.reset_rule_metrics(&name) {
-        Ok(_) => (StatusCode::OK, "success\n").into_response(),
+        Ok(_) => (StatusCode::OK, "success").into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -9689,11 +9756,15 @@ async fn stop_server() -> impl IntoResponse {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         std::process::exit(0);
     });
-    (StatusCode::OK, "Server is shutting down\n")
+    (StatusCode::OK, "stop success")
 }
 
 async fn import_status(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.latest_import_status.read().clone())
+}
+
+async fn metrics_dump_check() -> impl IntoResponse {
+    "disabled"
 }
 
 async fn metrics_dump(State(state): State<AppState>) -> impl IntoResponse {

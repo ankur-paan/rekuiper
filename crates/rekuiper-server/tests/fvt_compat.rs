@@ -57,9 +57,9 @@ async fn test_fvt_server_ping_and_root() {
     assert!(json["os"].is_string());
     assert!(json["arch"].is_string());
     assert!(json["upTimeSeconds"].is_number());
-    assert!(json["cpuUsage"].is_number());
-    assert!(json["memoryUsed"].is_number());
-    assert!(json["memoryTotal"].is_number());
+    assert!(json["cpuUsage"].is_string());
+    assert!(json["memoryUsed"].is_string());
+    assert!(json["memoryTotal"].is_string());
 }
 
 #[tokio::test]
@@ -478,7 +478,7 @@ async fn test_tables_and_details_lifecycle() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
-    assert_eq!(resp.text().await.unwrap(), "Table my_table is created.\n");
+    assert_eq!(resp.text().await.unwrap(), "Table my_table is created.");
 
     // 2. Verify GET /tables includes "my_table".
     let resp = client
@@ -546,7 +546,7 @@ async fn test_tables_and_details_lifecycle() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    assert_eq!(resp.text().await.unwrap(), "Table my_table is dropped.\n");
+    assert_eq!(resp.text().await.unwrap(), "Table my_table is dropped.");
 
     let resp = client
         .get(format!("{}/tables", base_url))
@@ -4770,7 +4770,7 @@ async fn test_batch_request_pipeline() {
 
     // Ping response
     assert_eq!(items[2]["code"], 200);
-    assert_eq!(items[2]["response"].as_str().unwrap(), "pong");
+    assert_eq!(items[2]["response"].as_str().unwrap(), "");
 
     // 3. Verify server state directly
     let resp = client
@@ -5874,7 +5874,7 @@ async fn test_stream_table_describe_and_schema_fields() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let described: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(described["Name"], json!("typed_stream"));
-    assert_eq!(described["StreamType"], json!("stream"));
+    assert_eq!(described["StreamType"], json!(0));
     assert_eq!(
         described["StreamFields"],
         json!([
@@ -5913,7 +5913,7 @@ async fn test_stream_table_describe_and_schema_fields() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let described: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(described["StreamType"], json!("table"));
+    assert_eq!(described["StreamType"], json!(1));
     assert_eq!(
         described["StreamFields"],
         json!([
@@ -7114,4 +7114,88 @@ async fn test_rule_stop_and_start_lifecycle() {
         .unwrap();
     let st2: serde_json::Value = status_resp2.json().await.unwrap();
     assert_eq!(st2["status"], "running");
+}
+
+#[tokio::test]
+async fn test_rules_list_and_all_status_parity() {
+    let (base_url, _handle) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create stream
+    let st_resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&serde_json::json!({
+            "sql": "CREATE STREAM parity_st () WITH (DATASOURCE=\"parity_ds\", TYPE=\"memory\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(st_resp.status(), reqwest::StatusCode::CREATED);
+
+    // Verify streamdetails wire format
+    let details_resp = client
+        .get(format!("{}/streamdetails", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(details_resp.status(), reqwest::StatusCode::OK);
+    let details: serde_json::Value = details_resp.json().await.unwrap();
+    let stream_item = details
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "parity_st")
+        .unwrap();
+    assert_eq!(stream_item["name"], "parity_st");
+    assert_eq!(stream_item["type"], "memory");
+    assert_eq!(stream_item["format"], "json");
+
+    // Create rule
+    let r_resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&serde_json::json!({
+            "id": "parity_rule",
+            "name": "Parity Rule",
+            "sql": "SELECT * FROM parity_st",
+            "actions": [{ "log": {} }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r_resp.status(), reqwest::StatusCode::CREATED);
+
+    // GET /rules format check
+    let rules_resp = client
+        .get(format!("{}/rules", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rules_resp.status(), reqwest::StatusCode::OK);
+    let rules: serde_json::Value = rules_resp.json().await.unwrap();
+    let rule_item = rules
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "parity_rule")
+        .unwrap();
+    assert_eq!(rule_item["id"], "parity_rule");
+    assert_eq!(rule_item["name"], "Parity Rule");
+    assert_eq!(rule_item["status"], "running");
+    assert!(rule_item.get("tags").is_some());
+    assert_eq!(rule_item["trace"], false);
+    assert!(rule_item.get("version").is_some());
+
+    // GET /rules/status/all format check
+    let all_resp = client
+        .get(format!("{}/rules/status/all", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(all_resp.status(), reqwest::StatusCode::OK);
+    let all_status: serde_json::Value = all_resp.json().await.unwrap();
+    assert!(all_status.get("parity_rule").is_some());
+    let entry = &all_status["parity_rule"];
+    assert_eq!(entry["status"], "running");
+    assert_eq!(entry["exceptions_total"], 0);
+    assert_eq!(entry["last_exception"], "");
 }

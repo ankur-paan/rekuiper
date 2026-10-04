@@ -58,10 +58,12 @@ Response sample (HTTP 200 OK):
 [
   {
     "id": "rule1",
+    "name": "rule1",
     "status": "Running"
   },
   {
      "id": "rule2",
+     "name": "rule2",
      "status": "Stopped: canceled by error."
   }
 ]
@@ -79,6 +81,8 @@ Response sample (HTTP 200 OK):
 
 ```json
 {
+  "id": "rule1",
+  "name": "rule1",
   "sql": "SELECT * from demo",
   "actions": [
     {
@@ -185,6 +189,8 @@ Response sample for a running rule:
 
 ```json
 {
+  "status": "running",
+  "message": "",
   "lastStartTimestamp": 0,
   "lastStopTimestamp": 0,
   "nextStartTimestamp": 0,
