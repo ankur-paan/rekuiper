@@ -1108,10 +1108,11 @@ fn push_decoded(
     batch: &mut Vec<StreamRecord>,
     publish: rumqttc::Publish,
     counters: Option<&RuleCounters>,
+    meta_flag: Option<&std::sync::atomic::AtomicBool>,
 ) {
-    let meta = config
-        .attach_meta
-        .then(|| mqtt_meta(publish.topic, publish.qos, publish.pkid));
+    let attach = config.attach_meta
+        || meta_flag.is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed));
+    let meta = attach.then(|| mqtt_meta(publish.topic, publish.qos, publish.pkid));
     if let Err(e) = decode_payload_into(&config.format, &publish.payload, meta, batch) {
         tracing::warn!("Skipping invalid MQTT payload: {}", e);
         if let Some(counters) = counters {
@@ -1133,6 +1134,7 @@ fn drain_buffered_publishes(
     batch: &mut Vec<StreamRecord>,
     max: usize,
     counters: Option<&RuleCounters>,
+    meta_flag: Option<&std::sync::atomic::AtomicBool>,
 ) {
     while batch.len() < max {
         if !matches!(
@@ -1142,7 +1144,7 @@ fn drain_buffered_publishes(
             break;
         }
         if let Some(rumqttc::Event::Incoming(rumqttc::Packet::Publish(p))) = events.pop_front() {
-            push_decoded(config, batch, p, counters);
+            push_decoded(config, batch, p, counters, meta_flag);
         }
     }
 }
@@ -1169,6 +1171,7 @@ pub struct MqttSource {
     pub config: MqttConfig,
     pub tx: StreamSender,
     rule_counters: Option<Arc<RuleCounters>>,
+    attach_meta_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl MqttSource {
@@ -1177,11 +1180,17 @@ impl MqttSource {
             config,
             tx,
             rule_counters: None,
+            attach_meta_flag: None,
         }
     }
 
     pub fn with_rule_counters(mut self, counters: Option<Arc<RuleCounters>>) -> Self {
         self.rule_counters = counters;
+        self
+    }
+
+    pub fn with_meta_flag(mut self, flag: Option<Arc<std::sync::atomic::AtomicBool>>) -> Self {
+        self.attach_meta_flag = flag;
         self
     }
 
@@ -1230,13 +1239,14 @@ impl MqttSource {
                                 // source: send_batch awaits subscriber capacity
                                 // instead of overwriting buffered records.
                                 let mut batch = Vec::with_capacity(16);
-                                push_decoded(&self.config, &mut batch, p, self.rule_counters.as_deref());
+                                push_decoded(&self.config, &mut batch, p, self.rule_counters.as_deref(), self.attach_meta_flag.as_deref());
                                 drain_buffered_publishes(
                                     &self.config,
                                     &mut eventloop.state.events,
                                     &mut batch,
                                     MQTT_SOURCE_MAX_BATCH,
                                     self.rule_counters.as_deref(),
+                                    self.attach_meta_flag.as_deref(),
                                 );
                                 if !batch.is_empty() {
                                     let _ = self.tx.send_batch(batch).await;
@@ -1264,11 +1274,17 @@ impl MqttSource {
                         match changed {
                             Ok(_) => {
                                 if *cancel_rx.borrow() {
+                                    let _ = client.disconnect().await;
+                                    let _ = tokio::time::timeout(std::time::Duration::from_millis(200), eventloop.poll()).await;
                                     return;
                                 }
                             }
                             // Cancellation sender dropped: shut down.
-                            Err(_) => return,
+                            Err(_) => {
+                                let _ = client.disconnect().await;
+                                let _ = tokio::time::timeout(std::time::Duration::from_millis(200), eventloop.poll()).await;
+                                return;
+                            }
                         }
                     }
                 }
@@ -1284,10 +1300,22 @@ impl MqttSource {
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Packet::Publish(p))) => {
-                    push_decoded(&self.config, &mut rows, p, self.rule_counters.as_deref());
+                    push_decoded(
+                        &self.config,
+                        &mut rows,
+                        p,
+                        self.rule_counters.as_deref(),
+                        self.attach_meta_flag.as_deref(),
+                    );
                     for record in rows.drain(..) {
                         if tx.send(record).await.is_err() {
                             // Receiver dropped; shut down cleanly.
+                            let _ = client.disconnect().await;
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_millis(200),
+                                eventloop.poll(),
+                            )
+                            .await;
                             return Ok(());
                         }
                     }
@@ -4063,7 +4091,7 @@ mod tests {
             serde_json::from_value(json!({"topic": "bench/telemetry"})).unwrap();
         let mut batch = vec![super::decode_mqtt_payload(br#"{"id":1}"#).unwrap()];
         let counters = super::RuleCounters::default();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024, Some(&counters));
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024, Some(&counters), None);
         assert_eq!(
             counters
                 .exceptions
@@ -4085,7 +4113,7 @@ mod tests {
         // The batch size bound is respected; the rest stays queued in order.
         let mut events: VecDeque<rumqttc::Event> = (0..10).map(|i| publish(obj(i))).collect();
         let mut batch = Vec::new();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 4, None);
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 4, None, None);
         let ids: Vec<_> = batch.iter().map(|r| r.data["id"].clone()).collect();
         assert_eq!(ids, vec![json!(0), json!(1), json!(2), json!(3)]);
         assert_eq!(events.len(), 6);
@@ -4093,7 +4121,7 @@ mod tests {
         // Requested metadata carries the publish topic and qos.
         config.attach_meta = true;
         let mut batch = Vec::new();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1, None);
+        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1, None, None);
         assert_eq!(batch[0].data["__meta__"]["topic"], json!("bench/telemetry"));
         assert_eq!(batch[0].data["__meta__"]["qos"], json!(0));
         assert!(batch[0].data["__meta__"].get("messageId").is_some());
