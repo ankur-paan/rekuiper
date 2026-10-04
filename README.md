@@ -1,9 +1,9 @@
 # rekuiper
 
-[![Release](https://img.shields.io/badge/release-v0.506--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
+[![Release](https://img.shields.io/badge/release-v0.507--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
 [![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.506--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
+[![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.507--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)
 
 rekuiper is a stream processing engine written in Rust for edge computing systems. The engine is fully compatible with LF Edge eKuiper. It implements the eKuiper REST API, SQL dialect, rule definition format, and the `kuiper` command-line interface (CLI). Existing eKuiper streams, rules, and ecosystem tools (including [eKuiper Manager](https://github.com/ankur-paan/ekuiper-manager)) operate without changes.
@@ -133,7 +133,7 @@ docker run -d --name rekuiper \
   -p 9081:9081 -p 20499:20499 \
   -e KUIPER__BASIC__CONSOLELOG=true \
   -e KUIPER__BASIC__PROMETHEUS=true \
-  ankurkrp/rekuiper:0.506-beta
+  ankurkrp/rekuiper:0.507-beta
 ```
 
 ### Run with Docker Compose
@@ -153,7 +153,7 @@ Install the bundled Helm chart:
 ```bash
 helm install rekuiper deploy/chart/ekuiper \
   --set image.repository=ankurkrp/rekuiper \
-  --set image.tag=0.506-beta
+  --set image.tag=0.507-beta
 ```
 
 Refer to the [Helm Chart Documentation](deploy/chart/ekuiper/README.md) for persistence and volume configurations.
@@ -372,7 +372,8 @@ Prometheus metrics are available at `http://localhost:9081/metrics` and on port 
 
 ## Release History
 
-- **0.506-beta** (Current): Upstream LF Edge eKuiper SQL parity functions (`array_positions`, `acc_distinct_collect`, `distinct_acc`, and 4-argument `lead` with `ignore_null`); stream ingestion buffer overflow policy validation (`BUFFER_FULL_POLICY="block|dropOldest"`); file sink path security hardening against directory traversal; Model Context Protocol (MCP) server 2.0 with 46 tools, 15 resources, and 8 prompts; complete technical documentation rewrite in ASD-STE100.
+- **0.507-beta** (Current): Upstream LF Edge eKuiper REST API and rule metadata parity (`GET /rules/:id/status` returns structured status object containing `status`, `message`, `source_statuses`, and execution metrics; preserved rule `name` and optional `version` field in `RuleDefinition`); CI runner workflow optimization eliminating duplicate pipeline executions on merge.
+- **0.506-beta**: Upstream LF Edge eKuiper SQL parity functions (`array_positions`, `acc_distinct_collect`, `distinct_acc`, and 4-argument `lead` with `ignore_null`); stream ingestion buffer overflow policy validation (`BUFFER_FULL_POLICY="block|dropOldest"`); file sink path security hardening against directory traversal; Model Context Protocol (MCP) server 2.0 with 46 tools, 15 resources, and 8 prompts; complete technical documentation rewrite in ASD-STE100.
 - **0.505-beta**: Six enterprise extensions: native RabbitMQ AMQP 0-9-1 source and sink with QoS and credential management; vector math & similarity search functions (`cosine_similarity`, `vector_l2`, `vector_dot`, `vector_match`) with SQL threshold filtering; WebAssembly (Wasm) runtime with REST registration and UDF execution; dynamic secret resolution (`vault://` and `env://`) with REST redaction; Apache Parquet columnar sink and source reader; EdgeX Foundry concurrent dual-port listening (9081 and 59720) with OpenZiti zero-trust architecture.
 - **0.504-beta**: Native dual binary entrypoints (`rekuiperd` daemon and `rekuiper` CLI); prioritized `etc/rekuiper.yaml` configuration and `REKUIPER__` environment variable loading; repository metadata maintenance for I-Dacs Labs; updated technical documentation site.
 - **0.503-beta**: Full SQL function library parity (162 functions) verified against live MQTT telemetry; compression extensions (`compress`, `decompress` for zlib, gzip, flate, zstd); timezone conversions (`convert_tz`); high-resolution date arithmetic (`date_calc`); dynamic column projection (`changed_cols`); row unnesting (`unnest`, `extract`); running stream accumulators (`acc_collect`).

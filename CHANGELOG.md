@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
 > No latency-histogram p99 is claimed.
 
+## [0.507.0-beta] - 2026-10-04
+
+### Added
+- **eKuiper REST Parity for Rule Status**: Updated `GET /rules/:id/status` to return structured status objects with top-level `status` (`"running"`, `"stopped"`), `message`, and detailed metrics matching the LF Edge eKuiper REST schema.
+- **Rule Metadata Parity**: Added support for user-supplied rule `name` and optional `version` field in `RuleDefinition`, preserved during rule lifecycle and returned in `GET /rules` and `GET /rules/:id`.
+
+### Changed
+- **CI Pipeline Optimization**: Streamlined `.github/workflows/ci.yml` and `.github/workflows/docker.yml` triggers to run full test matrices exclusively on pull requests and release tags, eliminating redundant duplicate test runs on branch merges.
+- **Qualification Test Harness**: Enhanced `find_kuiperd_bin()` to reliably discover daemon binaries across custom `CARGO_TARGET_DIR` paths and test runner build directories.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.507-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.507-beta`.
+
+---
+
 ## [0.506.0-beta] - 2026-10-03
 
 ### Added

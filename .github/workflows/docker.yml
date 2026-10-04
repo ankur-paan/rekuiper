@@ -3,7 +3,6 @@ name: Publish Docker Image
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
     tags: [ 'v*', '[0-9]+.*' ]
 
 jobs:

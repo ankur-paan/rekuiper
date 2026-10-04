@@ -24,7 +24,7 @@ docker run -d \
   -p 9081:9081 \
   -p 20498:20498 \
   -p 20499:20499 \
-  ankurkrp/rekuiper:0.506-beta
+  ankurkrp/rekuiper:0.507-beta
 ```
 
 Verify engine reachability:

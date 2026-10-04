@@ -1,3 +1,18 @@
+# Release Notes - rekuiper v0.507-beta
+
+`rekuiper` v0.507-beta delivers upstream LF Edge eKuiper REST API and rule metadata parity, enhanced daemon qualification discovery, and GitHub Actions CI runner workflow optimizations.
+
+Key highlights:
+- **eKuiper REST Parity for Rule Status**: `GET /rules/:id/status` returns structured status objects containing top-level `status` (`"running"`, `"stopped"`), `message`, `source_statuses`, and execution metrics matching the eKuiper REST contract.
+- **Rule Metadata Parity**: Preserves user-supplied rule `name` and optional `version` tag in `RuleDefinition`, returned in `GET /rules` and `GET /rules/:id`.
+- **CI Pipeline Optimization**: Streamlined GitHub Actions workflow triggers across `.github/workflows/ci.yml` and `.github/workflows/docker.yml` to eliminate redundant duplicate matrix executions on branch merges.
+- **Qualification Test Harness Hardening**: Enhanced binary discovery in `find_kuiperd_bin()` to reliably resolve `kuiperd` across custom `CARGO_TARGET_DIR` paths and test runner environments.
+
+- Docker image: `ankurkrp/rekuiper:0.507-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.507-beta`)
+
+---
+
 # Release Notes - rekuiper v0.506-beta
 
 `rekuiper` v0.506-beta adds upstream SQL parity functions, stream ingestion buffer policy enforcement, file sink traversal hardening, and Model Context Protocol (MCP) server 2.0. This release also aligns all project documentation with the ASD-STE100 technical English standard.
