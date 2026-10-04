@@ -91,6 +91,20 @@ impl Evaluator {
                         }
                     }
                 }
+                Expr::WildcardModified { except, replace } => {
+                    for (k, v) in record {
+                        if k != META_KEY && !k.starts_with("__") {
+                            if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
+                                continue;
+                            }
+                            output.insert(k.clone(), v.clone());
+                        }
+                    }
+                    for (rep_expr, col) in replace {
+                        let val = Self::eval_val(rep_expr, record);
+                        output.insert(col.clone(), val);
+                    }
+                }
                 Expr::Identifier(name) => {
                     let key = alias.unwrap_or_else(|| name.clone());
                     if let Some(val) = record.get(name) {
@@ -166,6 +180,22 @@ impl Evaluator {
                                 output.entry(k.clone()).or_insert_with(|| v.clone());
                             }
                         }
+                    }
+                }
+                Expr::WildcardModified { except, replace } => {
+                    if let Some(rec) = first {
+                        for (k, v) in rec {
+                            if k != META_KEY && !k.starts_with("__") {
+                                if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
+                                    continue;
+                                }
+                                output.entry(k.clone()).or_insert_with(|| v.clone());
+                            }
+                        }
+                    }
+                    for (rep_expr, col) in replace {
+                        let val = Self::eval_agg_expr(rep_expr, records, &output);
+                        output.insert(col.clone(), val);
                     }
                 }
                 Expr::Identifier(name) => {
@@ -250,6 +280,7 @@ impl Evaluator {
                 | "var"
                 | "vars"
                 | "percentile"
+                | "percentile_cont"
                 | "percentile_disc"
                 | "last_value"
                 | "merge_agg"
@@ -274,7 +305,7 @@ impl Evaluator {
             "stddevs" => Self::agg_stddevs(args, records),
             "var" => Self::agg_var(args, records),
             "vars" => Self::agg_vars(args, records),
-            "percentile" => Self::agg_percentile(args, records),
+            "percentile" | "percentile_cont" => Self::agg_percentile(args, records),
             "percentile_disc" => Self::agg_percentile_disc(args, records),
             "last_value" => Self::agg_last_value(args, records),
             "merge_agg" => Self::agg_merge_agg(args, records),
@@ -296,7 +327,7 @@ impl Evaluator {
         output: &HashMap<String, Value>,
     ) -> Value {
         match expr {
-            Expr::Wildcard => Value::Null,
+            Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
             Expr::Literal(v) => v.clone(),
             Expr::Identifier(name) => {
                 if let Some(v) = output.get(name) {
@@ -461,6 +492,20 @@ impl Evaluator {
                         if k != META_KEY && !k.starts_with("__") {
                             output.insert(k.clone(), v.clone());
                         }
+                    }
+                }
+                Expr::WildcardModified { except, replace } => {
+                    for (k, v) in record {
+                        if k != META_KEY && !k.starts_with("__") {
+                            if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
+                                continue;
+                            }
+                            output.insert(k.clone(), v.clone());
+                        }
+                    }
+                    for (rep_expr, col) in replace {
+                        let val = Self::eval_stateful_expr(rep_expr, record, state);
+                        output.insert(col.clone(), val);
                     }
                 }
                 Expr::Identifier(name) => {
@@ -640,7 +685,7 @@ impl Evaluator {
         state: &RuleState,
     ) -> Value {
         match expr {
-            Expr::Wildcard => Value::Null,
+            Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
             Expr::Literal(val) => val.clone(),
             Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
             Expr::FieldAccess { parent, field } => {
@@ -714,13 +759,23 @@ impl Evaluator {
                     Value::Bool(is_null)
                 }
             }
-            Expr::Call { .. } => Self::eval_stateful_call(expr, record, state, None),
-            Expr::Over { call, partition_by } => {
+            Expr::Call { .. } => Self::eval_stateful_call(expr, record, state, None, false),
+            Expr::Over {
+                call,
+                partition_by,
+                when,
+            } => {
                 let partition_key = match partition_by {
                     Some(p) => Self::value_to_key(&Self::eval_stateful_expr(p, record, state)),
                     None => String::new(),
                 };
-                Self::eval_stateful_call(call, record, state, Some(&partition_key))
+                let skip_update = if let Some(cond) = when {
+                    let cond_val = Self::eval_stateful_expr(cond, record, state);
+                    !cond_val.as_bool().unwrap_or(false)
+                } else {
+                    false
+                };
+                Self::eval_stateful_call(call, record, state, Some(&partition_key), skip_update)
             }
             Expr::Case {
                 operand,
@@ -741,6 +796,7 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
         partition_key: Option<&str>,
+        skip_update: bool,
     ) -> Value {
         let (name, args) = match expr {
             Expr::Call { name, args } => (name, args),
@@ -759,6 +815,7 @@ impl Evaluator {
                 state,
                 &call_id,
                 partition_key.unwrap_or(""),
+                skip_update,
             );
         }
         if lowered == "lag" {
@@ -767,7 +824,13 @@ impl Evaluator {
                 .map(|a| Self::eval_stateful_expr(a, record, state))
                 .collect();
             let call_id = Self::column_name(expr, 0);
-            return Self::eval_lag(&vals, state, &call_id, partition_key.unwrap_or(""));
+            return Self::eval_lag(
+                &vals,
+                state,
+                &call_id,
+                partition_key.unwrap_or(""),
+                skip_update,
+            );
         }
         if lowered == "had_changed" || lowered == "changed_col" {
             let vals: Vec<Value> = args
@@ -833,11 +896,14 @@ impl Evaluator {
             let call_id = Self::column_name(expr, 0);
             let state_key = format!("row_number:{}:{}", call_id, partition_key.unwrap_or(""));
             let mut guard = state.state.write();
-            let next = guard
+            let current = guard
                 .get(&state_key)
                 .and_then(|v| v.as_i64())
-                .unwrap_or(0)
-                .saturating_add(1);
+                .unwrap_or(0);
+            if skip_update {
+                return Value::from(current);
+            }
+            let next = current.saturating_add(1);
             guard.insert(state_key, Value::from(next));
             return Value::from(next);
         }
@@ -913,8 +979,28 @@ impl Evaluator {
         state: &RuleState,
         call_id: &str,
         partition_key: &str,
+        skip_update: bool,
     ) -> Value {
         let state_key = format!("{}:{}:{}", lowered_name, call_id, partition_key);
+        if skip_update {
+            if lowered_name == "acc_count" {
+                return state
+                    .state
+                    .read()
+                    .get(&state_key)
+                    .cloned()
+                    .unwrap_or(Value::from(0));
+            }
+            if lowered_name == "acc_avg" {
+                return Self::acc_avg_current(state, &state_key);
+            }
+            return state
+                .state
+                .read()
+                .get(&state_key)
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
         match lowered_name {
             "acc_map_agg" => Self::acc_map_agg(state, &state_key, args),
             "acc_max" => Self::acc_extreme(state, &state_key, args, true),
@@ -937,7 +1023,13 @@ impl Evaluator {
     /// (default `Null`) when fewer rows have been seen. The current value is
     /// appended to history after the lookup. State key:
     /// `lag:{func_call_id}:{partition_key}`.
-    fn eval_lag(args: &[Value], state: &RuleState, call_id: &str, partition_key: &str) -> Value {
+    fn eval_lag(
+        args: &[Value],
+        state: &RuleState,
+        call_id: &str,
+        partition_key: &str,
+        skip_update: bool,
+    ) -> Value {
         if args.is_empty() || args.len() > 3 {
             return Value::Null;
         }
@@ -957,8 +1049,10 @@ impl Evaluator {
         } else {
             default
         };
-        history.push(args[0].clone());
-        guard.insert(state_key, Value::Array(history));
+        if !skip_update {
+            history.push(args[0].clone());
+            guard.insert(state_key, Value::Array(history));
+        }
         out
     }
 
@@ -1762,13 +1856,16 @@ impl Evaluator {
             BinaryOperator::Mul => "*",
             BinaryOperator::Div => "/",
             BinaryOperator::Mod => "%",
+            BinaryOperator::BitAnd => "&",
+            BinaryOperator::BitOr => "|",
+            BinaryOperator::BitXor => "^",
             BinaryOperator::Like => "LIKE",
         }
     }
 
-    fn column_name(expr: &Expr, idx: usize) -> String {
+    pub fn column_name(expr: &Expr, idx: usize) -> String {
         match expr {
-            Expr::Wildcard => "*".to_string(),
+            Expr::Wildcard | Expr::WildcardModified { .. } => "*".to_string(),
             Expr::Identifier(name) => name.clone(),
             Expr::FieldAccess { parent, field } => {
                 // Full dotted path for uniqueness, e.g. dev.temp
@@ -1837,13 +1934,19 @@ impl Evaluator {
                 let inner: Vec<String> = args.iter().map(|a| Self::column_name(a, idx)).collect();
                 format!("{}({})", name, inner.join(", "))
             }
-            Expr::Over { call, partition_by } => match partition_by {
-                Some(p) => format!(
-                    "{} OVER (PARTITION BY {})",
-                    Self::column_name(call, idx),
-                    Self::column_name(p, idx)
-                ),
-                None => format!("{} OVER ()", Self::column_name(call, idx)),
+            Expr::Over {
+                call,
+                partition_by,
+                when,
+            } => {
+                let mut parts = Vec::new();
+                if let Some(p) = partition_by {
+                    parts.push(format!("PARTITION BY {}", Self::column_name(p, idx)));
+                }
+                if let Some(w) = when {
+                    parts.push(format!("WHEN {}", Self::column_name(w, idx)));
+                }
+                format!("{} OVER ({})", Self::column_name(call, idx), parts.join(" "))
             },
             Expr::Case {
                 operand,
@@ -1876,7 +1979,7 @@ impl Evaluator {
     /// infer to `"any"`.
     pub fn infer_expr_type(expr: &Expr) -> &'static str {
         match expr {
-            Expr::Wildcard | Expr::Identifier(_) | Expr::FieldAccess { .. } => "any",
+            Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::FieldAccess { .. } => "any",
             Expr::Index { .. } => "any",
             Expr::Slice { .. } => "array",
             Expr::Literal(val) => match val {
@@ -1904,6 +2007,7 @@ impl Evaluator {
                 | BinaryOperator::Or
                 | BinaryOperator::Like => "boolean",
                 BinaryOperator::Div => "float",
+                BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor => "bigint",
                 BinaryOperator::Add
                 | BinaryOperator::Sub
                 | BinaryOperator::Mul
@@ -1929,7 +2033,7 @@ impl Evaluator {
             },
             Expr::Between { .. } | Expr::InList { .. } | Expr::IsNull { .. } => "boolean",
             Expr::Call { name, .. } => match name.to_ascii_lowercase().as_str() {
-                "avg" | "stddev" | "stddevs" | "var" | "vars" | "percentile" | "sin" | "cos"
+                "avg" | "stddev" | "stddevs" | "var" | "vars" | "percentile" | "percentile_cont" | "sin" | "cos"
                 | "tan" | "asin" | "acos" | "atan" | "atan2" | "cosh" | "sinh" | "tanh" | "cot"
                 | "radians" | "degrees" | "exp" | "ln" | "log" | "log2" | "log10" | "sqrt"
                 | "pi" | "rand" => "float",
@@ -1943,7 +2047,7 @@ impl Evaluator {
                 | "array_contains" | "array_contains_any" => "boolean",
                 "concat" | "lower" | "upper" | "trim" | "ltrim" | "rtrim" | "lpad" | "rpad"
                 | "replace" | "reverse" | "substr" | "substring" | "regexp_replace"
-                | "regexp_substring" | "split_value" | "chr" | "hex2dec" | "dec2hex" | "encode"
+                | "regexp_substring" | "regexp_substr" | "split_value" | "chr" | "hex2dec" | "dec2hex" | "encode"
                 | "base64_encode" | "decode" | "base64_decode" | "uuid" | "newuuid"
                 | "format_date" | "day_name" | "month_name" | "to_json" | "tojson" | "rule_id" => {
                     "string"
@@ -2030,7 +2134,7 @@ impl Evaluator {
 
     pub fn eval_val(expr: &Expr, record: &HashMap<String, Value>) -> Value {
         match expr {
-            Expr::Wildcard => Value::Null,
+            Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
             Expr::Literal(val) => val.clone(),
             Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
             Expr::FieldAccess { parent, field } => {
@@ -2190,6 +2294,9 @@ impl Evaluator {
             BinaryOperator::Div => Self::eval_arith(left, right, ArithOp::Div),
             BinaryOperator::Mod => Self::eval_arith(left, right, ArithOp::Mod),
             BinaryOperator::Like => Self::eval_like(left, right),
+            BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor => {
+                Self::eval_bitwise(left, right, op)
+            }
         }
     }
 
@@ -2379,6 +2486,37 @@ impl Evaluator {
         Value::Null
     }
 
+    fn eval_bitwise(left: &Value, right: &Value, op: &BinaryOperator) -> Value {
+        if left.is_null() || right.is_null() {
+            return Value::Null;
+        }
+        if let (Some(lb), Some(rb)) = (left.as_bool(), right.as_bool()) {
+            return match op {
+                BinaryOperator::BitAnd => Value::Bool(lb && rb),
+                BinaryOperator::BitOr => Value::Bool(lb || rb),
+                BinaryOperator::BitXor => Value::Bool(lb != rb),
+                _ => Value::Null,
+            };
+        }
+        if let (Some(l), Some(r)) = (left.as_i64(), right.as_i64()) {
+            return match op {
+                BinaryOperator::BitAnd => Value::from(l & r),
+                BinaryOperator::BitOr => Value::from(l | r),
+                BinaryOperator::BitXor => Value::from(l ^ r),
+                _ => Value::Null,
+            };
+        }
+        if let (Some(l), Some(r)) = (left.as_u64(), right.as_u64()) {
+            return match op {
+                BinaryOperator::BitAnd => Value::from(l & r),
+                BinaryOperator::BitOr => Value::from(l | r),
+                BinaryOperator::BitXor => Value::from(l ^ r),
+                _ => Value::Null,
+            };
+        }
+        Value::Null
+    }
+
     fn eval_call(name: &str, args: &[Value]) -> Value {
         match name.to_ascii_lowercase().as_str() {
             // ---- Math ----
@@ -2513,7 +2651,7 @@ impl Evaluator {
             "crc32" => Self::func_crc32(args),
             "regexp_matches" => Self::func_regexp_matches(args),
             "regexp_replace" => Self::func_regexp_replace(args),
-            "regexp_substring" => Self::func_regexp_substring(args),
+            "regexp_substring" | "regexp_substr" => Self::func_regexp_substring(args),
             "split_value" => Self::func_split_value(args),
             "numbytes" => Self::func_numbytes(args),
             "chr" => Self::func_chr(args),

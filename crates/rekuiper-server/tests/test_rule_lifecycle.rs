@@ -677,3 +677,88 @@ async fn test_restart_rule_persistence_failure_preserves_running_source() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn test_rule_validation_rejections() {
+    let temp_db = TempDb::new("val_rej");
+    let kv: Arc<dyn KvStore> = Arc::new(SqliteKvStore::new(&temp_db.0).await.unwrap());
+    let server = TestServer::start(kv).await;
+    let client = reqwest::Client::new();
+
+    // Create stream first
+    let resp = client
+        .post(format!("{}/streams", server.base_url))
+        .json(&json!({
+            "sql": "create stream s () WITH (DATASOURCE=\"s\", TYPE=\"mqtt\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // 1. Duplicate output fields (unaliased duplicate)
+    let resp = client
+        .post(format!("{}/rules", server.base_url))
+        .json(&json!({
+            "id": "r_dup1",
+            "sql": "SELECT id, id FROM s",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("duplicate field definition id"), "expected duplicate field error, got: {}", body);
+
+    // 2. Duplicate output fields (aliased duplicate)
+    let resp = client
+        .post(format!("{}/rules", server.base_url))
+        .json(&json!({
+            "id": "r_dup2",
+            "sql": "SELECT id, temp AS id FROM s",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("duplicate field definition id"), "expected duplicate field error, got: {}", body);
+
+    // 3. Rule with missing actions
+    let resp = client
+        .post(format!("{}/rules", server.base_url))
+        .json(&json!({
+            "id": "r_no_act",
+            "sql": "SELECT id FROM s",
+            "actions": []
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("Missing rule actions."), "expected missing rule actions error, got: {}", body);
+
+    // 4. Rule option with wrong type (qos: "high" instead of integer)
+    let resp = client
+        .post(format!("{}/rules", server.base_url))
+        .json(&json!({
+            "id": "r_bad_opt",
+            "sql": "SELECT id FROM s",
+            "actions": [{"log": {}}],
+            "options": {
+                "qos": "high"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("invalid rule json"), "expected invalid rule json error, got: {}", body);
+
+    server.shutdown().await;
+}
+

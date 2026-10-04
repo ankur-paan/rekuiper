@@ -1710,6 +1710,9 @@ async fn create_rule(
     State(state): State<AppState>,
     Json(mut rule): Json<RuleDefinition>,
 ) -> Response {
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     // Graph rules carry no SQL: compile the DAG into SQL + actions first.
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
@@ -1729,6 +1732,13 @@ async fn create_rule(
                 }
             }
         }
+    }
+    if rule.actions.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
     }
     let mut parser = Parser::new(&rule.sql);
     let select_stmt = match parser.parse_select() {
@@ -6352,13 +6362,16 @@ fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
                 collect_called_functions(e, out);
             }
         }
-        Expr::Over { call, partition_by } => {
+        Expr::Over { call, partition_by, when } => {
             collect_called_functions(call, out);
             if let Some(p) = partition_by {
                 collect_called_functions(p, out);
             }
+            if let Some(w) = when {
+                collect_called_functions(w, out);
+            }
         }
-        Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => {}
+        Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::Literal(_) => {}
     }
 }
 
@@ -6431,10 +6444,64 @@ fn check_rule_functions(state: &AppState, stmt: &SelectStmt) -> Option<Response>
     })
 }
 
+fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(), String> {
+    let Some(opts) = options else { return Ok(()); };
+    for (k, v) in opts {
+        match k.as_str() {
+            "qos" => {
+                if !v.is_i64() && !v.is_u64() {
+                    return Err("invalid rule json: qos must be an integer (0, 1, or 2)".to_string());
+                }
+                let q = v.as_i64().unwrap_or(-1);
+                if !(0..=2).contains(&q) {
+                    return Err("invalid rule json: qos must be 0, 1, or 2".to_string());
+                }
+            }
+            "debug" | "isEventTime" | "sendMetaToSink" | "sendNilField" | "sendError"
+                if !v.is_boolean() =>
+            {
+                return Err(format!("invalid rule json: {} must be a boolean", k));
+            }
+            "concurrency" | "bufferLength" if !v.is_i64() && !v.is_u64() => {
+                return Err(format!("invalid rule json: {} must be an integer", k));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_duplicate_fields(stmt: &SelectStmt) -> Option<Response> {
+    let mut seen_fields = HashSet::new();
+    for (idx, field) in stmt.fields.iter().enumerate() {
+        if matches!(field, Expr::Wildcard | Expr::WildcardModified { .. }) {
+            continue;
+        }
+        let name = stmt
+            .field_aliases
+            .get(idx)
+            .and_then(|a| a.clone())
+            .unwrap_or_else(|| Evaluator::column_name(field, idx));
+        if !seen_fields.insert(name.clone()) {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("duplicate field definition {}", name),
+                )
+                    .into_response(),
+            );
+        }
+    }
+    None
+}
+
 /// Shared create/update gate: the source stream or table must exist and
 /// every called function must be known. Returns the rejection response
 /// when the rule is invalid.
 fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> {
+    if let Some(resp) = check_duplicate_fields(stmt) {
+        return Some(resp);
+    }
     let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
         || state.table_manager.get_table(&stmt.from).is_some();
     if !stream_exists {
@@ -6474,19 +6541,34 @@ async fn validate_rule(
     State(state): State<AppState>,
     Json(rule): Json<RuleDefinition>,
 ) -> Response {
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    if rule.actions.is_empty() && rule.graph.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
+    }
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
             return match compile_graph_to_sql_and_actions(graph) {
                 Ok((sql, _)) => {
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
-                        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
-                            Json(json!({
-                                "sources": graph.topo.sources,
-                                "valid": true
-                            }))
-                            .into_response()
-                        }),
+                        Ok(stmt) => {
+                            if let Some(resp) = check_duplicate_fields(&stmt) {
+                                return resp;
+                            }
+                            check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+                                Json(json!({
+                                    "sources": graph.topo.sources,
+                                    "valid": true
+                                }))
+                                .into_response()
+                            })
+                        }
                         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
                             .into_response(),
                     }
@@ -6501,13 +6583,18 @@ async fn validate_rule(
     }
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
-        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
-            Json(json!({
-                "sources": [stmt.from],
-                "valid": true
-            }))
-            .into_response()
-        }),
+        Ok(stmt) => {
+            if let Some(resp) = check_duplicate_fields(&stmt) {
+                return resp;
+            }
+            check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+                Json(json!({
+                    "sources": [stmt.from],
+                    "valid": true
+                }))
+                .into_response()
+            })
+        }
         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response(),
     }
 }
@@ -6678,6 +6765,20 @@ fn window_to_string(window: &WindowDef) -> String {
 fn expr_to_string(expr: &Expr) -> String {
     match expr {
         Expr::Wildcard => "*".to_string(),
+        Expr::WildcardModified { except, replace } => {
+            let mut s = "*".to_string();
+            if !except.is_empty() {
+                s.push_str(&format!(" EXCEPT({})", except.join(", ")));
+            }
+            if !replace.is_empty() {
+                let reps: Vec<String> = replace
+                    .iter()
+                    .map(|(e, c)| format!("{} AS {}", expr_to_string(e), c))
+                    .collect();
+                s.push_str(&format!(" REPLACE({})", reps.join(", ")));
+            }
+            s
+        }
         Expr::Identifier(name) => name.clone(),
         Expr::Literal(v) => v.to_string(),
         Expr::BinaryOp { left, op, right } => {
@@ -6696,6 +6797,9 @@ fn expr_to_string(expr: &Expr) -> String {
                 rekuiper_sql::BinaryOperator::Div => "/",
                 rekuiper_sql::BinaryOperator::Mod => "%",
                 rekuiper_sql::BinaryOperator::Like => "LIKE",
+                rekuiper_sql::BinaryOperator::BitAnd => "&",
+                rekuiper_sql::BinaryOperator::BitOr => "|",
+                rekuiper_sql::BinaryOperator::BitXor => "^",
             };
             format!(
                 "{} {} {}",
@@ -6878,6 +6982,9 @@ async fn update_rule(
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
     }
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     rule.id = name.clone();
     // Graph rules carry no SQL: compile the DAG first (mirrors creation).
     if rule.sql.trim().is_empty() {
@@ -6898,6 +7005,13 @@ async fn update_rule(
                 }
             }
         }
+    }
+    if rule.actions.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
     }
     let mut parser = Parser::new(&rule.sql);
     let select_stmt = match parser.parse_select() {

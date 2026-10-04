@@ -4,6 +4,10 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Wildcard,
+    WildcardModified {
+        except: Vec<String>,
+        replace: Vec<(Expr, String)>,
+    },
     Identifier(String),
     Literal(Value),
     BinaryOp {
@@ -62,6 +66,7 @@ pub enum Expr {
     Over {
         call: Box<Expr>,
         partition_by: Option<Box<Expr>>,
+        when: Option<Box<Expr>>,
     },
 }
 
@@ -81,6 +86,9 @@ pub enum BinaryOperator {
     Div,
     Mod,
     Like,
+    BitAnd,
+    BitOr,
+    BitXor,
 }
 
 #[derive(Debug, Clone, PartialEq)]
