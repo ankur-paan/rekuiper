@@ -7125,7 +7125,7 @@ async fn test_rules_list_and_all_status_parity() {
     let st_resp = client
         .post(format!("{}/streams", base_url))
         .json(&serde_json::json!({
-            "sql": "CREATE STREAM parity_st () WITH (DATASOURCE=\"parity_ds\", TYPE=\"mqtt\", FORMAT=\"json\")"
+            "sql": "CREATE STREAM parity_st () WITH (DATASOURCE=\"parity_ds\", TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -7147,7 +7147,7 @@ async fn test_rules_list_and_all_status_parity() {
         .find(|s| s["name"] == "parity_st")
         .unwrap();
     assert_eq!(stream_item["name"], "parity_st");
-    assert_eq!(stream_item["type"], "mqtt");
+    assert_eq!(stream_item["type"], "memory");
     assert_eq!(stream_item["format"], "json");
 
     // Create rule
