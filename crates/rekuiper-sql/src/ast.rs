@@ -70,6 +70,152 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    /// Format an expression in eKuiper's exact internal AST debug/string representation
+    /// (e.g. `Call:{ name:abs, args:[s.dev] }`, `binaryExpr:{ a + b }`).
+    pub fn to_ekuiper_string(&self) -> String {
+        self.to_ekuiper_string_qualified("")
+    }
+
+    /// Format an expression in eKuiper's exact internal AST debug/string representation
+    /// (e.g. `Call:{ name:abs, args:[s.dev] }`, `binaryExpr:{ a + b }`).
+    pub fn to_ekuiper_string_qualified(&self, stream: &str) -> String {
+        match self {
+            Expr::Wildcard => "*".to_string(),
+            Expr::WildcardModified { except, replace } => {
+                let mut s = "*".to_string();
+                if !except.is_empty() {
+                    s.push_str(" EXCEPT (");
+                    s.push_str(&except.join(", "));
+                    s.push(')');
+                }
+                if !replace.is_empty() {
+                    s.push_str(" REPLACE (");
+                    let reps: Vec<String> = replace
+                        .iter()
+                        .map(|(e, c)| format!("{} AS {}", e.to_ekuiper_string_qualified(stream), c))
+                        .collect();
+                    s.push_str(&reps.join(", "));
+                    s.push(')');
+                }
+                s
+            }
+            Expr::Identifier(name) => {
+                if !stream.is_empty() && !name.contains('.') {
+                    format!("{}.{}", stream, name)
+                } else {
+                    name.clone()
+                }
+            }
+            Expr::Literal(val) => match val {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                Value::Null => "nil".to_string(),
+                _ => val.to_string(),
+            },
+            Expr::BinaryOp { left, op, right } => {
+                let op_str = match op {
+                    BinaryOperator::Add => "+",
+                    BinaryOperator::Sub => "-",
+                    BinaryOperator::Mul => "*",
+                    BinaryOperator::Div => "/",
+                    BinaryOperator::Mod => "%",
+                    BinaryOperator::Eq => "=",
+                    BinaryOperator::Neq => "!=",
+                    BinaryOperator::Lt => "<",
+                    BinaryOperator::Lte => "<=",
+                    BinaryOperator::Gt => ">",
+                    BinaryOperator::Gte => ">=",
+                    BinaryOperator::And => "AND",
+                    BinaryOperator::Or => "OR",
+                    BinaryOperator::Like => "LIKE",
+                    BinaryOperator::BitAnd => "&",
+                    BinaryOperator::BitOr => "|",
+                    BinaryOperator::BitXor => "^",
+                };
+                format!(
+                    "binaryExpr:{{ {} {} {} }}",
+                    left.to_ekuiper_string_qualified(stream),
+                    op_str,
+                    right.to_ekuiper_string_qualified(stream)
+                )
+            }
+            Expr::UnaryOp { op, expr } => {
+                let op_str = match op {
+                    UnaryOperator::Not => "NOT",
+                    UnaryOperator::Neg => "-",
+                };
+                format!("unaryExpr:{{ {} {} }}", op_str, expr.to_ekuiper_string_qualified(stream))
+            }
+            Expr::FieldAccess { parent, field } => {
+                format!("{}.{}", parent.to_ekuiper_string_qualified(""), field)
+            }
+            Expr::Index { base, index } => {
+                format!(
+                    "binaryExpr:{{ {}[{}] }}",
+                    base.to_ekuiper_string_qualified(stream),
+                    index.to_ekuiper_string_qualified(stream)
+                )
+            }
+            Expr::Slice { base, lo, hi } => {
+                let l = lo
+                    .as_ref()
+                    .map(|e| e.to_ekuiper_string_qualified(stream))
+                    .unwrap_or_default();
+                let h = hi
+                    .as_ref()
+                    .map(|e| e.to_ekuiper_string_qualified(stream))
+                    .unwrap_or_default();
+                format!("{}[{}:{}]", base.to_ekuiper_string_qualified(stream), l, h)
+            }
+            Expr::Call { name, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|a| a.to_ekuiper_string_qualified(stream))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Call:{{ name:{}, args:[{}] }}", name, args_str)
+            }
+            Expr::Between {
+                expr,
+                low,
+                high,
+                negated,
+            } => {
+                let prefix = if *negated { "NOT BETWEEN" } else { "BETWEEN" };
+                format!(
+                    "{} {} {} AND {}",
+                    expr.to_ekuiper_string_qualified(stream),
+                    prefix,
+                    low.to_ekuiper_string_qualified(stream),
+                    high.to_ekuiper_string_qualified(stream)
+                )
+            }
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => {
+                let prefix = if *negated { "NOT IN" } else { "IN" };
+                let items = list
+                    .iter()
+                    .map(|e| e.to_ekuiper_string_qualified(stream))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} {} ({})", expr.to_ekuiper_string_qualified(stream), prefix, items)
+            }
+            Expr::IsNull { expr, negated } => {
+                let suffix = if *negated { "IS NOT NULL" } else { "IS NULL" };
+                format!("{} {}", expr.to_ekuiper_string_qualified(stream), suffix)
+            }
+            Expr::Over { call, .. } => call.to_ekuiper_string_qualified(stream),
+            Expr::Case { .. } => "caseExpr".to_string(),
+        }
+    }
+}
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     Eq,

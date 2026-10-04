@@ -3173,6 +3173,16 @@ fn clean_sink_value(v: &Value, send_nil_field: bool) -> Value {
 }
 
 fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) -> Value {
+    if data.contains_key("__raw_error__") {
+        let mut map = std::collections::BTreeMap::new();
+        if let Some(err) = data.get("error") {
+            map.insert("error".to_string(), err.clone());
+        }
+        if let Some(rid) = data.get("rule_id") {
+            map.insert("rule_id".to_string(), rid.clone());
+        }
+        return serde_json::to_value(map).unwrap_or(Value::Null);
+    }
     if let Some(ref df) = opts.data_field {
         if let Some(val) = data.get(df) {
             return clean_sink_value(val, opts.send_nil_field);
@@ -4165,6 +4175,23 @@ fn check_record_error(data: &HashMap<String, Value>) -> Option<String> {
     None
 }
 
+async fn handle_runtime_error(
+    counters: &RuleCounters,
+    rule_id: &str,
+    send_error: bool,
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    err_msg: String,
+) {
+    counters.record_exception(&err_msg);
+    if send_error {
+        let mut err_data = HashMap::new();
+        err_data.insert("error".to_string(), Value::String(err_msg.clone()));
+        err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
+        err_data.insert("__raw_error__".to_string(), Value::String(err_msg));
+        enqueue_sink_record(counters, sink, StreamRecord::new(err_data)).await;
+    }
+}
+
 /// Handles an upstream error record per the rule `sendError` option. Returns
 /// `true` when the record was an error record (counted as an exception and,
 /// when enabled, forwarded immediately to the sink); the caller must then
@@ -4180,13 +4207,7 @@ async fn handle_error_record(
     let Some(err_msg) = check_record_error(&record.data) else {
         return false;
     };
-    counters.inc_exceptions(1);
-    if send_error {
-        let mut err_data = HashMap::new();
-        err_data.insert("error".to_string(), Value::String(err_msg));
-        err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
-        enqueue_sink_record(counters, sink, StreamRecord::new(err_data)).await;
-    }
+    handle_runtime_error(counters, rule_id, send_error, sink, err_msg).await;
     true
 }
 
@@ -4493,7 +4514,9 @@ async fn send_action(
                     apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
                 }
                 None => {
-                    if format.as_deref() == Some("delimited") {
+                    if let Some(Value::String(raw_err)) = output.data.get("__raw_error__") {
+                        raw_err.as_bytes().to_vec()
+                    } else if format.as_deref() == Some("delimited") {
                         let keys = if let Some(ref f) = opts.fields {
                             f.clone()
                         } else {
@@ -5770,38 +5793,63 @@ async fn run_stateless_rule(
             joined
                 .entry("__rule_start__".to_string())
                 .or_insert_with(|| Value::from(start_time_ms));
-            let output_opt = Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
             let passes = match &select_stmt.where_clause {
-                Some(cond) => Evaluator::eval_bool(cond, &joined),
+                Some(cond) => {
+                    match Evaluator::eval_bool_stateful_fallible(cond, &joined, &rule_state) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                            continue;
+                        }
+                    }
+                }
                 None => true,
             };
             if passes {
-                if let Some(output) = output_opt {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
-                        break;
+                match Evaluator::eval_select_stateful_fallible(&select_stmt, &joined, &rule_state) {
+                    Ok(Some(output)) => {
+                        let output_record = StreamRecord::new(output);
+                        if !enqueue_sink_record(&counters, &sink, output_record).await {
+                            break;
+                        }
                     }
-                } else {
-                    counters.inc_filtered(1);
+                    Ok(None) => {
+                        counters.inc_filtered(1);
+                    }
+                    Err(err) => {
+                        handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                    }
                 }
             } else {
                 counters.inc_filtered(1);
             }
         } else {
-            let output_opt =
-                Evaluator::eval_select_stateful(&select_stmt, &record.data, &rule_state);
             let passes = match &select_stmt.where_clause {
-                Some(cond) => Evaluator::eval_bool(cond, &record.data),
+                Some(cond) => {
+                    match Evaluator::eval_bool_stateful_fallible(cond, &record.data, &rule_state) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                            continue;
+                        }
+                    }
+                }
                 None => true,
             };
             if passes {
-                if let Some(output) = output_opt {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
-                        break;
+                match Evaluator::eval_select_stateful_fallible(&select_stmt, &record.data, &rule_state) {
+                    Ok(Some(output)) => {
+                        let output_record = StreamRecord::new(output);
+                        if !enqueue_sink_record(&counters, &sink, output_record).await {
+                            break;
+                        }
                     }
-                } else {
-                    counters.inc_filtered(1);
+                    Ok(None) => {
+                        counters.inc_filtered(1);
+                    }
+                    Err(err) => {
+                        handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                    }
                 }
             } else {
                 counters.inc_filtered(1);
@@ -7092,7 +7140,12 @@ async fn get_rule_status(State(state): State<AppState>, Path(name): Path<String>
         return resp;
     }
     if let Some(status) = state.rule_manager.get_rule_status(&name) {
-        Json(status).into_response()
+        let mut val = serde_json::to_value(&status).unwrap_or(Value::Null);
+        if let Value::Object(ref mut map) = val {
+            map.insert("last_exception".to_string(), Value::String(status.last_exception.clone()));
+            map.insert("exceptions_total".to_string(), Value::from(status.exceptions_total));
+        }
+        Json(val).into_response()
     } else {
         (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response()
     }
@@ -7102,11 +7155,16 @@ async fn get_all_rule_status(State(state): State<AppState>) -> impl IntoResponse
     let mut all = HashMap::new();
     for rule in state.rule_manager.list_rules() {
         if let Some(status) = state.rule_manager.get_rule_status(&rule.id) {
+            let last_exc = if !status.last_exception.is_empty() {
+                status.last_exception
+            } else {
+                status.message
+            };
             all.insert(
                 rule.id,
                 json!({
                     "status": status.status,
-                    "last_exception": status.message,
+                    "last_exception": last_exc,
                     "exceptions_total": status.exceptions_total,
                 }),
             );

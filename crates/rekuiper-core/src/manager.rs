@@ -423,6 +423,7 @@ pub struct RuleCounters {
     pub dropped: std::sync::atomic::AtomicU64,
     pub high_water: std::sync::atomic::AtomicU64,
     pub blocked_micros: std::sync::atomic::AtomicU64,
+    pub last_exception: parking_lot::RwLock<String>,
 }
 
 impl RuleCounters {
@@ -432,6 +433,11 @@ impl RuleCounters {
         guard.source_records_in_total = self.source_in.load(Relaxed);
         guard.sink_records_out_total = self.sink_out.load(Relaxed);
         guard.exceptions_total = self.exceptions.load(Relaxed);
+        let last_exc = self.last_exception.read().clone();
+        if !last_exc.is_empty() {
+            guard.last_exception = last_exc.clone();
+            guard.message = last_exc;
+        }
         guard.source_records_filtered_total = self.filtered.load(Relaxed);
         guard.sink_records_enqueued_total = self.enqueued.load(Relaxed);
         guard.sink_records_failed_total = self.sink_failed.load(Relaxed);
@@ -452,6 +458,11 @@ impl RuleCounters {
     pub fn inc_exceptions(&self, n: u64) {
         use std::sync::atomic::Ordering::Relaxed;
         self.exceptions.fetch_add(n, Relaxed);
+    }
+    pub fn record_exception(&self, err: &str) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.exceptions.fetch_add(1, Relaxed);
+        *self.last_exception.write() = err.to_string();
     }
     pub fn inc_filtered(&self, n: u64) {
         use std::sync::atomic::Ordering::Relaxed;

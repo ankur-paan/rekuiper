@@ -24,6 +24,12 @@ pub struct RuleState {
     pub state: Arc<RwLock<HashMap<String, Value>>>,
 }
 
+impl RuleState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 pub struct Evaluator;
 
 /// One compiled step of a dot-notation JSON path.
@@ -62,6 +68,24 @@ impl Evaluator {
         }
     }
 
+    /// Format a Value's Go/eKuiper type name for parity error messages (e.g. `string(42)`, `int64(7)`).
+    pub fn format_ekuiper_val_type(v: &Value) -> String {
+        match v {
+            Value::Null => "nil".to_string(),
+            Value::Bool(b) => format!("bool({})", b),
+            Value::Number(n) => {
+                if n.is_i64() || n.is_u64() {
+                    format!("int64({})", n)
+                } else {
+                    format!("float64({})", n)
+                }
+            }
+            Value::String(s) => format!("string({})", s),
+            Value::Array(_) => "[]interface {}".to_string(),
+            Value::Object(_) => "map[string]interface {}".to_string(),
+        }
+    }
+
     pub fn eval_select(
         stmt: &SelectStmt,
         record: &HashMap<String, Value>,
@@ -78,87 +102,18 @@ impl Evaluator {
                 return None;
             }
         }
-
-        let mut output = HashMap::new();
-        for (idx, field) in stmt.fields.iter().enumerate() {
-            // An explicit `AS alias` wins over the default column name.
-            let alias = stmt.field_aliases.get(idx).and_then(|a| a.clone());
-            match field {
-                Expr::Wildcard => {
-                    for (k, v) in record {
-                        if k != META_KEY && !k.starts_with("__") {
-                            output.insert(k.clone(), v.clone());
-                        }
-                    }
-                }
-                Expr::WildcardModified { except, replace } => {
-                    for (k, v) in record {
-                        if k != META_KEY && !k.starts_with("__") {
-                            if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
-                                continue;
-                            }
-                            output.insert(k.clone(), v.clone());
-                        }
-                    }
-                    for (rep_expr, col) in replace {
-                        let val = Self::eval_val(rep_expr, record);
-                        output.insert(col.clone(), val);
-                    }
-                }
-                Expr::Identifier(name) => {
-                    let key = alias.unwrap_or_else(|| name.clone());
-                    if let Some(val) = record.get(name) {
-                        output.insert(key, val.clone());
-                    } else if name == "window_start" || name == "window_end" {
-                        let internal_key = format!("__{}__", name);
-                        if let Some(val) = record.get(&internal_key) {
-                            output.insert(key, val.clone());
-                        } else {
-                            output.insert(key, Value::Null);
-                        }
-                    } else {
-                        output.insert(key, Value::Null);
-                    }
-                }
-                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
-                    let parent_val = Self::eval_val(parent, record);
-                    if let Value::Object(map) = parent_val {
-                        for (k, v) in map {
-                            if k != META_KEY && !k.starts_with("__") {
-                                output.insert(k, v);
-                            }
-                        }
-                    } else if let Expr::Identifier(p_name) = parent.as_ref() {
-                        let has_other_namespace = record.iter().any(|(k, v)| {
-                            k != p_name && !k.starts_with("__") && matches!(v, Value::Object(_))
-                        });
-                        if !has_other_namespace {
-                            for (k, v) in record {
-                                if k != META_KEY && !k.starts_with("__") {
-                                    output.insert(k.clone(), v.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                Expr::FieldAccess {
-                    parent: _,
-                    field: leaf,
-                } => {
-                    let val = Self::eval_val(field, record);
-                    // Use leaf field name as output key (flattened projection)
-                    output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
-                }
-                _ => {
-                    let val = Self::eval_val(field, record);
-                    let name = alias.unwrap_or_else(|| Self::column_name(field, idx));
-                    output.insert(name, val);
-                }
-            }
-        }
-
-        Some(output)
+        let state = RuleState::default();
+        Self::eval_select_stateful_fallible(stmt, record, &state).ok().flatten()
     }
+
+    pub fn eval_select_fallible(
+        stmt: &SelectStmt,
+        record: &HashMap<String, Value>,
+    ) -> Result<Option<HashMap<String, Value>>, String> {
+        let state = RuleState::default();
+        Self::eval_select_stateful_fallible(stmt, record, &state)
+    }
+
 
     /// Batch evaluation over a window of records.
     ///
@@ -484,33 +439,48 @@ impl Evaluator {
     /// Simple CASE compares the operand with each WHEN value via
     /// [`Self::values_equal`]; searched CASE treats each WHEN as a boolean
     /// condition. Falls back to ELSE or `Null` when nothing matches.
-    fn eval_case<E>(
+    fn eval_case_fallible<E>(
         operand: &Option<Box<Expr>>,
         when_clauses: &[(Expr, Expr)],
         else_clause: &Option<Box<Expr>>,
-        eval: E,
-    ) -> Value
+        mut eval: E,
+    ) -> Result<Value, String>
     where
-        E: Fn(&Expr) -> Value,
+        E: FnMut(&Expr) -> Result<Value, String>,
     {
         if let Some(op) = operand {
-            let op_val = eval(op);
+            let op_val = eval(op)?;
             for (when_expr, then_expr) in when_clauses {
-                if Self::values_equal(&op_val, &eval(when_expr)) {
+                let when_val = eval(when_expr)?;
+                if Self::values_equal(&op_val, &when_val) {
                     return eval(then_expr);
                 }
             }
         } else {
             for (when_cond, then_expr) in when_clauses {
-                if matches!(eval(when_cond), Value::Bool(true)) {
+                let cond_val = eval(when_cond)?;
+                if matches!(cond_val, Value::Bool(true)) {
                     return eval(then_expr);
                 }
             }
         }
         match else_clause {
             Some(e) => eval(e),
-            None => Value::Null,
+            None => Ok(Value::Null),
         }
+    }
+
+    fn eval_case<E>(
+        operand: &Option<Box<Expr>>,
+        when_clauses: &[(Expr, Expr)],
+        else_clause: &Option<Box<Expr>>,
+        mut eval: E,
+    ) -> Value
+    where
+        E: FnMut(&Expr) -> Value,
+    {
+        Self::eval_case_fallible(operand, when_clauses, else_clause, |e| Ok(eval(e)))
+            .unwrap_or(Value::Null)
     }
 
     // ---------- stateful analytic evaluation (acc_* + OVER) ----------
@@ -529,14 +499,23 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Option<HashMap<String, Value>> {
+        Self::eval_select_stateful_fallible(stmt, record, state).ok().flatten()
+    }
+
+    pub fn eval_select_stateful_fallible(
+        stmt: &SelectStmt,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> Result<Option<HashMap<String, Value>>, String> {
         if let Some((_, rhs)) = &stmt.set_op {
-            let left = Self::eval_select_stateful(&Self::without_set_op(stmt), record, state);
-            let right = Self::eval_select_stateful(rhs, record, state);
-            return Self::merge_union_rows(left, right);
+            let left = Self::eval_select_stateful_fallible(&Self::without_set_op(stmt), record, state)?;
+            let right = Self::eval_select_stateful_fallible(rhs, record, state)?;
+            return Ok(Self::merge_union_rows(left, right));
         }
         let mut output = HashMap::new();
         for (idx, field) in stmt.fields.iter().enumerate() {
             let alias = stmt.field_aliases.get(idx).and_then(|a| a.clone());
+            let expr_str = field.to_ekuiper_string_qualified(&stmt.from);
             match field {
                 Expr::Wildcard => {
                     for (k, v) in record {
@@ -555,7 +534,15 @@ impl Evaluator {
                         }
                     }
                     for (rep_expr, col) in replace {
-                        let val = Self::eval_stateful_expr(rep_expr, record, state);
+                        let val = Self::eval_stateful_expr_fallible(rep_expr, record, state)
+                            .map_err(|err| {
+                                format!(
+                                    "run Select error: alias: {} expr: {} meet error, err:{}",
+                                    col,
+                                    rep_expr.to_ekuiper_string_qualified(&stmt.from),
+                                    err
+                                )
+                            })?;
                         output.insert(col.clone(), val);
                     }
                 }
@@ -563,12 +550,23 @@ impl Evaluator {
                     let key = alias.unwrap_or_else(|| name.clone());
                     if let Some(val) = record.get(name) {
                         output.insert(key, val.clone());
+                    } else if name == "window_start" || name == "window_end" {
+                        let internal_key = format!("__{}__", name);
+                        if let Some(val) = record.get(&internal_key) {
+                            output.insert(key, val.clone());
+                        } else {
+                            output.insert(key, Value::Null);
+                        }
                     } else {
                         output.insert(key, Value::Null);
                     }
                 }
                 Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
-                    let parent_val = Self::eval_stateful_expr(parent, record, state);
+                    let parent_val = Self::eval_stateful_expr_fallible(parent, record, state)
+                        .map_err(|err| {
+                            let a = alias.as_deref().unwrap_or("*");
+                            format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                        })?;
                     if let Value::Object(map) = parent_val {
                         for (k, v) in map {
                             if k != META_KEY && !k.starts_with("__") {
@@ -592,12 +590,20 @@ impl Evaluator {
                     parent: _,
                     field: leaf,
                 } => {
-                    let val = Self::eval_stateful_expr(field, record, state);
+                    let val = Self::eval_stateful_expr_fallible(field, record, state)
+                        .map_err(|err| {
+                            let a = alias.as_deref().unwrap_or(leaf);
+                            format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                        })?;
                     output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("extract") => {
                     if let Some(arg) = args.first() {
-                        let val = Self::eval_stateful_expr(arg, record, state);
+                        let val = Self::eval_stateful_expr_fallible(arg, record, state)
+                            .map_err(|err| {
+                                let a = alias.as_deref().unwrap_or("extract");
+                                format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                            })?;
                         if let Value::Object(map) = val {
                             for (k, v) in map {
                                 output.insert(k, v);
@@ -658,13 +664,20 @@ impl Evaluator {
                     }
                 }
                 _ => {
-                    let val = Self::eval_stateful_expr(field, record, state);
+                    let val = Self::eval_stateful_expr_fallible(field, record, state)
+                        .map_err(|err| {
+                            if let Some(ref a) = alias {
+                                format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                            } else {
+                                format!("run Select error: expr: {} meet error, err:{}", expr_str, err)
+                            }
+                        })?;
                     let name = alias.unwrap_or_else(|| Self::column_name(field, idx));
                     output.insert(name, val);
                 }
             }
         }
-        Some(output)
+        Ok(Some(output))
     }
 
     /// Multi-row stateful projection supporting `unnest(array_expr)`.
@@ -756,55 +769,76 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Value {
+        Self::eval_stateful_expr_fallible(expr, record, state).unwrap_or(Value::Null)
+    }
+
+    pub fn eval_stateful_expr_fallible(
+        expr: &Expr,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> Result<Value, String> {
         match expr {
-            Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
-            Expr::Literal(val) => val.clone(),
-            Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
+            Expr::Wildcard | Expr::WildcardModified { .. } => Ok(Value::Null),
+            Expr::Literal(val) => Ok(val.clone()),
+            Expr::Identifier(name) => {
+                if let Some(val) = record.get(name) {
+                    Ok(val.clone())
+                } else if name == "window_start" || name == "window_end" {
+                    Ok(record
+                        .get(&format!("__{}__", name))
+                        .cloned()
+                        .unwrap_or(Value::Null))
+                } else {
+                    Ok(Value::Null)
+                }
+            }
             Expr::FieldAccess { parent, field } => {
-                let parent_val = Self::eval_stateful_expr(parent, record, state);
+                let parent_val = Self::eval_stateful_expr_fallible(parent, record, state)?;
                 if let Value::Object(map) = &parent_val {
                     if let Some(v) = map.get(field) {
-                        return v.clone();
+                        return Ok(v.clone());
                     }
                 }
                 if let Expr::Identifier(p_name) = parent.as_ref() {
                     if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
-                        return v.clone();
+                        return Ok(v.clone());
                     }
                     let owned_by_other = record.iter().any(|(k, v)| {
                         k != p_name && matches!(v, Value::Object(m) if m.contains_key(field))
                     });
                     if !owned_by_other {
                         if let Some(v) = record.get(field) {
-                            return v.clone();
+                            return Ok(v.clone());
                         }
                     }
                 }
-                Value::Null
+                Ok(Value::Null)
             }
             Expr::Index { base, index } => {
-                let b = Self::eval_stateful_expr(base, record, state);
-                let i = Self::eval_stateful_expr(index, record, state);
-                Self::index_value(&b, &i)
+                let b = Self::eval_stateful_expr_fallible(base, record, state)?;
+                let i = Self::eval_stateful_expr_fallible(index, record, state)?;
+                Ok(Self::index_value(&b, &i))
             }
             Expr::Slice { base, lo, hi } => {
-                let b = Self::eval_stateful_expr(base, record, state);
-                let l = lo
-                    .as_ref()
-                    .map(|e| Self::eval_stateful_expr(e, record, state));
-                let h = hi
-                    .as_ref()
-                    .map(|e| Self::eval_stateful_expr(e, record, state));
-                Self::slice_value(&b, l.as_ref(), h.as_ref())
+                let b = Self::eval_stateful_expr_fallible(base, record, state)?;
+                let l = match lo {
+                    Some(e) => Some(Self::eval_stateful_expr_fallible(e, record, state)?),
+                    None => None,
+                };
+                let h = match hi {
+                    Some(e) => Some(Self::eval_stateful_expr_fallible(e, record, state)?),
+                    None => None,
+                };
+                Ok(Self::slice_value(&b, l.as_ref(), h.as_ref()))
             }
             Expr::BinaryOp { left, op, right } => {
-                let l = Self::eval_stateful_expr(left, record, state);
-                let r = Self::eval_stateful_expr(right, record, state);
-                Self::eval_binary_op(&l, op, &r)
+                let l = Self::eval_stateful_expr_fallible(left, record, state)?;
+                let r = Self::eval_stateful_expr_fallible(right, record, state)?;
+                Self::eval_binary_op_fallible(&l, op, &r)
             }
             Expr::UnaryOp { op, expr } => {
-                let v = Self::eval_stateful_expr(expr, record, state);
-                Self::eval_unary_op(op, &v)
+                let v = Self::eval_stateful_expr_fallible(expr, record, state)?;
+                Ok(Self::eval_unary_op(op, &v))
             }
             Expr::Between {
                 expr,
@@ -812,132 +846,131 @@ impl Evaluator {
                 high,
                 negated,
             } => {
-                let v = Self::eval_stateful_expr(expr, record, state);
-                let l = Self::eval_stateful_expr(low, record, state);
-                let h = Self::eval_stateful_expr(high, record, state);
-                Self::eval_between(&v, &l, &h, *negated)
+                let v = Self::eval_stateful_expr_fallible(expr, record, state)?;
+                let l = Self::eval_stateful_expr_fallible(low, record, state)?;
+                let h = Self::eval_stateful_expr_fallible(high, record, state)?;
+                Self::eval_between_fallible(&v, &l, &h, *negated)
             }
             Expr::InList {
                 expr,
                 list,
                 negated,
             } => {
-                let v = Self::eval_stateful_expr(expr, record, state);
+                let v = Self::eval_stateful_expr_fallible(expr, record, state)?;
                 let mut matched = false;
                 for item in list {
-                    let item_val = Self::eval_stateful_expr(item, record, state);
+                    let item_val = Self::eval_stateful_expr_fallible(item, record, state)?;
                     if Self::values_equal(&v, &item_val) {
                         matched = true;
                         break;
                     }
                 }
                 if *negated {
-                    Value::Bool(!matched)
+                    Ok(Value::Bool(!matched))
                 } else {
-                    Value::Bool(matched)
+                    Ok(Value::Bool(matched))
                 }
             }
             Expr::IsNull { expr, negated } => {
-                let v = Self::eval_stateful_expr(expr, record, state);
+                let v = Self::eval_stateful_expr_fallible(expr, record, state)?;
                 let is_null = v.is_null();
                 if *negated {
-                    Value::Bool(!is_null)
+                    Ok(Value::Bool(!is_null))
                 } else {
-                    Value::Bool(is_null)
+                    Ok(Value::Bool(is_null))
                 }
             }
-            Expr::Call { .. } => Self::eval_stateful_call(expr, record, state, None, false),
+            Expr::Call { .. } => {
+                Self::eval_stateful_call_fallible(expr, record, state, None, false)
+            }
             Expr::Over {
                 call,
                 partition_by,
                 when,
             } => {
                 let partition_key = match partition_by {
-                    Some(p) => Self::value_to_key(&Self::eval_stateful_expr(p, record, state)),
+                    Some(p) => Self::value_to_key(&Self::eval_stateful_expr_fallible(p, record, state)?),
                     None => String::new(),
                 };
                 let skip_update = if let Some(cond) = when {
-                    let cond_val = Self::eval_stateful_expr(cond, record, state);
+                    let cond_val = Self::eval_stateful_expr_fallible(cond, record, state)?;
                     !cond_val.as_bool().unwrap_or(false)
                 } else {
                     false
                 };
-                Self::eval_stateful_call(call, record, state, Some(&partition_key), skip_update)
+                Self::eval_stateful_call_fallible(call, record, state, Some(&partition_key), skip_update)
             }
             Expr::Case {
                 operand,
                 when_clauses,
                 else_clause,
-            } => Self::eval_case(operand, when_clauses, else_clause, |e| {
-                Self::eval_stateful_expr(e, record, state)
+            } => Self::eval_case_fallible(operand, when_clauses, else_clause, |e| {
+                Self::eval_stateful_expr_fallible(e, record, state)
             }),
         }
     }
 
-    /// Evaluate a call expression statefully: cumulative `acc_*` functions go
-    /// through [`Self::eval_acc_call`], everything else through the scalar
-    /// [`Self::eval_call`] (with statefully-resolved arguments so nesting
-    /// like `object_construct('x', acc_max(t))` works).
-    fn eval_stateful_call(
+
+    fn eval_stateful_call_fallible(
         expr: &Expr,
         record: &HashMap<String, Value>,
         state: &RuleState,
         partition_key: Option<&str>,
         skip_update: bool,
-    ) -> Value {
+    ) -> Result<Value, String> {
         let (name, args) = match expr {
             Expr::Call { name, args } => (name, args),
-            _ => return Self::eval_stateful_expr(expr, record, state),
+            _ => return Self::eval_stateful_expr_fallible(expr, record, state),
         };
         let lowered = name.to_ascii_lowercase();
         if Self::is_acc_call(&lowered) {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| Self::eval_stateful_expr(a, record, state))
-                .collect();
+                .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
+                .collect::<Result<_, _>>()?;
             let call_id = Self::column_name(expr, 0);
-            return Self::eval_acc_call(
+            return Ok(Self::eval_acc_call(
                 &lowered,
                 &vals,
                 state,
                 &call_id,
                 partition_key.unwrap_or(""),
                 skip_update,
-            );
+            ));
         }
         if lowered == "lag" {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| Self::eval_stateful_expr(a, record, state))
-                .collect();
+                .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
+                .collect::<Result<_, _>>()?;
             let call_id = Self::column_name(expr, 0);
-            return Self::eval_lag(
+            return Ok(Self::eval_lag(
                 &vals,
                 state,
                 &call_id,
                 partition_key.unwrap_or(""),
                 skip_update,
-            );
+            ));
         }
         if lowered == "had_changed" || lowered == "changed_col" {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| Self::eval_stateful_expr(a, record, state))
-                .collect();
+                .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
+                .collect::<Result<_, _>>()?;
             let call_id = Self::column_name(expr, 0);
-            return Self::eval_changed(
+            return Ok(Self::eval_changed(
                 &lowered,
                 &vals,
                 state,
                 &call_id,
                 partition_key.unwrap_or(""),
-            );
+            ));
         }
         if lowered == "changed_cols" && args.len() >= 2 {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| Self::eval_stateful_expr(a, record, state))
-                .collect();
+                .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
+                .collect::<Result<_, _>>()?;
             let prefix = match vals.first() {
                 Some(Value::String(s)) => s.as_str(),
                 _ => "",
@@ -972,13 +1005,13 @@ impl Evaluator {
                 }
             }
             if result_map.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
-            return Value::Object(result_map);
+            return Ok(Value::Object(result_map));
         }
         if lowered == "row_number" {
             if !args.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             let call_id = Self::column_name(expr, 0);
             let state_key = format!("row_number:{}:{}", call_id, partition_key.unwrap_or(""));
@@ -988,11 +1021,11 @@ impl Evaluator {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
             if skip_update {
-                return Value::from(current);
+                return Ok(Value::from(current));
             }
             let next = current.saturating_add(1);
             guard.insert(state_key, Value::from(next));
-            return Value::from(next);
+            return Ok(Value::from(next));
         }
         if lowered == "last_hit_count" {
             let call_id = Self::column_name(expr, 0);
@@ -1004,7 +1037,7 @@ impl Evaluator {
             let mut guard = state.state.write();
             let current = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
             guard.insert(state_key, Value::from(current.saturating_add(1)));
-            return Value::from(current);
+            return Ok(Value::from(current));
         }
         if lowered == "last_hit_time" {
             let call_id = Self::column_name(expr, 0);
@@ -1017,20 +1050,20 @@ impl Evaluator {
             let mut guard = state.state.write();
             let prev = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
             guard.insert(state_key, Value::from(event_time));
-            return Value::from(prev);
+            return Ok(Value::from(prev));
         }
         // Contextual system functions resolve against the record itself.
         if let Some(v) = Self::eval_context_call(name, args, record) {
-            return v;
+            return Ok(v);
         }
         if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max") {
-            return Self::eval_aggregate_call(name, args, std::slice::from_ref(record));
+            return Ok(Self::eval_aggregate_call(name, args, std::slice::from_ref(record)));
         }
         let vals: Vec<Value> = args
             .iter()
-            .map(|a| Self::eval_stateful_expr(a, record, state))
-            .collect();
-        Self::eval_call(name, &vals)
+            .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
+            .collect::<Result<_, _>>()?;
+        Self::eval_call_fallible(name, &vals)
     }
 
     fn is_acc_call(lowered_name: &str) -> bool {
@@ -2214,12 +2247,28 @@ impl Evaluator {
         schema
     }
 
-    pub fn eval_bool(expr: &Expr, record: &HashMap<String, Value>) -> bool {
-        match Self::eval_val(expr, record) {
-            Value::Bool(b) => b,
-            Value::Null => false,
-            _ => false,
+    pub fn eval_bool_fallible(expr: &Expr, record: &HashMap<String, Value>) -> Result<bool, String> {
+        Self::eval_bool_stateful_fallible(expr, record, &RuleState::new())
+    }
+
+    pub fn eval_bool_stateful_fallible(
+        expr: &Expr,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> Result<bool, String> {
+        match Self::eval_stateful_expr_fallible(expr, record, state) {
+            Ok(Value::Bool(b)) => Ok(b),
+            Ok(Value::Null) => Ok(false),
+            Ok(other) => Err(format!(
+                "run Where error: invalid condition that returns non-bool value {}",
+                Self::format_ekuiper_val_type(&other)
+            )),
+            Err(e) => Err(format!("run Where error: {}", e)),
         }
+    }
+
+    pub fn eval_bool(expr: &Expr, record: &HashMap<String, Value>) -> bool {
+        Self::eval_bool_fallible(expr, record).unwrap_or(false)
     }
 
     pub fn eval_bool_stateful(
@@ -2227,134 +2276,18 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> bool {
-        match Self::eval_stateful_expr(expr, record, state) {
-            Value::Bool(b) => b,
-            Value::Null => false,
-            _ => false,
-        }
+        Self::eval_bool_stateful_fallible(expr, record, state).unwrap_or(false)
+    }
+
+    pub fn eval_val_fallible(
+        expr: &Expr,
+        record: &HashMap<String, Value>,
+    ) -> Result<Value, String> {
+        Self::eval_stateful_expr_fallible(expr, record, &RuleState::new())
     }
 
     pub fn eval_val(expr: &Expr, record: &HashMap<String, Value>) -> Value {
-        match expr {
-            Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
-            Expr::Literal(val) => val.clone(),
-            Expr::Identifier(name) => {
-                if let Some(val) = record.get(name) {
-                    val.clone()
-                } else if name == "window_start" || name == "window_end" {
-                    record
-                        .get(&format!("__{}__", name))
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                } else {
-                    Value::Null
-                }
-            }
-            Expr::FieldAccess { parent, field } => {
-                let parent_val = Self::eval_val(parent, record);
-                if let Value::Object(map) = &parent_val {
-                    if let Some(v) = map.get(field) {
-                        return v.clone();
-                    }
-                }
-                if let Expr::Identifier(p_name) = parent.as_ref() {
-                    if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
-                        return v.clone();
-                    }
-                    let owned_by_other = record.iter().any(|(k, v)| {
-                        k != p_name && matches!(v, Value::Object(m) if m.contains_key(field))
-                    });
-                    if !owned_by_other {
-                        if let Some(v) = record.get(field) {
-                            return v.clone();
-                        }
-                    }
-                }
-                Value::Null
-            }
-            Expr::Index { base, index } => {
-                let b = Self::eval_val(base, record);
-                let i = Self::eval_val(index, record);
-                Self::index_value(&b, &i)
-            }
-            Expr::Slice { base, lo, hi } => {
-                let b = Self::eval_val(base, record);
-                let l = lo.as_ref().map(|e| Self::eval_val(e, record));
-                let h = hi.as_ref().map(|e| Self::eval_val(e, record));
-                Self::slice_value(&b, l.as_ref(), h.as_ref())
-            }
-            Expr::BinaryOp { left, op, right } => {
-                let l = Self::eval_val(left, record);
-                let r = Self::eval_val(right, record);
-                Self::eval_binary_op(&l, op, &r)
-            }
-            Expr::UnaryOp { op, expr } => {
-                let v = Self::eval_val(expr, record);
-                Self::eval_unary_op(op, &v)
-            }
-            Expr::Between {
-                expr,
-                low,
-                high,
-                negated,
-            } => {
-                let v = Self::eval_val(expr, record);
-                let l = Self::eval_val(low, record);
-                let h = Self::eval_val(high, record);
-                Self::eval_between(&v, &l, &h, *negated)
-            }
-            Expr::InList {
-                expr,
-                list,
-                negated,
-            } => {
-                let v = Self::eval_val(expr, record);
-                let mut matched = false;
-                for item in list {
-                    let item_val = Self::eval_val(item, record);
-                    if Self::values_equal(&v, &item_val) {
-                        matched = true;
-                        break;
-                    }
-                }
-                if *negated {
-                    Value::Bool(!matched)
-                } else {
-                    Value::Bool(matched)
-                }
-            }
-            Expr::IsNull { expr, negated } => {
-                let v = Self::eval_val(expr, record);
-                let is_null = v.is_null();
-                if *negated {
-                    Value::Bool(!is_null)
-                } else {
-                    Value::Bool(is_null)
-                }
-            }
-            Expr::Call { name, args } => {
-                // Contextual system functions (meta/mqtt/event_time/...)
-                // need the raw argument expressions plus the record.
-                if let Some(v) = Self::eval_context_call(name, args, record) {
-                    return v;
-                }
-                if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max") {
-                    return Self::eval_aggregate_call(name, args, std::slice::from_ref(record));
-                }
-                let vals: Vec<Value> = args.iter().map(|a| Self::eval_val(a, record)).collect();
-                Self::eval_call(name, &vals)
-            }
-            // Stateless single-record evaluation ignores partitioning (there is
-            // no shared state); cumulative `acc_*` calls yield `Null` here.
-            Expr::Over { call, .. } => Self::eval_val(call, record),
-            Expr::Case {
-                operand,
-                when_clauses,
-                else_clause,
-            } => Self::eval_case(operand, when_clauses, else_clause, |e| {
-                Self::eval_val(e, record)
-            }),
-        }
+        Self::eval_val_fallible(expr, record).unwrap_or(Value::Null)
     }
 
     fn eval_unary_op(op: &UnaryOperator, val: &Value) -> Value {
@@ -2393,42 +2326,249 @@ impl Evaluator {
         }
     }
 
-    fn eval_binary_op(left: &Value, op: &BinaryOperator, right: &Value) -> Value {
+    fn eval_binary_op_fallible(
+        left: &Value,
+        op: &BinaryOperator,
+        right: &Value,
+    ) -> Result<Value, String> {
+        let op_token = match op {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Mul => "*",
+            BinaryOperator::Div => "/",
+            BinaryOperator::Mod => "%",
+            BinaryOperator::Eq => "=",
+            BinaryOperator::Neq => "!=",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Lte => "<=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Gte => ">=",
+            BinaryOperator::And => "AND",
+            BinaryOperator::Or => "OR",
+            BinaryOperator::BitAnd => "&",
+            BinaryOperator::BitOr => "|",
+            BinaryOperator::BitXor => "^",
+            BinaryOperator::Like => "LIKE",
+        };
+
+        if left.is_null() || right.is_null() {
+            return match op {
+                BinaryOperator::And
+                | BinaryOperator::Or
+                | BinaryOperator::BitAnd
+                | BinaryOperator::BitOr
+                | BinaryOperator::BitXor
+                | BinaryOperator::Eq
+                | BinaryOperator::Neq
+                | BinaryOperator::Gt
+                | BinaryOperator::Gte
+                | BinaryOperator::Lt
+                | BinaryOperator::Lte => Ok(Value::Bool(false)),
+                _ => Ok(Value::Null),
+            };
+        }
+
         match op {
             BinaryOperator::And => {
-                let lb = left.as_bool().unwrap_or(false);
-                let rb = right.as_bool().unwrap_or(false);
-                Value::Bool(lb && rb)
+                if let (Some(lb), Some(rb)) = (left.as_bool(), right.as_bool()) {
+                    Ok(Value::Bool(lb && rb))
+                } else {
+                    Err(format!(
+                        "invalid operation {} AND {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
             }
             BinaryOperator::Or => {
-                let lb = left.as_bool().unwrap_or(false);
-                let rb = right.as_bool().unwrap_or(false);
-                Value::Bool(lb || rb)
+                if let (Some(lb), Some(rb)) = (left.as_bool(), right.as_bool()) {
+                    Ok(Value::Bool(lb || rb))
+                } else {
+                    Err(format!(
+                        "invalid operation {} OR {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
             }
-            BinaryOperator::Eq => Value::Bool(Self::values_equal(left, right)),
-            BinaryOperator::Neq => Value::Bool(!Self::values_equal(left, right)),
-            BinaryOperator::Lt => {
-                Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Less)
+            BinaryOperator::Eq => {
+                if left.is_number() && right.is_number() {
+                    Ok(Value::Bool(Self::values_equal(left, right)))
+                } else if (left.is_string() && right.is_string())
+                    || (left.is_boolean() && right.is_boolean())
+                {
+                    Ok(Value::Bool(left == right))
+                } else {
+                    Err(format!(
+                        "invalid operation {} = {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
             }
-            BinaryOperator::Lte => Self::eval_ordering(left, right, |o| {
-                o == std::cmp::Ordering::Less || o == std::cmp::Ordering::Equal
-            }),
-            BinaryOperator::Gt => {
-                Self::eval_ordering(left, right, |o| o == std::cmp::Ordering::Greater)
+            BinaryOperator::Neq => {
+                if left.is_number() && right.is_number() {
+                    Ok(Value::Bool(!Self::values_equal(left, right)))
+                } else if (left.is_string() && right.is_string())
+                    || (left.is_boolean() && right.is_boolean())
+                {
+                    Ok(Value::Bool(left != right))
+                } else {
+                    Err(format!(
+                        "invalid operation {} != {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
             }
-            BinaryOperator::Gte => Self::eval_ordering(left, right, |o| {
-                o == std::cmp::Ordering::Greater || o == std::cmp::Ordering::Equal
-            }),
-            BinaryOperator::Add => Self::eval_arith(left, right, ArithOp::Add),
-            BinaryOperator::Sub => Self::eval_arith(left, right, ArithOp::Sub),
-            BinaryOperator::Mul => Self::eval_arith(left, right, ArithOp::Mul),
-            BinaryOperator::Div => Self::eval_arith(left, right, ArithOp::Div),
-            BinaryOperator::Mod => Self::eval_arith(left, right, ArithOp::Mod),
-            BinaryOperator::Like => Self::eval_like(left, right),
+            BinaryOperator::Lt | BinaryOperator::Lte | BinaryOperator::Gt | BinaryOperator::Gte => {
+                let ordering = if left.is_number() && right.is_number() {
+                    left.as_f64()
+                        .and_then(|lf| right.as_f64().and_then(|rf| lf.partial_cmp(&rf)))
+                } else if let (Some(ls), Some(rs)) = (left.as_str(), right.as_str()) {
+                    Some(ls.cmp(rs))
+                } else if let (Some(lb), Some(rb)) = (left.as_bool(), right.as_bool()) {
+                    Some(lb.cmp(&rb))
+                } else {
+                    return Err(format!(
+                        "invalid operation {} {} {}",
+                        Self::format_ekuiper_val_type(left),
+                        op_token,
+                        Self::format_ekuiper_val_type(right)
+                    ));
+                };
+
+                let matched = matches!(
+                    (op, ordering),
+                    (BinaryOperator::Lt, Some(std::cmp::Ordering::Less))
+                        | (
+                            BinaryOperator::Lte,
+                            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
+                        )
+                        | (BinaryOperator::Gt, Some(std::cmp::Ordering::Greater))
+                        | (
+                            BinaryOperator::Gte,
+                            Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal),
+                        )
+                );
+                Ok(Value::Bool(matched))
+            }
+            BinaryOperator::Add => {
+                if left.is_number() && right.is_number() {
+                    if left.is_i64() && right.is_i64() {
+                        Ok(Value::from(
+                            left.as_i64().unwrap().saturating_add(right.as_i64().unwrap()),
+                        ))
+                    } else {
+                        let lf = left.as_f64().unwrap();
+                        let rf = right.as_f64().unwrap();
+                        Ok(serde_json::json!(lf + rf))
+                    }
+                } else {
+                    Err(format!(
+                        "invalid operation {} + {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
+            }
+            BinaryOperator::Sub => {
+                if left.is_number() && right.is_number() {
+                    if left.is_i64() && right.is_i64() {
+                        Ok(Value::from(
+                            left.as_i64().unwrap().saturating_sub(right.as_i64().unwrap()),
+                        ))
+                    } else {
+                        let lf = left.as_f64().unwrap();
+                        let rf = right.as_f64().unwrap();
+                        Ok(serde_json::json!(lf - rf))
+                    }
+                } else {
+                    Err(format!(
+                        "invalid operation {} - {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
+            }
+            BinaryOperator::Mul => {
+                if left.is_number() && right.is_number() {
+                    if left.is_i64() && right.is_i64() {
+                        Ok(Value::from(
+                            left.as_i64().unwrap().saturating_mul(right.as_i64().unwrap()),
+                        ))
+                    } else {
+                        let lf = left.as_f64().unwrap();
+                        let rf = right.as_f64().unwrap();
+                        Ok(serde_json::json!(lf * rf))
+                    }
+                } else {
+                    Err(format!(
+                        "invalid operation {} * {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
+            }
+            BinaryOperator::Div => {
+                if left.is_number() && right.is_number() {
+                    let rf = right.as_f64().unwrap();
+                    if rf == 0.0 {
+                        return Err("divided by zero".to_string());
+                    }
+                    if left.is_i64() && right.is_i64() {
+                        let li = left.as_i64().unwrap();
+                        let ri = right.as_i64().unwrap();
+                        if ri == 0 {
+                            return Err("divided by zero".to_string());
+                        }
+                        Ok(Value::from(li / ri))
+                    } else {
+                        let lf = left.as_f64().unwrap();
+                        Ok(serde_json::json!(lf / rf))
+                    }
+                } else {
+                    Err(format!(
+                        "invalid operation {} / {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
+            }
+            BinaryOperator::Mod => {
+                if left.is_number() && right.is_number() {
+                    let rf = right.as_f64().unwrap();
+                    if rf == 0.0 {
+                        return Err("divided by zero".to_string());
+                    }
+                    if left.is_i64() && right.is_i64() {
+                        let li = left.as_i64().unwrap();
+                        let ri = right.as_i64().unwrap();
+                        if ri == 0 {
+                            return Err("divided by zero".to_string());
+                        }
+                        Ok(Value::from(li % ri))
+                    } else {
+                        let lf = left.as_f64().unwrap();
+                        Ok(serde_json::json!(lf % rf))
+                    }
+                } else {
+                    Err(format!(
+                        "invalid operation {} % {}",
+                        Self::format_ekuiper_val_type(left),
+                        Self::format_ekuiper_val_type(right)
+                    ))
+                }
+            }
+            BinaryOperator::Like => Ok(Self::eval_like(left, right)),
             BinaryOperator::BitAnd | BinaryOperator::BitOr | BinaryOperator::BitXor => {
-                Self::eval_bitwise(left, right, op)
+                Ok(Self::eval_bitwise(left, right, op))
             }
         }
+    }
+
+    fn eval_binary_op(left: &Value, op: &BinaryOperator, right: &Value) -> Value {
+        Self::eval_binary_op_fallible(left, op, right).unwrap_or(Value::Null)
     }
 
     /// Numeric-aware equality: 1 == 1.0 is true; otherwise strict Value equality.
@@ -2477,40 +2617,47 @@ impl Evaluator {
         None
     }
 
-    fn eval_ordering<F>(left: &Value, right: &Value, pred: F) -> Value
-    where
-        F: Fn(std::cmp::Ordering) -> bool,
-    {
-        if left.is_null() || right.is_null() {
-            return Value::Bool(false);
+
+    fn eval_between_fallible(
+        val: &Value,
+        low: &Value,
+        high: &Value,
+        negated: bool,
+    ) -> Result<Value, String> {
+        if val.is_null() || low.is_null() || high.is_null() {
+            return Ok(Value::Bool(false));
         }
-        match Self::compare_values(left, right) {
-            Some(ord) => Value::Bool(pred(ord)),
-            None => Value::Bool(false),
+        let ord1 = match Self::compare_values(val, low) {
+            Some(o) => o,
+            None => {
+                return Err(format!(
+                    "between operator cannot compare {} and {}",
+                    Self::format_ekuiper_val_type(val),
+                    Self::format_ekuiper_val_type(low)
+                ));
+            }
+        };
+        let ord2 = match Self::compare_values(val, high) {
+            Some(o) => o,
+            None => {
+                return Err(format!(
+                    "between operator cannot compare {} and {}",
+                    Self::format_ekuiper_val_type(val),
+                    Self::format_ekuiper_val_type(high)
+                ));
+            }
+        };
+        let in_range = (ord1 == std::cmp::Ordering::Greater || ord1 == std::cmp::Ordering::Equal)
+            && (ord2 == std::cmp::Ordering::Less || ord2 == std::cmp::Ordering::Equal);
+        if negated {
+            Ok(Value::Bool(!in_range))
+        } else {
+            Ok(Value::Bool(in_range))
         }
     }
 
     fn eval_between(val: &Value, low: &Value, high: &Value, negated: bool) -> Value {
-        if val.is_null() || low.is_null() || high.is_null() {
-            // SQL: NULL BETWEEN ... is UNKNOWN -> false in WHERE.
-            // For negated (NOT BETWEEN), NULL is still UNKNOWN -> false.
-            return Value::Bool(false);
-        }
-        let in_range = match (
-            Self::compare_values(val, low),
-            Self::compare_values(val, high),
-        ) {
-            (Some(o1), Some(o2)) => {
-                (o1 == std::cmp::Ordering::Greater || o1 == std::cmp::Ordering::Equal)
-                    && (o2 == std::cmp::Ordering::Less || o2 == std::cmp::Ordering::Equal)
-            }
-            _ => false,
-        };
-        if negated {
-            Value::Bool(!in_range)
-        } else {
-            Value::Bool(in_range)
-        }
+        Self::eval_between_fallible(val, low, high, negated).unwrap_or(Value::Bool(false))
     }
 
     fn eval_like(left: &Value, right: &Value) -> Value {
@@ -2646,6 +2793,19 @@ impl Evaluator {
             };
         }
         Value::Null
+    }
+
+    fn eval_call_fallible(name: &str, args: &[Value]) -> Result<Value, String> {
+        match name.to_ascii_lowercase().as_str() {
+            "abs" => Self::func_abs_fallible(args),
+            "ln" => Self::func_ln_fallible(args),
+            "sqrt" => Self::func_sqrt_fallible(args),
+            "cot" => Self::func_cot_fallible(args),
+            "mod" => Self::func_mod_fallible(args),
+            "cast" => Self::func_cast_fallible(args),
+            "split_value" => Self::func_split_value_fallible(args),
+            _ => Ok(Self::eval_call(name, args)),
+        }
     }
 
     fn eval_call(name: &str, args: &[Value]) -> Value {
@@ -3147,40 +3307,31 @@ impl Evaluator {
 
     // ---------- math functions ----------
 
-    fn func_abs(args: &[Value]) -> Value {
+    fn func_abs_fallible(args: &[Value]) -> Result<Value, String> {
         if args.len() != 1 {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         let v = &args[0];
         if v.is_null() {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if let Some(i) = v.as_i64() {
             if let Some(n) = i.checked_abs() {
-                return Value::from(n);
+                return Ok(Value::from(n));
             }
-            return serde_json::json!((i as f64).abs());
+            return Ok(serde_json::json!((i as f64).abs()));
         }
         if let Some(u) = v.as_u64() {
-            // u64 is already non-negative
-            return Value::from(u);
+            return Ok(Value::from(u));
         }
         if let Some(f) = v.as_f64() {
-            return serde_json::json!(f.abs());
+            return Ok(serde_json::json!(f.abs()));
         }
-        if let Some(s) = v.as_str() {
-            let t = s.trim();
-            if let Ok(i) = t.parse::<i64>() {
-                if let Some(n) = i.checked_abs() {
-                    return Value::from(n);
-                }
-                return serde_json::json!((i as f64).abs());
-            }
-            if let Ok(f) = t.parse::<f64>() {
-                return serde_json::json!(f.abs());
-            }
-        }
-        Value::Null
+        Err("call func abs error: only float64 & int type are supported".to_string())
+    }
+
+    fn func_abs(args: &[Value]) -> Value {
+        Self::func_abs_fallible(args).unwrap_or(Value::Null)
     }
 
     fn func_ceil(args: &[Value]) -> Value {
@@ -3239,26 +3390,43 @@ impl Evaluator {
         serde_json::json!(scaled.round() / factor)
     }
 
-    fn func_sqrt(args: &[Value]) -> Value {
+    fn func_sqrt_fallible(args: &[Value]) -> Result<Value, String> {
         if args.len() != 1 {
-            return Value::Null;
+            return Ok(Value::Null);
         }
-        if args[0].is_null() {
-            return Value::Null;
+        let v = &args[0];
+        if v.is_null() {
+            return Ok(Value::Null);
         }
-        match Self::to_f64(&args[0]) {
-            Some(f) => {
-                if f < 0.0 {
-                    return Value::Null;
-                }
-                let r = f.sqrt();
-                if r.is_nan() {
-                    return Value::Null;
-                }
-                serde_json::json!(r)
+        let f = match Self::to_f64(v) {
+            Some(f) => f,
+            None => {
+                return Err(format!(
+                    "call func sqrt error: cannot convert {} to float64",
+                    Self::format_ekuiper_val_type(v)
+                ));
             }
-            None => Value::Null,
+        };
+        if f < 0.0 {
+            let formatted = if let Some(i) = v.as_i64() {
+                i.to_string()
+            } else {
+                f.to_string()
+            };
+            return Err(format!(
+                "call func sqrt error: The argument must be a positive number but got {}",
+                formatted
+            ));
         }
+        let r = f.sqrt();
+        if r.is_nan() {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::json!(r))
+    }
+
+    fn func_sqrt(args: &[Value]) -> Value {
+        Self::func_sqrt_fallible(args).unwrap_or(Value::Null)
     }
 
     fn func_power(args: &[Value]) -> Value {
@@ -3412,21 +3580,21 @@ impl Evaluator {
 
     // ---------- conversion & utility ----------
 
-    fn func_cast(args: &[Value]) -> Value {
+    fn func_cast_fallible(args: &[Value]) -> Result<Value, String> {
         if args.len() != 2 {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if args.iter().any(|v| v.is_null()) {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         let Some(target) = args[1].as_str() else {
-            return Value::Null;
+            return Ok(Value::Null);
         };
         match target.trim().to_ascii_lowercase().as_str() {
-            "bigint" | "int" => Self::cast_to_bigint(&args[0]),
-            "float" | "double" => Self::cast_to_float(&args[0]),
-            "string" => Self::cast_to_string(&args[0]),
-            "boolean" | "bool" => Self::cast_to_bool(&args[0]),
+            "bigint" | "int" => Self::cast_to_bigint_fallible(&args[0]),
+            "float" | "double" => Self::cast_to_float_fallible(&args[0]),
+            "string" => Ok(Self::cast_to_string(&args[0])),
+            "boolean" | "bool" => Ok(Self::cast_to_bool(&args[0])),
             "datetime" => {
                 if let Some(ms) = Self::to_epoch_millis(&args[0]) {
                     if let Some(dt) = Self::datetime_from_millis(ms) {
@@ -3435,78 +3603,83 @@ impl Evaluator {
                         } else {
                             dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
                         };
-                        Value::String(formatted)
+                        Ok(Value::String(formatted))
                     } else {
-                        Value::Null
+                        Ok(Value::Null)
                     }
                 } else {
-                    Value::Null
+                    Ok(Value::Null)
                 }
             }
             "bytea" => {
                 let s = Self::to_string_always(&args[0]);
                 if s.is_empty() {
-                    Value::String(String::new())
+                    Ok(Value::String(String::new()))
                 } else {
-                    Value::String(base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))
+                    Ok(Value::String(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
                 }
             }
-            _ => Value::Null,
+            _ => Ok(Value::Null),
         }
     }
 
-    fn cast_to_bigint(v: &Value) -> Value {
+    fn func_cast(args: &[Value]) -> Value {
+        Self::func_cast_fallible(args).unwrap_or(Value::Null)
+    }
+
+    fn cast_to_bigint_fallible(v: &Value) -> Result<Value, String> {
         if v.is_null() {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if let Some(i) = v.as_i64() {
-            return Value::from(i);
+            return Ok(Value::from(i));
         }
         if let Some(u) = v.as_u64() {
             if u <= i64::MAX as u64 {
-                return Value::from(u as i64);
+                return Ok(Value::from(u as i64));
             }
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if let Some(f) = v.as_f64() {
             if f.is_finite() {
-                return Value::from(f.trunc() as i64);
+                return Ok(Value::from(f.trunc() as i64));
             }
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if let Some(b) = v.as_bool() {
-            return Value::from(if b { 1 } else { 0 });
+            return Ok(Value::from(if b { 1 } else { 0 }));
         }
         if let Some(s) = v.as_str() {
             let t = s.trim();
             if let Ok(i) = t.parse::<i64>() {
-                return Value::from(i);
-            }
-            if let Ok(f) = t.parse::<f64>() {
-                if f.is_finite() {
-                    return Value::from(f.trunc() as i64);
-                }
+                return Ok(Value::from(i));
             }
         }
-        Value::Null
+        Err(format!(
+            "call func cast error: not supported type conversion, got error cannot convert {} to int",
+            Self::format_ekuiper_val_type(v)
+        ))
     }
 
-    fn cast_to_float(v: &Value) -> Value {
+    fn cast_to_float_fallible(v: &Value) -> Result<Value, String> {
         if v.is_null() {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if let Some(f) = v.as_f64() {
-            return serde_json::json!(f);
+            return Ok(serde_json::json!(f));
         }
         if let Some(b) = v.as_bool() {
-            return serde_json::json!(if b { 1.0 } else { 0.0 });
+            return Ok(serde_json::json!(if b { 1.0 } else { 0.0 }));
         }
         if let Some(s) = v.as_str() {
             if let Ok(f) = s.trim().parse::<f64>() {
-                return serde_json::json!(f);
+                return Ok(serde_json::json!(f));
             }
         }
-        Value::Null
+        Err(format!(
+            "call func cast error: not supported type conversion, got error cannot convert {} to float64",
+            Self::format_ekuiper_val_type(v)
+        ))
     }
 
     fn cast_to_string(v: &Value) -> Value {
@@ -3625,20 +3798,39 @@ impl Evaluator {
         Self::func_float1(args, f64::exp)
     }
 
-    fn func_ln(args: &[Value]) -> Value {
-        if args.len() != 1 || args[0].is_null() {
-            return Value::Null;
+    fn func_ln_fallible(args: &[Value]) -> Result<Value, String> {
+        if args.len() != 1 {
+            return Ok(Value::Null);
         }
-        match Self::to_f64(&args[0]) {
-            Some(v) if v > 0.0 => {
-                let r = v.ln();
-                if r.is_nan() || r.is_infinite() {
-                    return Value::Null;
-                }
-                serde_json::json!(r)
+        let v = &args[0];
+        if v.is_null() {
+            return Ok(Value::Null);
+        }
+        let f = match Self::to_f64(v) {
+            Some(f) => f,
+            None => {
+                return Err(format!(
+                    "call func ln error: cannot convert {} to float64",
+                    Self::format_ekuiper_val_type(v)
+                ));
             }
-            _ => Value::Null,
+        };
+        if f <= 0.0 {
+            let formatted = if let Some(i) = v.as_i64() {
+                i.to_string()
+            } else {
+                f.to_string()
+            };
+            return Err(format!(
+                "call func ln error: The argument must be a strictly positive number but got {}",
+                formatted
+            ));
         }
+        Ok(serde_json::json!(f.ln()))
+    }
+
+    fn func_ln(args: &[Value]) -> Value {
+        Self::func_ln_fallible(args).unwrap_or(Value::Null)
     }
 
     fn func_log10(args: &[Value]) -> Value {
@@ -3716,24 +3908,36 @@ impl Evaluator {
         Self::func_float1(args, f64::tanh)
     }
 
-    fn func_cot(args: &[Value]) -> Value {
-        if args.len() != 1 || args[0].is_null() {
-            return Value::Null;
+    fn func_cot_fallible(args: &[Value]) -> Result<Value, String> {
+        if args.len() != 1 {
+            return Ok(Value::Null);
         }
-        match Self::to_f64(&args[0]) {
-            Some(v) => {
-                let t = v.tan();
-                if t == 0.0 {
-                    return Value::Null;
-                }
-                let r = 1.0 / t;
-                if r.is_nan() || r.is_infinite() {
-                    return Value::Null;
-                }
-                serde_json::json!(r)
+        let v = &args[0];
+        if v.is_null() {
+            return Ok(Value::Null);
+        }
+        let f = match Self::to_f64(v) {
+            Some(f) => f,
+            None => {
+                return Err(format!(
+                    "call func cot error: cannot convert {} to float64",
+                    Self::format_ekuiper_val_type(v)
+                ));
             }
-            None => Value::Null,
+        };
+        let tan_val = f.tan();
+        if tan_val == 0.0 || f == 0.0 {
+            return Err("call func cot error: out-of-range error".to_string());
         }
+        let cot_val = 1.0 / tan_val;
+        if cot_val.is_infinite() {
+            return Err("call func cot error: out-of-range error".to_string());
+        }
+        Ok(serde_json::json!(cot_val))
+    }
+
+    fn func_cot(args: &[Value]) -> Value {
+        Self::func_cot_fallible(args).unwrap_or(Value::Null)
     }
 
     fn func_radians(args: &[Value]) -> Value {
@@ -3901,11 +4105,47 @@ impl Evaluator {
         }
     }
 
-    fn func_mod(args: &[Value]) -> Value {
+    fn func_mod_fallible(args: &[Value]) -> Result<Value, String> {
         if args.len() != 2 {
-            return Value::Null;
+            return Ok(Value::Null);
         }
-        Self::eval_arith(&args[0], &args[1], ArithOp::Mod)
+        if args[0].is_null() || args[1].is_null() {
+            return Ok(Value::Null);
+        }
+        let f1 = match Self::to_f64(&args[0]) {
+            Some(f) => f,
+            None => {
+                return Err(format!(
+                    "call func mod error: cannot convert {} to float64",
+                    Self::format_ekuiper_val_type(&args[0])
+                ));
+            }
+        };
+        let f2 = match Self::to_f64(&args[1]) {
+            Some(f) => f,
+            None => {
+                return Err(format!(
+                    "call func mod error: cannot convert {} to float64",
+                    Self::format_ekuiper_val_type(&args[1])
+                ));
+            }
+        };
+        if f2 == 0.0 {
+            return Err("call func mod error: divided by zero".to_string());
+        }
+        if args[0].is_i64() && args[1].is_i64() {
+            let i1 = args[0].as_i64().unwrap();
+            let i2 = args[1].as_i64().unwrap();
+            if i2 == 0 {
+                return Err("call func mod error: divided by zero".to_string());
+            }
+            return Ok(Value::from(i1 % i2));
+        }
+        Ok(serde_json::json!(f1 % f2))
+    }
+
+    fn func_mod(args: &[Value]) -> Value {
+        Self::func_mod_fallible(args).unwrap_or(Value::Null)
     }
 
     // ---------- extended string functions ----------
@@ -5384,28 +5624,37 @@ impl Evaluator {
         }
     }
 
-    /// 0-based split: index counts from the leading (possibly empty) segment.
-    fn func_split_value(args: &[Value]) -> Value {
+    fn func_split_value_fallible(args: &[Value]) -> Result<Value, String> {
         if args.len() != 3 {
-            return Value::Null;
+            return Ok(Value::Null);
         }
         if args.iter().any(|v| v.is_null()) {
-            return Value::Null;
+            return Ok(Value::Null);
         }
-        let (Some(text), Some(sep)) = (args[0].as_str(), args[1].as_str()) else {
-            return Value::Null;
-        };
+        let text = Self::to_string_always(&args[0]);
+        let sep = Self::to_string_always(&args[1]);
         let Some(index) = Self::to_i64_arg(&args[2]) else {
-            return Value::Null;
+            return Ok(Value::Null);
         };
-        if index < 0 || sep.is_empty() {
-            return Value::Null;
+        let parts: Vec<&str> = text.split(&sep).collect();
+        let len = parts.len() as i64;
+        if index > len - 1 || index < -len {
+            return Err(format!(
+                "call func split_value error: {} out of index array (size = {})",
+                index, len
+            ));
         }
-        let parts: Vec<&str> = text.split(sep).collect();
-        match parts.get(index as usize) {
-            Some(part) => Value::String(part.to_string()),
-            None => Value::Null,
-        }
+        let actual_idx = if index >= 0 {
+            index as usize
+        } else {
+            (len + index) as usize
+        };
+        Ok(Value::String(parts[actual_idx].to_string()))
+    }
+
+    /// 0-based split: index counts from the leading (possibly empty) segment.
+    fn func_split_value(args: &[Value]) -> Value {
+        Self::func_split_value_fallible(args).unwrap_or(Value::Null)
     }
 
     fn func_numbytes(args: &[Value]) -> Value {
@@ -6286,6 +6535,7 @@ impl Evaluator {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArithOp {
     Add,

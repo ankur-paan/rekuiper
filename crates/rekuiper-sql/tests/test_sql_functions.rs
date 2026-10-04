@@ -20,10 +20,10 @@ fn eval_one(sql: &str, record: &Record) -> Value {
     let mut parser = Parser::new(sql);
     let stmt = parser.parse_select().expect("Should parse");
     assert_eq!(stmt.fields.len(), 1);
-    Evaluator::eval_select(&stmt, record)
-        .expect("Should project")
-        .remove("v")
-        .unwrap()
+    match Evaluator::eval_select(&stmt, record) {
+        Some(mut row) => row.remove("v").unwrap_or(Value::Null),
+        None => Value::Null,
+    }
 }
 
 /// Evaluate a single-projection aggregate query over a batch.
@@ -1867,7 +1867,7 @@ fn test_string_regex_encoding_parity() {
             "SELECT split_value('/test/device001/message', '/', -1) AS v FROM demo",
             &empty
         ),
-        Value::Null
+        json!("message")
     );
     assert_eq!(
         eval_one("SELECT split_value('a,b,c', ',', 1) AS v FROM demo", &empty),

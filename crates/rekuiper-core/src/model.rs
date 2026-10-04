@@ -391,6 +391,8 @@ pub struct RuleStatus {
     #[serde(default)]
     pub message: String,
     #[serde(default)]
+    pub last_exception: String,
+    #[serde(default)]
     pub last_start_timestamp: i64,
     #[serde(default)]
     pub last_stop_timestamp: i64,
@@ -429,6 +431,7 @@ impl Default for RuleStatus {
         Self {
             status: "running".to_string(),
             message: "".to_string(),
+            last_exception: "".to_string(),
             last_start_timestamp: chrono::Utc::now().timestamp_millis(),
             last_stop_timestamp: 0,
             next_start_timestamp: 0,
