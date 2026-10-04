@@ -149,14 +149,38 @@ impl TableManager {
         Ok(())
     }
 
-    /// Appends a lookup row to a table (creates the row list on demand,
-    /// even if the table definition itself was never registered).
+    /// Appends or updates a lookup row in a table.
+    /// When KEY / PRIMARY_KEY option is configured on the table, matches are replaced in-place.
+    /// When RETAIN_SIZE is configured, oldest rows beyond RETAIN_SIZE are pruned.
     pub fn insert_table_row(&self, table: &str, row: HashMap<String, Value>) {
-        self.rows
-            .write()
-            .entry(table.to_string())
-            .or_default()
-            .push(row);
+        let def = self.get_table(table);
+        let key_col = def.as_ref().and_then(|d| {
+            d.options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("KEY") || k.eq_ignore_ascii_case("PRIMARY_KEY"))
+                .map(|(_, v)| v.clone())
+        });
+        let retain_size: Option<usize> = def.as_ref().and_then(|d| {
+            d.options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("RETAIN_SIZE"))
+                .and_then(|(_, v)| v.parse().ok())
+        });
+        let mut rows_map = self.rows.write();
+        let rows = rows_map.entry(table.to_string()).or_default();
+        if let Some(ref k) = key_col {
+            if let Some(target_val) = row.get(k) {
+                if let Some(pos) = rows.iter().position(|r| r.get(k) == Some(target_val)) {
+                    rows[pos] = row;
+                    return;
+                }
+            }
+        }
+        rows.push(row);
+        let max_size = retain_size.unwrap_or(if key_col.is_some() { usize::MAX } else { 100 });
+        while rows.len() > max_size {
+            rows.remove(0);
+        }
     }
 
     /// Returns all lookup rows stored for a table (empty when none).

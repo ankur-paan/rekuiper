@@ -1476,12 +1476,14 @@ async fn create_table(
                 stream_fields: to_stream_fields(stmt.fields),
                 options: stmt.options,
             };
+            let table_name = stmt.name.clone();
             if let Err(e) = state.table_manager.create_table(table_def).await {
                 return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
             }
+            bootstrap_table_source(&state, &table_name);
             (
                 StatusCode::CREATED,
-                format!("Table {} is created.", stmt.name),
+                format!("Table {} is created.", table_name),
             )
                 .into_response()
         }
@@ -1514,6 +1516,7 @@ async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    cancel_table_source(&state, &name);
     match state.table_manager.delete_table(&name).await {
         Ok(_) => (StatusCode::OK, format!("Table {} is dropped.", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
@@ -1561,9 +1564,11 @@ async fn update_table(
         stream_fields: to_stream_fields(stmt.fields),
         options: stmt.options,
     };
+    cancel_table_source(&state, &name);
     if let Err(e) = state.table_manager.update_table(table_def).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
+    bootstrap_table_source(&state, &name);
     (StatusCode::OK, format!("Table {} is replaced.", name)).into_response()
 }
 
@@ -2050,9 +2055,19 @@ fn resolve_payload_format(
     def: &rekuiper_core::model::StreamDefinition,
     rule_id: &str,
 ) -> Option<rekuiper_connectors::PayloadFormat> {
+    resolve_payload_format_options(schemas, &def.options, &def.stream_fields, &def.name, rule_id)
+}
+
+fn resolve_payload_format_options(
+    schemas: &SchemaManager,
+    options: &HashMap<String, String>,
+    stream_fields: &[StreamField],
+    source_name: &str,
+    rule_id: &str,
+) -> Option<rekuiper_connectors::PayloadFormat> {
     use rekuiper_connectors::{DelimitedCodec, PayloadFormat};
     let opt = |name: &str| {
-        def.options
+        options
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.trim())
@@ -2066,7 +2081,7 @@ fn resolve_payload_format(
                 .filter(|d| !d.is_empty())
                 .map(DelimitedCodec::delimiter_from_name)
                 .unwrap_or(',');
-            let headers = def.stream_fields.iter().map(|f| f.name.clone()).collect();
+            let headers = stream_fields.iter().map(|f| f.name.clone()).collect();
             Some(PayloadFormat::Delimited(DelimitedCodec::new(
                 delimiter, headers,
             )))
@@ -2074,15 +2089,15 @@ fn resolve_payload_format(
         "protobuf" => match resolve_proto_message(schemas, opt("SCHEMAID").unwrap_or("")) {
             Ok(message) => Some(PayloadFormat::Protobuf(Arc::new(message))),
             Err(e) => {
-                tracing::warn!("[RULE {}] stream '{}': {}", rule_id, def.name, e);
+                tracing::warn!("[RULE {}] source '{}': {}", rule_id, source_name, e);
                 None
             }
         },
         other => {
             tracing::warn!(
-                "[RULE {}] stream '{}': FORMAT '{}' is not supported for this source; decoding as JSON",
+                "[RULE {}] source '{}': FORMAT '{}' is not supported for this source; decoding as JSON",
                 rule_id,
-                def.name,
+                source_name,
                 other
             );
             Some(PayloadFormat::Json)
@@ -2129,6 +2144,206 @@ fn cancel_stream_sources(state: &AppState, stream_name: &str) {
     }
     state.stream_active_rules.write().remove(stream_name);
     state.stream_attach_meta.write().remove(stream_name);
+}
+
+fn cancel_table_source(state: &AppState, table_name: &str) {
+    let table_key = format!("$table/{}", table_name);
+    if let Some(cancels) = state.stream_source_cancels.write().remove(&table_key) {
+        for tx in cancels {
+            let _ = tx.send(true);
+        }
+    }
+}
+
+fn resolve_mqtt_table_source(
+    table_def: &TableDefinition,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    schemas: &SchemaManager,
+) -> Option<MqttConfig> {
+    if let Some(kind) = table_def.options.get("TYPE") {
+        if !kind.trim().is_empty() && !kind.eq_ignore_ascii_case("mqtt") {
+            return None;
+        }
+    }
+    let mut config = MqttConfig::default();
+    let conf_key = table_def
+        .options
+        .iter()
+        .find(|(k, _)| {
+            k.eq_ignore_ascii_case("CONF_KEY")
+                || k.eq_ignore_ascii_case("confKey")
+                || k.eq_ignore_ascii_case("connectionSelector")
+        })
+        .map(|(_, v)| v.trim());
+    if let Some(key) = conf_key {
+        if !key.is_empty() {
+            let lookup1 = format!("mqtt/{}", key);
+            let configs_guard = source_configs.read();
+            let conf_val = configs_guard
+                .get(&lookup1)
+                .or_else(|| configs_guard.get(key))
+                .or_else(|| configs_guard.get(&format!("connections/{}", key)))
+                .cloned();
+            drop(configs_guard);
+            if let Some(val) = conf_val {
+                if let Ok(stored) = serde_json::from_value::<MqttConfig>(val.clone()) {
+                    config = stored;
+                } else if let Some(srv) = val.get("server").and_then(|v| v.as_str()) {
+                    if !srv.trim().is_empty() {
+                        config.server = srv.to_string();
+                    }
+                    if let Some(u) = val.get("username").and_then(|v| v.as_str()) {
+                        config.username = Some(u.to_string());
+                    }
+                    if let Some(p) = val.get("password").and_then(|v| v.as_str()) {
+                        config.password = Some(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if let Some((_, srv)) = table_def.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("SERVER")) {
+        let srv = srv.trim();
+        if !srv.is_empty() {
+            config.server = srv.to_string();
+        }
+    }
+    if let Some((_, top)) = table_def.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("topic")) {
+        let top = top.trim();
+        if !top.is_empty() {
+            config.topic = top.to_string();
+        }
+    }
+    if config.topic.trim().is_empty() {
+        config.topic = table_def.name.clone();
+    }
+    if let Some(id) = table_def.options.get("CLIENTID").or_else(|| table_def.options.get("CLIENT_ID")) {
+        if !id.trim().is_empty() {
+            config.client_id = Some(id.clone());
+        }
+    }
+    if let Some(user) = table_def.options.get("USERNAME") {
+        if !user.is_empty() {
+            config.username = Some(user.clone());
+        }
+    }
+    if let Some(pass) = table_def.options.get("PASSWORD") {
+        if !pass.is_empty() {
+            config.password = Some(pass.clone());
+        }
+    }
+    if let Some(qos) = table_def.options.get("QOS") {
+        if let Ok(q) = qos.trim().parse::<u8>() {
+            config.qos = q;
+        }
+    }
+    config.format = resolve_payload_format_options(schemas, &table_def.options, &table_def.stream_fields, &table_def.name, &table_def.name)?;
+    Some(config)
+}
+
+fn bootstrap_table_source(state: &AppState, table_name: &str) {
+    let table_key = format!("$table/{}", table_name);
+    if state.stream_source_cancels.read().contains_key(&table_key) {
+        return;
+    }
+    let Some(def) = state.table_manager.get_table(table_name) else {
+        return;
+    };
+    let datasource = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("TOPIC"))
+        .map(|(_, v)| v.trim().to_string())
+        .unwrap_or_else(|| table_name.to_string());
+    let table_type = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+        .map(|(_, v)| v.trim().to_string())
+        .unwrap_or_default();
+
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    state
+        .stream_source_cancels
+        .write()
+        .insert(table_key.clone(), vec![cancel_tx]);
+
+    let t_name = table_name.to_string();
+    let table_mgr = state.table_manager.clone();
+
+    // 1. Listen on the stream bus for this table's datasource topic (handles memory sinks and internal publication)
+    let mut bus_rx = state.stream_bus.subscribe(&datasource);
+    let mut table_bus_rx = if datasource != table_name {
+        Some(state.stream_bus.subscribe(table_name))
+    } else {
+        None
+    };
+    let mut bus_cancel_rx = cancel_rx.clone();
+    let t_name_bus = t_name.clone();
+    let table_mgr_bus = table_mgr.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                record = bus_rx.recv() => {
+                    match record {
+                        Some(rec) => table_mgr_bus.insert_table_row(&t_name_bus, rec.data),
+                        None => break,
+                    }
+                }
+                record = async {
+                    if let Some(ref mut rx) = table_bus_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    match record {
+                        Some(rec) => table_mgr_bus.insert_table_row(&t_name_bus, rec.data),
+                        None => break,
+                    }
+                }
+                changed = bus_cancel_rx.changed() => {
+                    if changed.is_err() || *bus_cancel_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // 2. If table is MQTT source (TYPE="mqtt" or default when not memory/file/redis/sql):
+    let is_memory = table_type.eq_ignore_ascii_case("memory");
+    let is_redis = table_type.eq_ignore_ascii_case("redis");
+    let is_sql = table_type.eq_ignore_ascii_case("sql");
+    let is_file = table_type.eq_ignore_ascii_case("file");
+    if !is_memory && !is_redis && !is_sql && !is_file {
+        if let Some(config) = resolve_mqtt_table_source(&def, &state.source_configs, &state.schema_manager) {
+            let bus_topic = format!("$table_mqtt/{}", table_name);
+            let stream_tx = state.stream_bus.get_or_create(&bus_topic);
+            let mut mqtt_rx = state.stream_bus.subscribe(&bus_topic);
+            let mut mqtt_cancel = cancel_rx.clone();
+            let t_name_mqtt = t_name.clone();
+            let table_mgr_mqtt = table_mgr.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        record = mqtt_rx.recv() => {
+                            match record {
+                                Some(rec) => table_mgr_mqtt.insert_table_row(&t_name_mqtt, rec.data),
+                                None => break,
+                            }
+                        }
+                        changed = mqtt_cancel.changed() => {
+                            if changed.is_err() || *mqtt_cancel.borrow() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            MqttSource::new(config, stream_tx).spawn(cancel_rx.clone());
+        }
+    }
 }
 
 fn register_rule_stream_source(
@@ -2472,19 +2687,23 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     }
 }
 
-/// Start source producers for a rule: its FROM stream plus every joined
-/// stream (stream-stream joins fan in both sides; table targets resolve
-/// per-row through lookups and need no producer).
+/// Start source producers for a rule: its FROM source plus every joined
+/// source (streams fan in messages; table targets bootstrap their source listeners).
 fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
     // Metadata costs an allocation per message: attach it only for rules
     // that read it.
     let needs_meta = stmt_called_functions(select_stmt)
         .iter()
         .any(|f| f.eq_ignore_ascii_case("meta") || f.eq_ignore_ascii_case("mqtt"));
-    bootstrap_stream_sources(state, rule_id, &select_stmt.from, needs_meta);
+    if state.table_manager.get_table(&select_stmt.from).is_some() {
+        bootstrap_table_source(state, &select_stmt.from);
+    } else {
+        bootstrap_stream_sources(state, rule_id, &select_stmt.from, needs_meta);
+    }
     for join in &select_stmt.joins {
-        if state.table_manager.get_table(&join.target).is_none() && join.target != select_stmt.from
-        {
+        if state.table_manager.get_table(&join.target).is_some() {
+            bootstrap_table_source(state, &join.target);
+        } else if join.target != select_stmt.from {
             bootstrap_stream_sources(state, rule_id, &join.target, needs_meta);
         }
     }
@@ -2494,6 +2713,9 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
 /// persisted status is `running`, so a restarted daemon resumes processing
 /// without manual intervention.
 pub async fn restore_running_rules(state: &AppState) {
+    for table_name in state.table_manager.list_tables() {
+        bootstrap_table_source(state, &table_name);
+    }
     for rule in state.rule_manager.list_rules() {
         let running = state
             .rule_manager
@@ -3735,6 +3957,21 @@ fn spawn_rule_task(
     // Event-time mode for windowed rules: boundaries derive from payload
     // timestamps (stream TIMESTAMP field or well-known keys) instead of the
     // wall clock, with a late-tolerance grace window for out-of-order rows.
+    let mut source_ts_fields = HashMap::new();
+    let from_topic = resolve_source_topic(stream_manager, &select_stmt.from);
+    if let Some(s) = stream_manager.get_stream(&from_topic) {
+        if let Some((_, v)) = s.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP")) {
+            source_ts_fields.insert(select_stmt.from.clone(), v.clone());
+        }
+    }
+    for join in &select_stmt.joins {
+        let topic = resolve_source_topic(stream_manager, &join.target);
+        if let Some(s) = stream_manager.get_stream(&topic) {
+            if let Some((_, v)) = s.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP")) {
+                source_ts_fields.insert(join.target.clone(), v.clone());
+            }
+        }
+    }
     let event_time = EventTimeConfig {
         enabled: rule_options
             .as_ref()
@@ -3746,14 +3983,8 @@ fn spawn_rule_task(
             .and_then(|o| o.get("lateTolerance"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0),
-        timestamp_field: stream_manager
-            .get_stream(&resolve_source_topic(stream_manager, &select_stmt.from))
-            .and_then(|s| {
-                s.options
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
-                    .map(|(_, v)| v.clone())
-            }),
+        timestamp_field: source_ts_fields.get(&select_stmt.from).cloned(),
+        source_timestamp_fields: source_ts_fields,
     };
 
     // Hot-path handles cloned once: rule loops bump lock-free atomics and
@@ -3939,6 +4170,7 @@ struct EventTimeConfig {
     enabled: bool,
     late_tolerance_ms: i64,
     timestamp_field: Option<String>,
+    source_timestamp_fields: HashMap<String, String>,
 }
 
 fn parse_timestamp_val(v: &Value) -> Option<i64> {
@@ -5859,23 +6091,65 @@ async fn run_tumbling_window_rule(
     let mut window_start: Option<i64> = None;
     let window_millis = duration.as_millis() as i64;
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
     // Ingest one row (FROM or joined stream) into the wall/event buffers.
     macro_rules! ingest {
         ($tagged:expr) => {{
             let tagged: TaggedRow = $tagged;
             if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
                 let event_ts =
-                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                    extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    watermark =
-                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
                     let aligned = event_ts - event_ts.rem_euclid(window_millis.max(1));
                     if window_start.is_none() {
                         window_start = Some(aligned);
+                    } else if let Some(ws) = window_start {
+                        if aligned < ws {
+                            window_start = Some(aligned);
+                        }
                     }
                     // Rows rejected by WHERE still advance the watermark.
                     if window_ingest_passes(&select_stmt, &tagged.data) {
@@ -5949,6 +6223,9 @@ async fn run_tumbling_window_rule(
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
@@ -6154,8 +6431,23 @@ async fn run_sliding_window_rule(
     let mut watermark: i64 = i64::MIN;
     let window_millis = length.as_millis() as i64;
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
     // Ingest one row then evaluate the trailing horizon (shared by FROM
     // and joined-stream rows).
     macro_rules! ingest_slide {
@@ -6164,13 +6456,36 @@ async fn run_sliding_window_rule(
             if !window_ingest_passes(&select_stmt, &tagged.data) {
                 // Filtered below the window: neither buffered nor a trigger.
             } else if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
                 let event_ts =
-                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                    extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    watermark =
-                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
                     et_buffer.push((event_ts, tagged));
                     et_buffer.sort_by_key(|(ts, _)| *ts);
                     // Lower-bounded horizon only: expiry is purely age-based
@@ -6257,6 +6572,9 @@ async fn run_sliding_window_rule(
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
@@ -6502,6 +6820,21 @@ fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> 
     if let Some(resp) = check_duplicate_fields(stmt) {
         return Some(resp);
     }
+    if !stmt.joins.is_empty() && stmt.window.is_none() {
+        let has_stream_target = stmt
+            .joins
+            .iter()
+            .any(|j| state.table_manager.get_table(&j.target).is_none());
+        if has_stream_target {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    "a time window or count window is required to join multiple streams",
+                )
+                    .into_response(),
+            );
+        }
+    }
     let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
         || state.table_manager.get_table(&stmt.from).is_some();
     if !stream_exists {
@@ -6558,7 +6891,7 @@ async fn validate_rule(
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
                         Ok(stmt) => {
-                            if let Some(resp) = check_duplicate_fields(&stmt) {
+                            if let Some(resp) = reject_invalid_rule(&state, &stmt) {
                                 return resp;
                             }
                             check_rule_functions(&state, &stmt).unwrap_or_else(|| {
@@ -6584,7 +6917,7 @@ async fn validate_rule(
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
         Ok(stmt) => {
-            if let Some(resp) = check_duplicate_fields(&stmt) {
+            if let Some(resp) = reject_invalid_rule(&state, &stmt) {
                 return resp;
             }
             check_rule_functions(&state, &stmt).unwrap_or_else(|| {

@@ -113,6 +113,22 @@ impl Evaluator {
                         output.insert(key, Value::Null);
                     }
                 }
+                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
+                    let parent_val = Self::eval_val(parent, record);
+                    if let Value::Object(map) = parent_val {
+                        for (k, v) in map {
+                            if k != META_KEY && !k.starts_with("__") {
+                                output.insert(k, v);
+                            }
+                        }
+                    } else {
+                        for (k, v) in record {
+                            if k != META_KEY && !k.starts_with("__") {
+                                output.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                }
                 Expr::FieldAccess {
                     parent: _,
                     field: leaf,
@@ -210,6 +226,24 @@ impl Evaluator {
                             .and_then(|rec| rec.get(name).cloned())
                             .unwrap_or(Value::Null)
                     });
+                }
+                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
+                    if let Some(rec) = first {
+                        let parent_val = Self::eval_val(parent, rec);
+                        if let Value::Object(map) = parent_val {
+                            for (k, v) in map {
+                                if k != META_KEY && !k.starts_with("__") {
+                                    output.entry(k).or_insert_with(|| v);
+                                }
+                            }
+                        } else {
+                            for (k, v) in rec {
+                                if k != META_KEY && !k.starts_with("__") {
+                                    output.entry(k.clone()).or_insert_with(|| v.clone());
+                                }
+                            }
+                        }
+                    }
                 }
                 Expr::FieldAccess {
                     parent: _,
@@ -516,6 +550,22 @@ impl Evaluator {
                         output.insert(key, Value::Null);
                     }
                 }
+                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
+                    let parent_val = Self::eval_stateful_expr(parent, record, state);
+                    if let Value::Object(map) = parent_val {
+                        for (k, v) in map {
+                            if k != META_KEY && !k.starts_with("__") {
+                                output.insert(k, v);
+                            }
+                        }
+                    } else {
+                        for (k, v) in record {
+                            if k != META_KEY && !k.starts_with("__") {
+                                output.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                }
                 Expr::FieldAccess {
                     parent: _,
                     field: leaf,
@@ -690,10 +740,20 @@ impl Evaluator {
             Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
             Expr::FieldAccess { parent, field } => {
                 let parent_val = Self::eval_stateful_expr(parent, record, state);
-                match parent_val {
-                    Value::Object(map) => map.get(field).cloned().unwrap_or(Value::Null),
-                    _ => Value::Null,
+                if let Value::Object(map) = &parent_val {
+                    if let Some(v) = map.get(field) {
+                        return v.clone();
+                    }
                 }
+                if let Expr::Identifier(p_name) = parent.as_ref() {
+                    if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
+                        return v.clone();
+                    }
+                    if let Some(v) = record.get(field) {
+                        return v.clone();
+                    }
+                }
+                Value::Null
             }
             Expr::Index { base, index } => {
                 let b = Self::eval_stateful_expr(base, record, state);
@@ -2139,10 +2199,20 @@ impl Evaluator {
             Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
             Expr::FieldAccess { parent, field } => {
                 let parent_val = Self::eval_val(parent, record);
-                match parent_val {
-                    Value::Object(map) => map.get(field).cloned().unwrap_or(Value::Null),
-                    _ => Value::Null,
+                if let Value::Object(map) = &parent_val {
+                    if let Some(v) = map.get(field) {
+                        return v.clone();
+                    }
                 }
+                if let Expr::Identifier(p_name) = parent.as_ref() {
+                    if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
+                        return v.clone();
+                    }
+                    if let Some(v) = record.get(field) {
+                        return v.clone();
+                    }
+                }
+                Value::Null
             }
             Expr::Index { base, index } => {
                 let b = Self::eval_val(base, record);

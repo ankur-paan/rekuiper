@@ -1343,7 +1343,10 @@ impl<'a> Parser<'a> {
             if self.pos < self.input.len() && self.input[self.pos..].starts_with('.') {
                 self.pos += 1;
                 self.skip_whitespace();
-                let field = if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                let field = if self.pos < self.input.len() && self.input[self.pos..].starts_with('*') {
+                    self.pos += 1;
+                    "*".to_string()
+                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
                     self.parse_backtick_identifier()?
                 } else {
                     let f = self
