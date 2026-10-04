@@ -135,6 +135,11 @@ pub enum WindowDef {
         max_duration: u64,
         timeout: u64,
     },
+    /// `STATEWINDOW(start_condition[, end_condition])`
+    State {
+        start_condition: Expr,
+        end_condition: Option<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -186,6 +191,9 @@ pub struct SelectStmt {
     pub where_clause: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub window: Option<WindowDef>,
+    pub window_filter: Option<Expr>,
+    pub window_trigger_condition: Option<Expr>,
+    pub window_partition_by: Option<Expr>,
     pub having: Option<Expr>,
     pub order_by: Vec<OrderByItem>,
     pub limit: Option<usize>,

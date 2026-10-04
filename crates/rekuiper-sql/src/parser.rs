@@ -433,6 +433,9 @@ impl<'a> Parser<'a> {
 
         let mut group_by = Vec::new();
         let mut window: Option<WindowDef> = None;
+        let mut window_filter: Option<Expr> = None;
+        let mut window_trigger_condition: Option<Expr> = None;
+        let mut window_partition_by: Option<Expr> = None;
         // GROUP BY <items> — items may include window calls which go to `window`.
         if self.peek_word_is("GROUP") {
             self.expect_keyword("GROUP")?;
@@ -441,10 +444,47 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 // Allow trailing commas / empty? No — require an expression.
                 let item = self.parse_expr()?;
+                if let Expr::Over { partition_by, when, .. } = &item {
+                    if window_partition_by.is_none() {
+                        window_partition_by = partition_by.as_deref().cloned();
+                    }
+                    if window_trigger_condition.is_none() {
+                        window_trigger_condition = when.as_deref().cloned();
+                    }
+                }
                 // Recognize window calls case-insensitively; they go to `window`,
                 // remaining expressions go to `group_by`.
                 if let Some(w) = Self::try_parse_window_def(&item)? {
                     window = Some(w);
+                    loop {
+                        self.skip_whitespace();
+                        if self.peek_word_is("FILTER") {
+                            self.match_keyword("FILTER");
+                            self.expect_char('(')?;
+                            self.expect_keyword("WHERE")?;
+                            window_filter = Some(self.parse_expr()?);
+                            self.expect_char(')')?;
+                        } else if self.peek_word_is("OVER") {
+                            self.match_keyword("OVER");
+                            self.expect_char('(')?;
+                            loop {
+                                self.skip_whitespace();
+                                if self.peek_word_is("WHEN") {
+                                    self.match_keyword("WHEN");
+                                    window_trigger_condition = Some(self.parse_expr()?);
+                                } else if self.peek_word_is("PARTITION") {
+                                    self.match_keyword("PARTITION");
+                                    self.expect_keyword("BY")?;
+                                    window_partition_by = Some(self.parse_expr()?);
+                                } else {
+                                    break;
+                                }
+                            }
+                            self.expect_char(')')?;
+                        } else {
+                            break;
+                        }
+                    }
                 } else {
                     group_by.push(item);
                 }
@@ -527,6 +567,9 @@ impl<'a> Parser<'a> {
             where_clause,
             group_by,
             window,
+            window_filter,
+            window_trigger_condition,
+            window_partition_by,
             having,
             order_by,
             limit,
@@ -539,9 +582,31 @@ impl<'a> Parser<'a> {
     fn try_parse_window_def(expr: &Expr) -> Result<Option<WindowDef>> {
         let (name, args) = match expr {
             Expr::Call { name, args } => (name, args),
+            Expr::Over { call, .. } => match &**call {
+                Expr::Call { name, args } => (name, args),
+                _ => return Ok(None),
+            },
             _ => return Ok(None),
         };
         match name.to_ascii_lowercase().as_str() {
+            "statewindow" => {
+                if args.is_empty() || args.len() > 2 {
+                    bail!(
+                        "STATEWINDOW expects 1 or 2 arguments, got {}",
+                        args.len()
+                    );
+                }
+                let start_condition = args[0].clone();
+                let end_condition = if args.len() == 2 {
+                    Some(args[1].clone())
+                } else {
+                    None
+                };
+                Ok(Some(WindowDef::State {
+                    start_condition,
+                    end_condition,
+                }))
+            }
             "tumblingwindow" => {
                 if args.len() != 2 {
                     bail!(

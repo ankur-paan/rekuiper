@@ -1752,7 +1752,7 @@ async fn create_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref()) {
         return resp;
     }
 
@@ -4023,21 +4023,33 @@ fn spawn_rule_task(
             confs.clone(),
         )),
         Some(WindowDef::TumblingTime { unit, length }) => {
-            let duration = tumbling_window_duration(&unit, length);
-            tokio::spawn(run_tumbling_window_rule(
-                loop_counters,
-                loop_running,
-                rule_id.clone(),
-                select_stmt,
-                rx,
-                duration,
-                sink_tx,
-                event_time,
-                send_error,
-                join_rxs,
-                tables.clone(),
-                confs.clone(),
-            ))
+            if length == 0 {
+                tokio::spawn(async move {
+                    let mut rx = rx;
+                    while rx.recv().await.is_some() {
+                        if !is_rule_running(&loop_running) {
+                            continue;
+                        }
+                        loop_counters.inc_source(1);
+                    }
+                })
+            } else {
+                let duration = tumbling_window_duration(&unit, length);
+                tokio::spawn(run_tumbling_window_rule(
+                    loop_counters,
+                    loop_running,
+                    rule_id.clone(),
+                    select_stmt,
+                    rx,
+                    duration,
+                    sink_tx,
+                    event_time,
+                    send_error,
+                    join_rxs,
+                    tables.clone(),
+                    confs.clone(),
+                ))
+            }
         }
         Some(WindowDef::HoppingTime {
             unit,
@@ -4055,6 +4067,7 @@ fn spawn_rule_task(
                 window_length,
                 hop_interval,
                 sink_tx,
+                event_time,
                 send_error,
                 join_rxs,
                 tables.clone(),
@@ -4089,12 +4102,6 @@ fn spawn_rule_task(
             max_duration,
             timeout,
         }) => {
-            if event_time.enabled {
-                tracing::warn!(
-                    "[RULE {}] SESSIONWINDOW runs on processing time; event-time options are ignored",
-                    rule_id
-                );
-            }
             tokio::spawn(run_session_window_rule(
                 loop_counters,
                 loop_running,
@@ -4104,6 +4111,27 @@ fn spawn_rule_task(
                 tumbling_window_duration(&unit, max_duration),
                 tumbling_window_duration(&unit, timeout),
                 sink_tx,
+                event_time,
+                send_error,
+                join_rxs,
+                tables.clone(),
+                confs.clone(),
+            ))
+        }
+        Some(WindowDef::State {
+            start_condition,
+            end_condition,
+        }) => {
+            tokio::spawn(run_state_window_rule(
+                loop_counters,
+                loop_running,
+                rule_id.clone(),
+                select_stmt,
+                rx,
+                start_condition,
+                end_condition,
+                sink_tx,
+                event_time,
                 send_error,
                 join_rxs,
                 tables.clone(),
@@ -5785,17 +5813,25 @@ async fn run_stateless_rule(
 /// Emit one window trigger: plain windows aggregate the batch; rules with
 /// JOIN clauses resolve matches first (stream fan-in, table lookups, ON
 /// conditions) and project each match.
+#[allow(clippy::too_many_arguments)]
 async fn emit_window_batch(
     counters: &RuleCounters,
     table_manager: &TableManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     select_stmt: &SelectStmt,
-    batch: Vec<TaggedRow>,
+    mut batch: Vec<TaggedRow>,
     prefiltered: bool,
+    window_bounds: Option<(i64, i64)>,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
 ) {
     if batch.is_empty() {
         return;
+    }
+    if let Some((start_ms, end_ms)) = window_bounds {
+        for row in &mut batch {
+            row.data.insert("__window_start__".to_string(), Value::from(start_ms));
+            row.data.insert("__window_end__".to_string(), Value::from(end_ms));
+        }
     }
     let outputs = if select_stmt.joins.is_empty() {
         let rows: Vec<HashMap<String, Value>> = batch.into_iter().map(|r| r.data).collect();
@@ -5826,9 +5862,16 @@ async fn emit_window_outputs(
 /// Time-window ingest filter: without joins, `WHERE` is pushed below the
 /// window (as eKuiper's predicate push-down does), so rejected rows are
 /// never buffered. With joins it may reference joined columns and runs at
-/// trigger time instead.
+/// trigger time instead. FILTER (WHERE ...) is always evaluated before the window.
 fn window_ingest_passes(select_stmt: &SelectStmt, data: &HashMap<String, Value>) -> bool {
-    !select_stmt.joins.is_empty() || Evaluator::passes_where(select_stmt, data)
+    let where_pass = !select_stmt.joins.is_empty() || Evaluator::passes_where(select_stmt, data);
+    if !where_pass {
+        return false;
+    }
+    if let Some(filter) = &select_stmt.window_filter {
+        return Evaluator::eval_bool(filter, data);
+    }
+    true
 }
 
 /// Contents of one open time window: row-free accumulators when the
@@ -5874,6 +5917,7 @@ impl WindowRows {
         table_manager: &TableManager,
         source_configs: &Arc<RwLock<HashMap<String, Value>>>,
         select_stmt: &SelectStmt,
+        window_bounds: Option<(i64, i64)>,
         sink: &tokio::sync::mpsc::Sender<StreamRecord>,
     ) {
         match self {
@@ -5891,6 +5935,7 @@ impl WindowRows {
                     select_stmt,
                     batch,
                     true,
+                    window_bounds,
                     sink,
                 )
                 .await;
@@ -5972,6 +6017,9 @@ async fn run_count_window_rule(
                 if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
+                if !window_ingest_passes(&select_stmt, &record.data) {
+                    continue;
+                }
                 buffer.push(TaggedRow { source: from_source.clone(), data: record.data });
                 events_since_trigger += 1;
                 if hop <= count {
@@ -5985,7 +6033,8 @@ async fn run_count_window_rule(
                             buffer.drain(0..hop.min(buffer.len()));
                             batch
                         };
-                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
+                        let now_ms = chrono::Utc::now().timestamp_millis();
+                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
                     }
                 } else {
                     // Sparsely sampled count window with gap (hop > count)
@@ -5994,7 +6043,8 @@ async fn run_count_window_rule(
                     }
                     if events_since_trigger >= hop {
                         if !buffer.is_empty() {
-                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
+                            let now_ms = chrono::Utc::now().timestamp_millis();
+                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
                         }
                         events_since_trigger = 0;
                         buffer.clear();
@@ -6015,6 +6065,9 @@ async fn run_count_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
+                        if !window_ingest_passes(&select_stmt, &tagged.data) {
+                            continue;
+                        }
                         buffer.push(tagged);
                         events_since_trigger += 1;
                         if hop <= count {
@@ -6026,14 +6079,16 @@ async fn run_count_window_rule(
                                     buffer.drain(0..hop.min(buffer.len()));
                                     batch
                                 };
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
                             }
                         } else if events_since_trigger >= hop {
                             if buffer.len() > count {
                                 buffer.remove(0);
                             }
                             if !buffer.is_empty() {
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
                             }
                             events_since_trigger = 0;
                             buffer.clear();
@@ -6179,6 +6234,7 @@ async fn run_tumbling_window_rule(
                             &select_stmt,
                             batch,
                             true,
+                            Some((t0, t_end)),
                             &sink,
                         )
                         .await;
@@ -6237,17 +6293,18 @@ async fn run_tumbling_window_rule(
                 if window.is_empty() {
                     continue;
                 }
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let end_ms = now_ms - now_ms.rem_euclid(window_millis.max(1));
+                let start_ms = end_ms - window_millis;
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, end_ms)), &sink).await;
             }
         }
     }
 }
 
-/// SESSIONWINDOW over processing time (eKuiper semantics): a session opens
-/// at the first row that passes `WHERE`, closes `timeout` after the last
-/// such row, and is also cut at a natural-time `max_duration` check once it
-/// has lasted at least `max_duration`. Sessions are stream-wide; `GROUP BY`
-/// partitions rows inside a session.
+/// SESSIONWINDOW: in event time, groups events within consecutive gaps <= timeout,
+/// cutting on max_duration or gap > timeout. In processing time, operates on idle timeout
+/// and aligned max_duration intervals.
 #[allow(clippy::too_many_arguments)]
 async fn run_session_window_rule(
     counters: Arc<RuleCounters>,
@@ -6258,6 +6315,7 @@ async fn run_session_window_rule(
     max_duration: std::time::Duration,
     timeout: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
     send_error: bool,
     join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
@@ -6265,24 +6323,131 @@ async fn run_session_window_rule(
 ) {
     let mut max_check = aligned_interval(max_duration);
     let mut window = WindowRows::new(&select_stmt);
-    // When the open session started; `None` while no session is open.
     let mut opened_at: Option<tokio::time::Instant> = None;
+    let mut opened_at_ms: Option<i64> = None;
     let idle = tokio::time::sleep(timeout);
     tokio::pin!(idle);
     let from_source = select_stmt.from.clone();
+
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
-    macro_rules! ingest {
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
+    let mut watermark: i64 = i64::MIN;
+    let mut session_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut session_start: Option<i64> = None;
+    let mut last_event_ts: Option<i64> = None;
+    let timeout_ms = (timeout.as_millis() as i64).max(1);
+    let max_duration_ms = (max_duration.as_millis() as i64).max(1);
+
+    macro_rules! ingest_session {
         ($tagged:expr) => {{
-            if window.push(&select_stmt, $tagged) {
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
+                if event_ts < watermark {
+                    // Drop late arrival
+                } else {
+                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
+                    if window_ingest_passes(&select_stmt, &tagged.data) {
+                        if let Some(last_ts) = last_event_ts {
+                            if event_ts.saturating_sub(last_ts) > timeout_ms
+                                || event_ts.saturating_sub(session_start.unwrap_or(event_ts)) >= max_duration_ms
+                            {
+                                let s_start = session_start.unwrap_or(last_ts);
+                                let s_end = last_ts.saturating_add(timeout_ms);
+                                let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer).into_iter().map(|(_, r)| r).collect();
+                                session_start = Some(event_ts);
+                                last_event_ts = Some(event_ts);
+                                session_buffer.push((event_ts, tagged));
+                                emit_window_batch(
+                                    &counters,
+                                    &table_manager,
+                                    &source_configs,
+                                    &select_stmt,
+                                    batch,
+                                    true,
+                                    Some((s_start, s_end)),
+                                    &sink,
+                                ).await;
+                            } else {
+                                last_event_ts = Some(event_ts);
+                                session_buffer.push((event_ts, tagged));
+                            }
+                        } else {
+                            session_start = Some(event_ts);
+                            last_event_ts = Some(event_ts);
+                            session_buffer.push((event_ts, tagged));
+                        }
+                    }
+
+                    if let Some(last_ts) = last_event_ts {
+                        if watermark >= last_ts.saturating_add(timeout_ms) {
+                            let s_start = session_start.take().unwrap_or(last_ts);
+                            let s_end = last_ts.saturating_add(timeout_ms);
+                            last_event_ts = None;
+                            let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer).into_iter().map(|(_, r)| r).collect();
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((s_start, s_end)),
+                                &sink,
+                            ).await;
+                        }
+                    }
+                }
+            } else if window.push(&select_stmt, tagged) {
                 let now = tokio::time::Instant::now();
                 if opened_at.is_none() {
                     opened_at = Some(now);
+                    opened_at_ms = Some(chrono::Utc::now().timestamp_millis());
                 }
                 idle.as_mut().reset(now + timeout);
             }
         }};
     }
+
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -6297,7 +6462,7 @@ async fn run_session_window_rule(
                         {
                             continue;
                         }
-                        ingest!(TaggedRow { source: from_source.clone(), data: record.data });
+                        ingest_session!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
                     None => break,
                 }
@@ -6313,24 +6478,47 @@ async fn run_session_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        ingest!(tagged);
+                        ingest_session!(tagged);
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
-            _ = &mut idle, if opened_at.is_some() => {
+            _ = &mut idle, if opened_at.is_some() && !event_time.enabled => {
                 opened_at = None;
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let start_ms = opened_at_ms.take().unwrap_or(now_ms);
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
             }
             _ = max_check.tick() => {
-                if opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
+                if !event_time.enabled && opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
                     opened_at = None;
-                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let start_ms = opened_at_ms.take().unwrap_or(now_ms);
+                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
                 }
             }
         }
+    }
+
+    if event_time.enabled && !session_buffer.is_empty() {
+        let s_start = session_start.unwrap_or(0);
+        let s_end = last_event_ts.unwrap_or(0).saturating_add(timeout_ms);
+        let batch: Vec<TaggedRow> = session_buffer.into_iter().map(|(_, r)| r).collect();
+        emit_window_batch(
+            &counters,
+            &table_manager,
+            &source_configs,
+            &select_stmt,
+            batch,
+            true,
+            Some((s_start, s_end)),
+            &sink,
+        ).await;
     }
 }
 
@@ -6344,17 +6532,118 @@ async fn run_hopping_window_rule(
     length: std::time::Duration,
     hop: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
     send_error: bool,
     join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let length_ms = length.as_millis() as i64;
+    let hop_ms = (hop.as_millis() as i64).max(1);
+
     // Hops end on natural-time multiples of the hop (eKuiper alignment).
     let mut ticker = aligned_interval(hop);
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
+
+    let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut watermark: i64 = i64::MIN;
+    let mut next_hop_end: Option<i64> = None;
+
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
+
+    macro_rules! ingest_hop {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
+                if event_ts < watermark {
+                    // Late arrival beyond tolerance: drop
+                } else {
+                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
+                    if next_hop_end.is_none() {
+                        let aligned = event_ts - event_ts.rem_euclid(hop_ms) + hop_ms;
+                        next_hop_end = Some(aligned);
+                    }
+
+                    if window_ingest_passes(&select_stmt, &tagged.data) {
+                        et_buffer.push((event_ts, tagged));
+                    }
+
+                    while let Some(cur_end) = next_hop_end {
+                        if watermark < cur_end {
+                            break;
+                        }
+                        let cur_start = cur_end.saturating_sub(length_ms);
+                        let batch: Vec<TaggedRow> = et_buffer
+                            .iter()
+                            .filter(|(ts, _)| *ts >= cur_start && *ts < cur_end)
+                            .map(|(_, row)| row.clone())
+                            .collect();
+                        next_hop_end = Some(cur_end.saturating_add(hop_ms));
+                        let retain_after = cur_end.saturating_add(hop_ms).saturating_sub(length_ms);
+                        et_buffer.retain(|(ts, _)| *ts >= retain_after);
+                        if !batch.is_empty() {
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((cur_start, cur_end)),
+                                &sink,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            } else if window_ingest_passes(&select_stmt, &tagged.data) {
+                buffer.push((std::time::Instant::now(), tagged));
+            }
+        }};
+    }
+
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -6369,9 +6658,7 @@ async fn run_hopping_window_rule(
                         {
                             continue;
                         }
-                        if window_ingest_passes(&select_stmt, &record.data) {
-                            buffer.push((std::time::Instant::now(), TaggedRow { source: from_source.clone(), data: record.data }));
-                        }
+                        ingest_hop!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
                     None => break,
                 }
@@ -6387,23 +6674,32 @@ async fn run_hopping_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        buffer.push((std::time::Instant::now(), tagged));
+                        ingest_hop!(tagged);
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
             _ = ticker.tick() => {
+                if event_time.enabled {
+                    continue;
+                }
                 let now = std::time::Instant::now();
                 // Expire and discard records older than the full window length
                 buffer.retain(|(ts, _)| now.duration_since(*ts) <= length);
                 if buffer.is_empty() {
                     continue;
                 }
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let end_ms = now_ms - now_ms.rem_euclid(hop_ms);
+                let start_ms = end_ms.saturating_sub(length_ms);
                 let batch: Vec<TaggedRow> =
                     buffer.iter().map(|(_, row)| row.clone()).collect();
-                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, &sink).await;
+                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, Some((start_ms, end_ms)), &sink).await;
             }
         }
     }
@@ -6428,6 +6724,7 @@ async fn run_sliding_window_rule(
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
     // Event-time state: event-timestamped rows plus the watermark.
     let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut pending_triggers: Vec<(i64, i64)> = Vec::new();
     let mut watermark: i64 = i64::MIN;
     let window_millis = length.as_millis() as i64;
     let from_source = select_stmt.from.clone();
@@ -6448,8 +6745,7 @@ async fn run_sliding_window_rule(
     let mut joins_open = true;
     let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
     let mut closed_streams: HashSet<String> = HashSet::new();
-    // Ingest one row then evaluate the trailing horizon (shared by FROM
-    // and joined-stream rows).
+
     macro_rules! ingest_slide {
         ($tagged:expr) => {{
             let tagged: TaggedRow = $tagged;
@@ -6486,32 +6782,83 @@ async fn run_sliding_window_rule(
                         watermark = watermark.max(new_wm);
                     }
 
-                    et_buffer.push((event_ts, tagged));
+                    et_buffer.push((event_ts, tagged.clone()));
                     et_buffer.sort_by_key(|(ts, _)| *ts);
-                    // Lower-bounded horizon only: expiry is purely age-based
-                    // (`ts >= event_ts - length`). Newer buffered rows must
-                    // survive out-of-order arrivals within the window.
-                    et_buffer.retain(|(ts, _)| *ts >= event_ts.saturating_sub(window_millis));
-                    let batch: Vec<TaggedRow> =
-                        et_buffer.iter().map(|(_, row)| row.clone()).collect();
-                    emit_window_batch(
-                        &counters,
-                        &table_manager,
-                        &source_configs,
-                        &select_stmt,
-                        batch,
-                        true,
-                        &sink,
-                    )
-                    .await;
+
+                    let should_trigger = match &select_stmt.window_trigger_condition {
+                        Some(cond) => Evaluator::eval_bool(cond, &tagged.data),
+                        None => true,
+                    };
+
+                    let delay_ms = delay.map(|d| d.as_millis() as i64).unwrap_or(0);
+                    if should_trigger {
+                        if delay_ms > 0 {
+                            pending_triggers.push((event_ts, event_ts.saturating_add(delay_ms)));
+                        } else {
+                            let start_ts = event_ts.saturating_sub(window_millis);
+                            let batch: Vec<TaggedRow> = et_buffer
+                                .iter()
+                                .filter(|(ts, _)| *ts >= start_ts && *ts <= event_ts)
+                                .map(|(_, row)| row.clone())
+                                .collect();
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((start_ts, event_ts)),
+                                &sink,
+                            )
+                            .await;
+                        }
+                    }
+
+                    while !pending_triggers.is_empty() && watermark >= pending_triggers[0].1 {
+                        let (trigger_end_ts, _) = pending_triggers.remove(0);
+                        let start_ts = trigger_end_ts.saturating_sub(window_millis);
+                        let batch: Vec<TaggedRow> = et_buffer
+                            .iter()
+                            .filter(|(ts, _)| *ts >= start_ts && *ts <= trigger_end_ts)
+                            .map(|(_, row)| row.clone())
+                            .collect();
+                        emit_window_batch(
+                            &counters,
+                            &table_manager,
+                            &source_configs,
+                            &select_stmt,
+                            batch,
+                            true,
+                            Some((start_ts, trigger_end_ts)),
+                            &sink,
+                        )
+                        .await;
+                    }
+
+                    let min_pending = pending_triggers.first().map(|(ts, _)| *ts).unwrap_or(event_ts);
+                    let retain_ts = min_pending.min(event_ts).saturating_sub(window_millis);
+                    et_buffer.retain(|(ts, _)| *ts >= retain_ts);
                 }
             } else {
                 let now = std::time::Instant::now();
-                buffer.push((now, tagged));
+                buffer.push((now, tagged.clone()));
                 let eval_time = std::time::Instant::now();
-                // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
                 buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
-                if !buffer.is_empty() {
+
+                let should_trigger = match &select_stmt.window_trigger_condition {
+                    Some(cond) => Evaluator::eval_bool(cond, &tagged.data),
+                    None => true,
+                };
+
+                if should_trigger && !buffer.is_empty() {
+                    if let Some(delay_dur) = delay {
+                        if !delay_dur.is_zero() {
+                            tokio::time::sleep(delay_dur).await;
+                        }
+                    }
+                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let start_ms = now_ms.saturating_sub(window_millis);
                     let batch: Vec<TaggedRow> =
                         buffer.iter().map(|(_, row)| row.clone()).collect();
                     emit_window_batch(
@@ -6521,6 +6868,7 @@ async fn run_sliding_window_rule(
                         &select_stmt,
                         batch,
                         true,
+                        Some((start_ms, now_ms)),
                         &sink,
                     )
                     .await;
@@ -6540,13 +6888,6 @@ async fn run_sliding_window_rule(
                 if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
-                // If delay is configured, wait for the delay duration before evaluating
-                // so events arriving during the delay window are captured.
-                if let Some(delay_dur) = delay {
-                    if !delay_dur.is_zero() {
-                        tokio::time::sleep(delay_dur).await;
-                    }
-                }
                 ingest_slide!(TaggedRow { source: from_source.clone(), data: record.data });
             }
             None => break,
@@ -6563,11 +6904,6 @@ async fn run_sliding_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        if let Some(delay_dur) = delay {
-                            if !delay_dur.is_zero() {
-                                tokio::time::sleep(delay_dur).await;
-                            }
-                        }
                         ingest_slide!(tagged);
                     }
                     None => {
@@ -6575,6 +6911,164 @@ async fn run_sliding_window_rule(
                         for s in &join_stream_names {
                             closed_streams.insert(s.clone());
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// STATEWINDOW: creates dynamic windows based on condition matches.
+/// Two conditions: begins on start_condition, emits on end_condition.
+/// Single condition: begins on start_condition, emits prior window when start_condition matches again.
+#[allow(clippy::too_many_arguments)]
+async fn run_state_window_rule(
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: StreamReceiver,
+    start_condition: Expr,
+    end_condition: Option<Expr>,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
+    send_error: bool,
+    join_rxs: Vec<(String, StreamReceiver)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
+) {
+    struct StateWindowState {
+        on_begin: bool,
+        start_time: i64,
+        buffer: Vec<TaggedRow>,
+    }
+
+    let rule_state = RuleState::default();
+    let mut partitions: HashMap<String, StateWindowState> = HashMap::new();
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
+
+    macro_rules! ingest_state {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if !window_ingest_passes(&select_stmt, &tagged.data) {
+                // Filtered below the window
+            } else {
+                let ts = if event_time.enabled {
+                    let ts_field = event_time
+                        .source_timestamp_fields
+                        .get(&tagged.source)
+                        .map(|s| s.as_str())
+                        .or(event_time.timestamp_field.as_deref());
+                    extract_event_timestamp(&tagged.data, ts_field)
+                } else {
+                    chrono::Utc::now().timestamp_millis()
+                };
+
+                let partition_key = match &select_stmt.window_partition_by {
+                    Some(p_expr) => Evaluator::eval_val(p_expr, &tagged.data).to_string(),
+                    None => String::new(),
+                };
+
+                let state = partitions.entry(partition_key).or_insert_with(|| StateWindowState {
+                    on_begin: false,
+                    start_time: 0,
+                    buffer: Vec::new(),
+                });
+
+                match &end_condition {
+                    Some(end_cond) => {
+                        if !state.on_begin {
+                            if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                                state.start_time = ts;
+                                state.on_begin = true;
+                                state.buffer.push(tagged);
+                            }
+                        } else {
+                            state.buffer.push(tagged.clone());
+                            if Evaluator::eval_bool_stateful(end_cond, &tagged.data, &rule_state) {
+                                state.on_begin = false;
+                                let batch = std::mem::take(&mut state.buffer);
+                                emit_window_batch(
+                                    &counters,
+                                    &table_manager,
+                                    &source_configs,
+                                    &select_stmt,
+                                    batch,
+                                    true,
+                                    Some((state.start_time, ts)),
+                                    &sink,
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                    None => {
+                        if !state.on_begin {
+                            if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                                state.start_time = ts;
+                                state.on_begin = true;
+                                state.buffer.push(tagged);
+                            }
+                        } else if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                            let batch = std::mem::take(&mut state.buffer);
+                            let prev_start = state.start_time;
+                            state.start_time = ts;
+                            state.on_begin = true;
+                            state.buffer.push(tagged);
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((prev_start, ts)),
+                                &sink,
+                            )
+                            .await;
+                        } else {
+                            state.buffer.push(tagged);
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Some(record) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
+                            continue;
+                        }
+                        ingest_state!(TaggedRow { source: from_source.clone(), data: record.data });
+                    }
+                    None => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        ingest_state!(tagged);
+                    }
+                    None => {
+                        joins_open = false;
                     }
                 }
             }
@@ -6816,9 +7310,43 @@ fn check_duplicate_fields(stmt: &SelectStmt) -> Option<Response> {
 /// Shared create/update gate: the source stream or table must exist and
 /// every called function must be known. Returns the rejection response
 /// when the rule is invalid.
-fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> {
+fn reject_invalid_rule(
+    state: &AppState,
+    stmt: &SelectStmt,
+    options: Option<&HashMap<String, Value>>,
+) -> Option<Response> {
     if let Some(resp) = check_duplicate_fields(stmt) {
         return Some(resp);
+    }
+    if !stmt.group_by.is_empty() && stmt.window.is_none() {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                "select stmt group by should be used with window",
+            )
+                .into_response(),
+        );
+    }
+    let is_event_time = options
+        .and_then(|opts| opts.get("isEventTime"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if is_event_time {
+        if let Some(stream) = state.stream_manager.get_stream(&stmt.from) {
+            let has_timestamp = stream
+                .options
+                .keys()
+                .any(|k| k.eq_ignore_ascii_case("TIMESTAMP"));
+            if !has_timestamp {
+                return Some(
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "preprocessor is set to be event time but stream option TIMESTAMP not found",
+                    )
+                        .into_response(),
+                );
+            }
+        }
     }
     if !stmt.joins.is_empty() && stmt.window.is_none() {
         let has_stream_target = stmt
@@ -6891,7 +7419,7 @@ async fn validate_rule(
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
                         Ok(stmt) => {
-                            if let Some(resp) = reject_invalid_rule(&state, &stmt) {
+                            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref()) {
                                 return resp;
                             }
                             check_rule_functions(&state, &stmt).unwrap_or_else(|| {
@@ -6917,7 +7445,7 @@ async fn validate_rule(
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
         Ok(stmt) => {
-            if let Some(resp) = reject_invalid_rule(&state, &stmt) {
+            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref()) {
                 return resp;
             }
             check_rule_functions(&state, &stmt).unwrap_or_else(|| {
@@ -7092,6 +7620,17 @@ fn window_to_string(window: &WindowDef) -> String {
             max_duration,
             timeout
         ),
+        WindowDef::State {
+            start_condition,
+            end_condition,
+        } => match end_condition {
+            Some(end) => format!(
+                "STATEWINDOW({}, {})",
+                expr_to_string(start_condition),
+                expr_to_string(end)
+            ),
+            None => format!("STATEWINDOW({})", expr_to_string(start_condition)),
+        },
     }
 }
 
@@ -7353,7 +7892,7 @@ async fn update_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref()) {
         return resp;
     }
     let was_running = match state.rule_manager.update_rule(rule.clone()).await {

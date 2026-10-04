@@ -109,6 +109,13 @@ impl Evaluator {
                     let key = alias.unwrap_or_else(|| name.clone());
                     if let Some(val) = record.get(name) {
                         output.insert(key, val.clone());
+                    } else if name == "window_start" || name == "window_end" {
+                        let internal_key = format!("__{}__", name);
+                        if let Some(val) = record.get(&internal_key) {
+                            output.insert(key, val.clone());
+                        } else {
+                            output.insert(key, Value::Null);
+                        }
                     } else {
                         output.insert(key, Value::Null);
                     }
@@ -121,10 +128,15 @@ impl Evaluator {
                                 output.insert(k, v);
                             }
                         }
-                    } else {
-                        for (k, v) in record {
-                            if k != META_KEY && !k.starts_with("__") {
-                                output.insert(k.clone(), v.clone());
+                    } else if let Expr::Identifier(p_name) = parent.as_ref() {
+                        let has_other_namespace = record.iter().any(|(k, v)| {
+                            k != p_name && !k.starts_with("__") && matches!(v, Value::Object(_))
+                        });
+                        if !has_other_namespace {
+                            for (k, v) in record {
+                                if k != META_KEY && !k.starts_with("__") {
+                                    output.insert(k.clone(), v.clone());
+                                }
                             }
                         }
                     }
@@ -236,10 +248,15 @@ impl Evaluator {
                                     output.entry(k).or_insert_with(|| v);
                                 }
                             }
-                        } else {
-                            for (k, v) in rec {
-                                if k != META_KEY && !k.starts_with("__") {
-                                    output.entry(k.clone()).or_insert_with(|| v.clone());
+                        } else if let Expr::Identifier(p_name) = parent.as_ref() {
+                            let has_other_namespace = rec.iter().any(|(k, v)| {
+                                k != p_name && !k.starts_with("__") && matches!(v, Value::Object(_))
+                            });
+                            if !has_other_namespace {
+                                for (k, v) in rec {
+                                    if k != META_KEY && !k.starts_with("__") {
+                                        output.entry(k.clone()).or_insert_with(|| v.clone());
+                                    }
                                 }
                             }
                         }
@@ -558,10 +575,15 @@ impl Evaluator {
                                 output.insert(k, v);
                             }
                         }
-                    } else {
-                        for (k, v) in record {
-                            if k != META_KEY && !k.starts_with("__") {
-                                output.insert(k.clone(), v.clone());
+                    } else if let Expr::Identifier(p_name) = parent.as_ref() {
+                        let has_other_namespace = record.iter().any(|(k, v)| {
+                            k != p_name && !k.starts_with("__") && matches!(v, Value::Object(_))
+                        });
+                        if !has_other_namespace {
+                            for (k, v) in record {
+                                if k != META_KEY && !k.starts_with("__") {
+                                    output.insert(k.clone(), v.clone());
+                                }
                             }
                         }
                     }
@@ -749,8 +771,13 @@ impl Evaluator {
                     if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
                         return v.clone();
                     }
-                    if let Some(v) = record.get(field) {
-                        return v.clone();
+                    let owned_by_other = record.iter().any(|(k, v)| {
+                        k != p_name && matches!(v, Value::Object(m) if m.contains_key(field))
+                    });
+                    if !owned_by_other {
+                        if let Some(v) = record.get(field) {
+                            return v.clone();
+                        }
                     }
                 }
                 Value::Null
@@ -995,6 +1022,9 @@ impl Evaluator {
         // Contextual system functions resolve against the record itself.
         if let Some(v) = Self::eval_context_call(name, args, record) {
             return v;
+        }
+        if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max") {
+            return Self::eval_aggregate_call(name, args, std::slice::from_ref(record));
         }
         let vals: Vec<Value> = args
             .iter()
@@ -2192,11 +2222,34 @@ impl Evaluator {
         }
     }
 
+    pub fn eval_bool_stateful(
+        expr: &Expr,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> bool {
+        match Self::eval_stateful_expr(expr, record, state) {
+            Value::Bool(b) => b,
+            Value::Null => false,
+            _ => false,
+        }
+    }
+
     pub fn eval_val(expr: &Expr, record: &HashMap<String, Value>) -> Value {
         match expr {
             Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
             Expr::Literal(val) => val.clone(),
-            Expr::Identifier(name) => record.get(name).cloned().unwrap_or(Value::Null),
+            Expr::Identifier(name) => {
+                if let Some(val) = record.get(name) {
+                    val.clone()
+                } else if name == "window_start" || name == "window_end" {
+                    record
+                        .get(&format!("__{}__", name))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            }
             Expr::FieldAccess { parent, field } => {
                 let parent_val = Self::eval_val(parent, record);
                 if let Value::Object(map) = &parent_val {
@@ -2208,8 +2261,13 @@ impl Evaluator {
                     if let Some(v) = record.get(&format!("{}.{}", p_name, field)) {
                         return v.clone();
                     }
-                    if let Some(v) = record.get(field) {
-                        return v.clone();
+                    let owned_by_other = record.iter().any(|(k, v)| {
+                        k != p_name && matches!(v, Value::Object(m) if m.contains_key(field))
+                    });
+                    if !owned_by_other {
+                        if let Some(v) = record.get(field) {
+                            return v.clone();
+                        }
                     }
                 }
                 Value::Null
@@ -2279,6 +2337,9 @@ impl Evaluator {
                 // need the raw argument expressions plus the record.
                 if let Some(v) = Self::eval_context_call(name, args, record) {
                     return v;
+                }
+                if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max") {
+                    return Self::eval_aggregate_call(name, args, std::slice::from_ref(record));
                 }
                 let vals: Vec<Value> = args.iter().map(|a| Self::eval_val(a, record)).collect();
                 Self::eval_call(name, &vals)
