@@ -579,6 +579,31 @@ async fn test_rule_validation_topo_and_migration() {
     let (base_url, _handle) = spawn_test_server().await;
     let client = reqwest::Client::new();
 
+    let response = client
+        .post(format!("{}/rules/validate", base_url))
+        .json(&json!({"id":"missing", "sql":"SELECT * FROM missing", "actions":[{"log":{}}]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"], json!(1000));
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("fail to get stream missing"));
+
+    // Validation requires the sources to exist, just as rule creation does.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM test_stream () WITH (TYPE=\"memory\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
     // 1. Validate a valid rule via POST /rules/validate -> 200 OK.
     let resp = client
         .post(format!("{}/rules/validate", base_url))
@@ -608,17 +633,7 @@ async fn test_rule_validation_topo_and_migration() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
-    // 3. Deploy stream `test_stream` and rule `test_rule`.
-    let resp = client
-        .post(format!("{}/streams", base_url))
-        .json(&json!({
-            "sql": "CREATE STREAM test_stream () WITH (DATASOURCE=\"test_stream\", FORMAT=\"json\")"
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert!(resp.status().is_success());
-
+    // 3. Deploy rule 	est_rule using the existing stream.
     let resp = client
         .post(format!("{}/rules", base_url))
         .json(&json!({
@@ -3556,7 +3571,7 @@ async fn test_event_time_watermark_and_late_tolerance() {
         .post(format!("{}/rules", base_url))
         .json(&json!({
             "id": "rule_et_test",
-            "sql": "SELECT count(*) AS cnt, max(ts) AS max_ts FROM et_stream GROUP BY SLIDINGWINDOW(ms, 500)",
+            "sql": "SELECT count(*) AS cnt, max(ts) AS max_ts, window_start() AS ws, window_end() AS we FROM et_stream GROUP BY SLIDINGWINDOW(ms, 500)",
             "actions": [{"memory": {"topic": "et_sink_topic"}}],
             "options": {"isEventTime": true, "lateTolerance": 100}
         }))
@@ -3592,11 +3607,13 @@ async fn test_event_time_watermark_and_late_tolerance() {
     assert_eq!(out1["cnt"], json!(1), "output 1: {}", out1);
     assert_eq!(out1["max_ts"], json!(1000), "output 1: {}", out1);
 
-    // Event 2 (t=950, out of order but >= W=900): accepted, buffer [950, 1000].
+    // Event 2 (t=950 >= W=900) is accepted; its window ends at 950, excluding 1000.
     post_event(&client, &base_url, 2, 950).await;
     let out2 = recv_output(&mut sink_rx).await;
-    assert_eq!(out2["cnt"], json!(2), "output 2: {}", out2);
-    assert_eq!(out2["max_ts"], json!(1000), "output 2: {}", out2);
+    assert_eq!(out2["cnt"], json!(1), "output 2: {}", out2);
+    assert_eq!(out2["max_ts"], json!(950), "output 2: {}", out2);
+    assert_eq!(out2["ws"], json!(450));
+    assert_eq!(out2["we"], json!(950));
 
     // Event 3 (t=1500): watermark 1400, horizon [1000, 1500] drops 950.
     post_event(&client, &base_url, 3, 1500).await;
@@ -6250,7 +6267,7 @@ async fn test_rule_input_validation() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
 
-    // Validation reports unknown functions as 422.
+    // Validation rejects unknown functions with 422, while creation/update use 400.
     let resp = client
         .post(format!("{}/rules/validate", base_url))
         .json(&json!({
@@ -7399,4 +7416,79 @@ async fn test_rules_list_and_all_status_parity() {
     assert_eq!(entry["status"], "running");
     assert_eq!(entry["exceptions_total"], 0);
     assert_eq!(entry["last_exception"], "");
+}
+
+#[tokio::test]
+async fn test_issue16_repeated_start_delivers_each_input_once() {
+    let (base, handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+    assert!(client
+        .post(format!("{base}/streams"))
+        .json(&json!({
+            "sql":"CREATE STREAM once () WITH (TYPE=\"memory\", FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    let mut output = state.stream_bus.subscribe("once_out");
+    assert!(client
+        .post(format!("{base}/rules"))
+        .json(&json!({
+            "id":"once", "sql":"SELECT id FROM once", "actions":[{"memory":{"topic":"once_out"}}]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    for action in ["stop", "stop", "start", "start", "start"] {
+        assert_eq!(
+            client
+                .post(format!("{base}/rules/once/{action}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+    }
+    assert!(client
+        .post(format!("{base}/streams/once/data"))
+        .json(&json!([
+            {"id":0},{"id":1},{"id":2},{"id":3},{"id":4},{"id":5}
+        ]))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    for id in 0..6 {
+        let row = tokio::time::timeout(std::time::Duration::from_secs(2), output.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.data["id"],
+            json!(id),
+            "repeated starts must not duplicate outputs"
+        );
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), output.recv())
+            .await
+            .is_err()
+    );
+    let status: serde_json::Value = client
+        .get(format!("{base}/rules/once/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["sourceRecordsInTotal"], json!(6));
+    assert_eq!(status["sinkRecordsOutTotal"], json!(6));
+    handle.abort();
 }

@@ -667,3 +667,52 @@ async fn test_state_window_single_condition() {
     assert_eq!(rec.data.get("a"), Some(&json!(10)));
     assert_eq!(rec.data.get("c"), Some(&json!(2)));
 }
+
+#[tokio::test]
+async fn test_event_time_sliding_delay_includes_arrivals_during_delay() {
+    let (base, handle, state) = spawn_test_server().await;
+    let client = reqwest::Client::new();
+    let response = client.post(format!("{base}/streams")).json(&json!({
+        "sql": "CREATE STREAM delayed () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
+    })).send().await.unwrap();
+    assert!(response.status().is_success());
+    let mut sink = state.stream_bus.subscribe("delayed_out");
+    let response = client.post(format!("{base}/rules")).json(&json!({
+        "id":"delay", "sql":"SELECT count(*) AS c, window_start() AS ws, window_end() AS we FROM delayed GROUP BY SLIDINGWINDOW(ms, 500, 100) OVER (WHEN fire = true)",
+        "options":{"isEventTime":true}, "actions":[{"memory":{"topic":"delayed_out"}}]
+    })).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    for (ts, fire) in [(1000, true), (1050, false)] {
+        assert!(client
+            .post(format!("{base}/streams/delayed/data"))
+            .json(&json!({"ts":ts,"fire":fire}))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success());
+    }
+    assert!(tokio::time::timeout(Duration::from_millis(50), sink.recv())
+        .await
+        .is_err());
+    assert!(client
+        .post(format!("{base}/streams/delayed/data"))
+        .json(&json!({"ts":1100,"fire":false}))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    let row = tokio::time::timeout(Duration::from_secs(2), sink.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.data["c"],
+        json!(3),
+        "delay must include rows after the triggering event"
+    );
+    assert_eq!(row.data["ws"], json!(500));
+    assert_eq!(row.data["we"], json!(1100));
+    handle.abort();
+}

@@ -22,6 +22,7 @@ pub const META_KEY: &str = "__meta__";
 #[derive(Default, Clone)]
 pub struct RuleState {
     pub state: Arc<RwLock<HashMap<String, Value>>>,
+    row_values: HashMap<String, Value>,
 }
 
 impl RuleState {
@@ -510,6 +511,157 @@ impl Evaluator {
             .flatten()
     }
 
+    /// Advance analytic functions before WHERE, then project only passing rows.
+    /// The per-row cache prevents SELECT and WHERE from advancing the same call twice.
+    pub fn eval_select_filtered_stateful_fallible(
+        stmt: &SelectStmt,
+        record: &HashMap<String, Value>,
+        state: &RuleState,
+    ) -> Result<Option<HashMap<String, Value>>, String> {
+        let Some(condition) = &stmt.where_clause else {
+            return Self::eval_select_stateful_fallible(stmt, record, state);
+        };
+        let mut row_state = RuleState {
+            state: state.state.clone(),
+            row_values: HashMap::new(),
+        };
+        for (idx, field) in stmt.fields.iter().enumerate() {
+            let mut calls = Vec::new();
+            Self::collect_analytic_exprs(field, &mut calls);
+            for call in calls {
+                let key = format!("{:?}", call);
+                if row_state.row_values.contains_key(&key) {
+                    continue;
+                }
+                let value =
+                    Self::eval_stateful_expr_fallible(call, record, &row_state).map_err(|err| {
+                        let alias = stmt.field_aliases.get(idx).and_then(|a| a.as_deref());
+                        let alias = alias.map(|a| format!("alias: {} ", a)).unwrap_or_default();
+                        format!(
+                            "run Select error: {}expr: {} meet error, err:{}",
+                            alias,
+                            field.to_ekuiper_string_qualified(&stmt.from),
+                            err
+                        )
+                    })?;
+                row_state.row_values.insert(key, value);
+            }
+        }
+        let mut calls = Vec::new();
+        Self::collect_analytic_exprs(condition, &mut calls);
+        for call in calls {
+            let key = format!("{:?}", call);
+            if row_state.row_values.contains_key(&key) {
+                continue;
+            }
+            let value = Self::eval_stateful_expr_fallible(call, record, &row_state)
+                .map_err(|err| format!("run Where error: {}", err))?;
+            row_state.row_values.insert(key, value);
+        }
+        if !Self::eval_bool_stateful_fallible(condition, record, &row_state)? {
+            return Ok(None);
+        }
+        Self::eval_select_stateful_fallible(stmt, record, &row_state)
+    }
+
+    fn is_analytic_expr(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { name, .. } => {
+                let name = name.to_ascii_lowercase();
+                Self::is_acc_call(&name)
+                    || matches!(
+                        name.as_str(),
+                        "lag"
+                            | "had_changed"
+                            | "changed_col"
+                            | "row_number"
+                            | "last_hit_count"
+                            | "last_hit_time"
+                    )
+            }
+            Expr::Over { call, .. } => Self::is_analytic_expr(call),
+            _ => false,
+        }
+    }
+
+    fn collect_analytic_exprs<'a>(expr: &'a Expr, calls: &mut Vec<&'a Expr>) {
+        match expr {
+            Expr::Call { args, .. } => {
+                for arg in args {
+                    Self::collect_analytic_exprs(arg, calls);
+                }
+            }
+            Expr::Over {
+                call,
+                partition_by,
+                when,
+            } => {
+                // The OVER call owns its partition/WHEN update; don't also run it unqualified.
+                if let Expr::Call { args, .. } = call.as_ref() {
+                    for arg in args {
+                        Self::collect_analytic_exprs(arg, calls);
+                    }
+                }
+                for child in [partition_by, when].into_iter().flatten() {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                Self::collect_analytic_exprs(left, calls);
+                Self::collect_analytic_exprs(right, calls);
+            }
+            Expr::UnaryOp { expr, .. } | Expr::IsNull { expr, .. } => {
+                Self::collect_analytic_exprs(expr, calls)
+            }
+            Expr::FieldAccess { parent, .. } => Self::collect_analytic_exprs(parent, calls),
+            Expr::Index { base, index } => {
+                Self::collect_analytic_exprs(base, calls);
+                Self::collect_analytic_exprs(index, calls);
+            }
+            Expr::Slice { base, lo, hi } => {
+                Self::collect_analytic_exprs(base, calls);
+                for child in [lo, hi].into_iter().flatten() {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+            }
+            Expr::Between {
+                expr, low, high, ..
+            } => {
+                for child in [expr, low, high] {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+            }
+            Expr::InList { expr, list, .. } => {
+                Self::collect_analytic_exprs(expr, calls);
+                for child in list {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+            }
+            Expr::Case {
+                operand,
+                when_clauses,
+                else_clause,
+            } => {
+                for child in [operand, else_clause].into_iter().flatten() {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+                for (condition, value) in when_clauses {
+                    Self::collect_analytic_exprs(condition, calls);
+                    Self::collect_analytic_exprs(value, calls);
+                }
+            }
+            Expr::WildcardModified { replace, .. } => {
+                for (child, _) in replace {
+                    Self::collect_analytic_exprs(child, calls);
+                }
+            }
+            Expr::Wildcard | Expr::Literal(_) | Expr::Identifier(_) => {}
+        }
+        if Self::is_analytic_expr(expr) {
+            calls.push(expr);
+        }
+    }
+
     pub fn eval_select_stateful_fallible(
         stmt: &SelectStmt,
         record: &HashMap<String, Value>,
@@ -806,6 +958,11 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Result<Value, String> {
+        if !state.row_values.is_empty() && Self::is_analytic_expr(expr) {
+            if let Some(value) = state.row_values.get(&format!("{:?}", expr)) {
+                return Ok(value.clone());
+            }
+        }
         match expr {
             Expr::Wildcard | Expr::WildcardModified { .. } => Ok(Value::Null),
             Expr::Literal(val) => Ok(val.clone()),

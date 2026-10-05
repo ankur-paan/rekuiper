@@ -5968,50 +5968,32 @@ async fn run_stateless_rule(
             joined
                 .entry("__rule_start__".to_string())
                 .or_insert_with(|| Value::from(start_time_ms));
-            // Analytic projections accumulate every row before WHERE filters the output.
-            let output_res =
-                Evaluator::eval_select_stateful_fallible(&select_stmt, &joined, &rule_state);
-            let passes_res = match &select_stmt.where_clause {
-                Some(cond) => Evaluator::eval_bool_stateful_fallible(cond, &joined, &rule_state),
-                None => Ok(true),
-            };
-            match (output_res, passes_res) {
-                (Err(err), _) | (_, Err(err)) => {
-                    handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
-                }
-                (Ok(Some(output)), Ok(true)) => {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+            match Evaluator::eval_select_filtered_stateful_fallible(
+                &select_stmt,
+                &joined,
+                &rule_state,
+            ) {
+                Ok(Some(output)) => {
+                    if !enqueue_sink_record(&counters, &sink, StreamRecord::new(output)).await {
                         break;
                     }
                 }
-                _ => {
-                    counters.inc_filtered(1);
-                }
+                Ok(None) => counters.inc_filtered(1),
+                Err(err) => handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await,
             }
         } else {
-            // Analytic projections accumulate every row before WHERE filters the output.
-            let output_res =
-                Evaluator::eval_select_stateful_fallible(&select_stmt, &record.data, &rule_state);
-            let passes_res = match &select_stmt.where_clause {
-                Some(cond) => {
-                    Evaluator::eval_bool_stateful_fallible(cond, &record.data, &rule_state)
-                }
-                None => Ok(true),
-            };
-            match (output_res, passes_res) {
-                (Err(err), _) | (_, Err(err)) => {
-                    handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
-                }
-                (Ok(Some(output)), Ok(true)) => {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+            match Evaluator::eval_select_filtered_stateful_fallible(
+                &select_stmt,
+                &record.data,
+                &rule_state,
+            ) {
+                Ok(Some(output)) => {
+                    if !enqueue_sink_record(&counters, &sink, StreamRecord::new(output)).await {
                         break;
                     }
                 }
-                _ => {
-                    counters.inc_filtered(1);
-                }
+                Ok(None) => counters.inc_filtered(1),
+                Err(err) => handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await,
             }
         }
     }
@@ -7019,15 +7001,14 @@ async fn run_sliding_window_rule(
                     if should_trigger {
                         if delay_ms > 0 {
                             pending_triggers.push((event_ts, event_ts.saturating_add(delay_ms)));
+                            pending_triggers.sort_by_key(|(_, end)| *end);
                         } else {
-                            // Accepted out-of-order events must not rewind the active window.
-                            let horizon_ts =
-                                (*stream_max_ts.get(&tagged.source).unwrap_or(&event_ts))
-                                    .max(event_ts);
-                            let start_ts = horizon_ts.saturating_sub(window_millis);
-                            et_buffer.retain(|(ts, _)| *ts >= start_ts);
-                            let batch: Vec<TaggedRow> =
-                                et_buffer.iter().map(|(_, row)| row.clone()).collect();
+                            let start_ts = event_ts.saturating_sub(window_millis);
+                            let batch: Vec<TaggedRow> = et_buffer
+                                .iter()
+                                .filter(|(ts, _)| *ts >= start_ts && *ts <= event_ts)
+                                .map(|(_, row)| row.clone())
+                                .collect();
                             emit_window_batch(
                                 &counters,
                                 &table_manager,
@@ -7035,7 +7016,7 @@ async fn run_sliding_window_rule(
                                 &select_stmt,
                                 batch,
                                 true,
-                                Some((start_ts, horizon_ts)),
+                                Some((start_ts, event_ts)),
                                 &sink,
                             )
                             .await;
@@ -7043,11 +7024,12 @@ async fn run_sliding_window_rule(
                     }
 
                     while !pending_triggers.is_empty() && watermark >= pending_triggers[0].1 {
-                        let (trigger_end_ts, _) = pending_triggers.remove(0);
-                        let start_ts = trigger_end_ts.saturating_sub(window_millis);
+                        // Delay extends the right edge to include arrivals after the trigger.
+                        let (trigger_ts, window_end_ts) = pending_triggers.remove(0);
+                        let start_ts = trigger_ts.saturating_sub(window_millis);
                         let batch: Vec<TaggedRow> = et_buffer
                             .iter()
-                            .filter(|(ts, _)| *ts >= start_ts && *ts <= trigger_end_ts)
+                            .filter(|(ts, _)| *ts >= start_ts && *ts <= window_end_ts)
                             .map(|(_, row)| row.clone())
                             .collect();
                         emit_window_batch(
@@ -7057,7 +7039,7 @@ async fn run_sliding_window_rule(
                             &select_stmt,
                             batch,
                             true,
-                            Some((start_ts, trigger_end_ts)),
+                            Some((start_ts, window_end_ts)),
                             &sink,
                         )
                         .await;
@@ -7609,7 +7591,7 @@ fn reject_invalid_rule(
     state: &AppState,
     stmt: &SelectStmt,
     options: Option<&HashMap<String, Value>>,
-    is_validate_endpoint: bool,
+    validation: bool,
 ) -> Option<Response> {
     if let Some(resp) = check_duplicate_fields(stmt) {
         return Some(resp);
@@ -7659,41 +7641,44 @@ fn reject_invalid_rule(
             );
         }
     }
-    // Validation also accepts rules whose source streams have not been deployed yet.
-    // Unknown functions retain the validation endpoint's separate 422 response.
-    if !is_validate_endpoint {
-        let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
-            || state.table_manager.get_table(&stmt.from).is_some();
-        if !stream_exists {
-            return Some(
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": 1000,
-                        "message": format!(
-                            "fail to get stream {}, please check if stream is created",
-                            stmt.from
-                        )
-                    })),
-                )
-                    .into_response(),
-            );
-        }
-        if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
-            return Some(
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": 1000,
-                        "message": format!(
-                            "invalid rule json: Parse SQL ... error: function {} not found.",
-                            bad_fn
-                        )
-                    })),
-                )
-                    .into_response(),
-            );
-        }
+    // Validation uses 422 for unresolved sources/functions; creation/update use 400.
+    // Both paths reject the same invalid rule rather than skipping the checks.
+    let resolution_status = if validation {
+        StatusCode::UNPROCESSABLE_ENTITY
+    } else {
+        StatusCode::BAD_REQUEST
+    };
+    let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
+        || state.table_manager.get_table(&stmt.from).is_some();
+    if !stream_exists {
+        return Some(
+            (
+                resolution_status,
+                Json(json!({
+                    "error": 1000,
+                    "message": format!(
+                        "fail to get stream {}, please check if stream is created",
+                        stmt.from
+                    )
+                })),
+            )
+                .into_response(),
+        );
+    }
+    if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
+        return Some(
+            (
+                resolution_status,
+                Json(json!({
+                    "error": 1000,
+                    "message": format!(
+                        "invalid rule json: Parse SQL ... error: function {} not found.",
+                        bad_fn
+                    )
+                })),
+            )
+                .into_response(),
+        );
     }
     None
 }
