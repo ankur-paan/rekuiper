@@ -1755,7 +1755,7 @@ async fn create_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref()) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref(), false) {
         return resp;
     }
 
@@ -5968,70 +5968,50 @@ async fn run_stateless_rule(
             joined
                 .entry("__rule_start__".to_string())
                 .or_insert_with(|| Value::from(start_time_ms));
-            let passes = match &select_stmt.where_clause {
-                Some(cond) => {
-                    match Evaluator::eval_bool_stateful_fallible(cond, &joined, &rule_state) {
-                        Ok(p) => p,
-                        Err(err) => {
-                            handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
-                            continue;
-                        }
-                    }
-                }
-                None => true,
+            // Analytic projections accumulate every row before WHERE filters the output.
+            let output_res =
+                Evaluator::eval_select_stateful_fallible(&select_stmt, &joined, &rule_state);
+            let passes_res = match &select_stmt.where_clause {
+                Some(cond) => Evaluator::eval_bool_stateful_fallible(cond, &joined, &rule_state),
+                None => Ok(true),
             };
-            if passes {
-                match Evaluator::eval_select_stateful_fallible(&select_stmt, &joined, &rule_state) {
-                    Ok(Some(output)) => {
-                        let output_record = StreamRecord::new(output);
-                        if !enqueue_sink_record(&counters, &sink, output_record).await {
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        counters.inc_filtered(1);
-                    }
-                    Err(err) => {
-                        handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+            match (output_res, passes_res) {
+                (Err(err), _) | (_, Err(err)) => {
+                    handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                }
+                (Ok(Some(output)), Ok(true)) => {
+                    let output_record = StreamRecord::new(output);
+                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+                        break;
                     }
                 }
-            } else {
-                counters.inc_filtered(1);
+                _ => {
+                    counters.inc_filtered(1);
+                }
             }
         } else {
-            let passes = match &select_stmt.where_clause {
+            // Analytic projections accumulate every row before WHERE filters the output.
+            let output_res =
+                Evaluator::eval_select_stateful_fallible(&select_stmt, &record.data, &rule_state);
+            let passes_res = match &select_stmt.where_clause {
                 Some(cond) => {
-                    match Evaluator::eval_bool_stateful_fallible(cond, &record.data, &rule_state) {
-                        Ok(p) => p,
-                        Err(err) => {
-                            handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
-                            continue;
-                        }
-                    }
+                    Evaluator::eval_bool_stateful_fallible(cond, &record.data, &rule_state)
                 }
-                None => true,
+                None => Ok(true),
             };
-            if passes {
-                match Evaluator::eval_select_stateful_fallible(
-                    &select_stmt,
-                    &record.data,
-                    &rule_state,
-                ) {
-                    Ok(Some(output)) => {
-                        let output_record = StreamRecord::new(output);
-                        if !enqueue_sink_record(&counters, &sink, output_record).await {
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        counters.inc_filtered(1);
-                    }
-                    Err(err) => {
-                        handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+            match (output_res, passes_res) {
+                (Err(err), _) | (_, Err(err)) => {
+                    handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await;
+                }
+                (Ok(Some(output)), Ok(true)) => {
+                    let output_record = StreamRecord::new(output);
+                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+                        break;
                     }
                 }
-            } else {
-                counters.inc_filtered(1);
+                _ => {
+                    counters.inc_filtered(1);
+                }
             }
         }
     }
@@ -7040,12 +7020,14 @@ async fn run_sliding_window_rule(
                         if delay_ms > 0 {
                             pending_triggers.push((event_ts, event_ts.saturating_add(delay_ms)));
                         } else {
-                            let start_ts = event_ts.saturating_sub(window_millis);
-                            let batch: Vec<TaggedRow> = et_buffer
-                                .iter()
-                                .filter(|(ts, _)| *ts >= start_ts && *ts <= event_ts)
-                                .map(|(_, row)| row.clone())
-                                .collect();
+                            // Accepted out-of-order events must not rewind the active window.
+                            let horizon_ts =
+                                (*stream_max_ts.get(&tagged.source).unwrap_or(&event_ts))
+                                    .max(event_ts);
+                            let start_ts = horizon_ts.saturating_sub(window_millis);
+                            et_buffer.retain(|(ts, _)| *ts >= start_ts);
+                            let batch: Vec<TaggedRow> =
+                                et_buffer.iter().map(|(_, row)| row.clone()).collect();
                             emit_window_batch(
                                 &counters,
                                 &table_manager,
@@ -7053,7 +7035,7 @@ async fn run_sliding_window_rule(
                                 &select_stmt,
                                 batch,
                                 true,
-                                Some((start_ts, event_ts)),
+                                Some((start_ts, horizon_ts)),
                                 &sink,
                             )
                             .await;
@@ -7627,6 +7609,7 @@ fn reject_invalid_rule(
     state: &AppState,
     stmt: &SelectStmt,
     options: Option<&HashMap<String, Value>>,
+    is_validate_endpoint: bool,
 ) -> Option<Response> {
     if let Some(resp) = check_duplicate_fields(stmt) {
         return Some(resp);
@@ -7676,37 +7659,41 @@ fn reject_invalid_rule(
             );
         }
     }
-    let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
-        || state.table_manager.get_table(&stmt.from).is_some();
-    if !stream_exists {
-        return Some(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": 1000,
-                    "message": format!(
-                        "fail to get stream {}, please check if stream is created",
-                        stmt.from
-                    )
-                })),
-            )
-                .into_response(),
-        );
-    }
-    if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
-        return Some(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": 1000,
-                    "message": format!(
-                        "invalid rule json: Parse SQL ... error: function {} not found.",
-                        bad_fn
-                    )
-                })),
-            )
-                .into_response(),
-        );
+    // Validation also accepts rules whose source streams have not been deployed yet.
+    // Unknown functions retain the validation endpoint's separate 422 response.
+    if !is_validate_endpoint {
+        let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
+            || state.table_manager.get_table(&stmt.from).is_some();
+        if !stream_exists {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": 1000,
+                        "message": format!(
+                            "fail to get stream {}, please check if stream is created",
+                            stmt.from
+                        )
+                    })),
+                )
+                    .into_response(),
+            );
+        }
+        if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": 1000,
+                        "message": format!(
+                            "invalid rule json: Parse SQL ... error: function {} not found.",
+                            bad_fn
+                        )
+                    })),
+                )
+                    .into_response(),
+            );
+        }
     }
     None
 }
@@ -7733,7 +7720,7 @@ async fn validate_rule(
                     match parser.parse_select() {
                         Ok(stmt) => {
                             if let Some(resp) =
-                                reject_invalid_rule(&state, &stmt, rule.options.as_ref())
+                                reject_invalid_rule(&state, &stmt, rule.options.as_ref(), true)
                             {
                                 return resp;
                             }
@@ -7760,7 +7747,7 @@ async fn validate_rule(
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
         Ok(stmt) => {
-            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref()) {
+            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref(), true) {
                 return resp;
             }
             check_rule_functions(&state, &stmt).unwrap_or_else(|| {
@@ -8208,7 +8195,7 @@ async fn update_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref()) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref(), false) {
         return resp;
     }
     if let Err(e) = validate_sink_actions(&rule.actions) {
