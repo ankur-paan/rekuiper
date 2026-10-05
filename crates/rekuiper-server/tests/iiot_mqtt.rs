@@ -500,3 +500,84 @@ async fn real_broker_tls_integration() {
         "TLS end-to-end publish/subscribe failed over real broker"
     );
 }
+
+#[tokio::test]
+async fn test_issue14_mqtt_shared_stream_three_rules_once_delivery() {
+    let Some(server) = broker().await else { return };
+    let base = spawn_server().await;
+    let client = reqwest::Client::new();
+    let topic_in = unique("dup_in");
+    let topic_out0 = unique("dup_out0");
+    let topic_out1 = unique("dup_out1");
+    let topic_out2 = unique("dup_out2");
+    let stream_name = unique("dup_s");
+
+    // 1. Create stream pointing to topic_in
+    post(
+        &client,
+        format!("{}/streams", base),
+        json!({
+            "sql": format!(
+                "CREATE STREAM {} () WITH (DATASOURCE=\"{}\", FORMAT=\"json\", TYPE=\"mqtt\", SERVER=\"{}\")",
+                stream_name, topic_in, server
+            )
+        }),
+    )
+    .await;
+
+    // 2. Create 3 rules consuming the same stream, outputting to distinct MQTT topics
+    for (i, topic_out) in [&topic_out0, &topic_out1, &topic_out2].iter().enumerate() {
+        let rule_id = format!("{}_r{}", stream_name, i);
+        post(
+            &client,
+            format!("{}/rules", base),
+            json!({
+                "id": rule_id,
+                "sql": format!("SELECT id FROM {}", stream_name),
+                "actions": [{
+                    "mqtt": {
+                        "server": server,
+                        "topic": topic_out,
+                        "qos": 1,
+                        "sendSingle": true
+                    }
+                }]
+            }),
+        )
+        .await;
+    }
+
+    // Wait for sink connections to settle
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // 3. Connect a publisher and publish 6 messages to topic_in
+    let pub_sink = publisher(&server, &topic_in).await;
+    for i in 0..6 {
+        let mut map = HashMap::new();
+        map.insert("id".to_string(), json!(i));
+        let _ = pub_sink.send(&StreamRecord::new(map)).await;
+    }
+
+    // 4. Verify /rules/{id}/status for rule 0: sourceRecordsInTotal must advance by 6, not 18!
+    let rule0_id = format!("{}_r0", stream_name);
+    let mut total_in = 0;
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let status: Value = client
+            .get(format!("{}/rules/{}/status", base, rule0_id))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        total_in = status["sourceRecordsInTotal"].as_u64().unwrap_or(0);
+        if total_in >= 6 {
+            break;
+        }
+    }
+    assert_eq!(
+        total_in, 6,
+        "sourceRecordsInTotal should be 6 on 3-rule stream, not 18"
+    );
+}

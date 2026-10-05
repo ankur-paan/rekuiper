@@ -2496,6 +2496,158 @@ async fn test_file_source_streaming_ingestion() {
 }
 
 #[tokio::test]
+async fn test_issue14_shared_stream_multi_rule_no_duplicate_delivery() {
+    let (base_url, _handle, state) = spawn_test_server_with_state().await;
+    let client = reqwest::Client::new();
+
+    // 1. Seed rule whose status endpoint is used as the mock HTTP pull source.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM seed_issue14 () WITH (FORMAT=\"json\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .post(format!("{}/rules", base_url))
+        .json(&json!({
+            "id": "rule_seed_14",
+            "sql": "SELECT * FROM seed_issue14",
+            "actions": [{"log": {}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let mock_url = format!("{}/rules/rule_seed_14/status", base_url);
+    let resp = client
+        .put(format!(
+            "{}/metadata/sources/httppull/confKeys/pull_cfg_14",
+            base_url
+        ))
+        .json(&json!({"url": mock_url, "method": "get", "interval": 100}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // 2. Create the pull-backed stream.
+    let resp = client
+        .post(format!("{}/streams", base_url))
+        .json(&json!({
+            "sql": "CREATE STREAM shared_pull_s () WITH (TYPE=\"httppull\", CONF_KEY=\"pull_cfg_14\")"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // 3. Create 2 rules consuming the same stream, outputting to distinct memory sinks.
+    let mut rx0 = state.stream_bus.subscribe("pull_out_0");
+    let mut rx1 = state.stream_bus.subscribe("pull_out_1");
+
+    for (rule_id, topic) in [("pull_r0", "pull_out_0"), ("pull_r1", "pull_out_1")] {
+        let resp = client
+            .post(format!("{}/rules", base_url))
+            .json(&json!({
+                "id": rule_id,
+                "sql": "SELECT * FROM shared_pull_s",
+                "actions": [{"memory": {"topic": topic}}]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_success(),
+            "failed to create rule {}",
+            rule_id
+        );
+    }
+
+    // 4. Verify stream source deduplication: only 1 underlying source task spawned!
+    assert_eq!(
+        state
+            .stream_source_cancels
+            .read()
+            .get("shared_pull_s")
+            .map(|v| v.len()),
+        Some(1),
+        "only 1 source task should be spawned for shared stream"
+    );
+    assert_eq!(
+        state
+            .stream_active_rules
+            .read()
+            .get("shared_pull_s")
+            .map(|s| s.len()),
+        Some(2),
+        "both rules should be registered on shared stream"
+    );
+
+    // 5. Both rules receive polled records from the single producer.
+    let r0 = tokio::time::timeout(std::time::Duration::from_secs(3), rx0.recv())
+        .await
+        .expect("timed out waiting for record on r0")
+        .expect("channel closed");
+    assert_eq!(r0.data.get("status"), Some(&json!("running")));
+
+    let r1 = tokio::time::timeout(std::time::Duration::from_secs(3), rx1.recv())
+        .await
+        .expect("timed out waiting for record on r1")
+        .expect("channel closed");
+    assert_eq!(r1.data.get("status"), Some(&json!("running")));
+
+    // 6. Stopping rule 0 keeps the stream source active for rule 1.
+    let resp = client
+        .post(format!("{}/rules/pull_r0/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        state
+            .stream_source_cancels
+            .read()
+            .contains_key("shared_pull_s"),
+        "stream source must remain active while pull_r1 is running"
+    );
+    assert_eq!(
+        state
+            .stream_active_rules
+            .read()
+            .get("shared_pull_s")
+            .map(|s| s.len()),
+        Some(1)
+    );
+
+    // rule 1 continues receiving records seamlessly.
+    let r1_next = tokio::time::timeout(std::time::Duration::from_secs(3), rx1.recv())
+        .await
+        .expect("timed out waiting for subsequent record on r1")
+        .expect("channel closed");
+    assert_eq!(r1_next.data.get("status"), Some(&json!("running")));
+
+    // 7. Stopping rule 1 cancels the stream source cleanly.
+    let resp = client
+        .post(format!("{}/rules/pull_r1/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        !state
+            .stream_source_cancels
+            .read()
+            .contains_key("shared_pull_s"),
+        "stream source should be cancelled once all rules stop"
+    );
+}
+
+#[tokio::test]
 async fn test_mqtt_source_lifecycle_and_defaults() {
     let (base_url, _handle, state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();
@@ -2632,6 +2784,55 @@ async fn test_mqtt_source_lifecycle_and_defaults() {
         .await
         .unwrap();
     assert_eq!(status["status"], "stopped");
+
+    // 5. Multiple rules on the same MQTT stream share 1 source task without duplicates.
+    create_rule(
+        &client,
+        &base_url,
+        "rule_mqtt_explicit_2",
+        "SELECT * FROM m_mqtt",
+    )
+    .await;
+    assert_eq!(
+        state
+            .stream_source_cancels
+            .read()
+            .get("m_mqtt")
+            .map(|v| v.len()),
+        Some(1),
+        "shared MQTT stream should maintain only 1 underlying source task"
+    );
+    assert_eq!(
+        state
+            .stream_active_rules
+            .read()
+            .get("m_mqtt")
+            .map(|s| s.len()),
+        Some(2),
+        "both rules should be registered on m_mqtt"
+    );
+    // Stopping first rule does not cancel stream source.
+    let resp = client
+        .post(format!("{}/rules/rule_mqtt_explicit/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        state.stream_source_cancels.read().contains_key("m_mqtt"),
+        "stream source must remain active while rule_mqtt_explicit_2 is running"
+    );
+    // Stopping second rule cancels stream source cleanly.
+    let resp = client
+        .post(format!("{}/rules/rule_mqtt_explicit_2/stop", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert!(
+        !state.stream_source_cancels.read().contains_key("m_mqtt"),
+        "stream source should be cancelled when all rules stop"
+    );
 }
 
 #[tokio::test]

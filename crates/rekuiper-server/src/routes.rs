@@ -392,6 +392,10 @@ pub struct AppState {
     pub config_op_lock: Arc<tokio::sync::Mutex<()>>,
     pub ruletests: Arc<RwLock<HashMap<String, RuletestSession>>>,
     pub source_cancels: Arc<RwLock<HashMap<String, Vec<tokio::sync::watch::Sender<bool>>>>>,
+    pub stream_active_rules: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    pub stream_source_cancels: Arc<RwLock<HashMap<String, Vec<tokio::sync::watch::Sender<bool>>>>>,
+    pub rule_streams: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    pub stream_attach_meta: Arc<RwLock<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
     pub http_client: reqwest::Client,
     pub schema_manager: SchemaManager,
     pub plugin_manager: PluginManager,
@@ -483,6 +487,10 @@ impl AppState {
                 .unwrap_or_default(),
             ruletests: Arc::new(RwLock::new(HashMap::new())),
             source_cancels: Arc::new(RwLock::new(HashMap::new())),
+            stream_active_rules: Arc::new(RwLock::new(HashMap::new())),
+            stream_source_cancels: Arc::new(RwLock::new(HashMap::new())),
+            rule_streams: Arc::new(RwLock::new(HashMap::new())),
+            stream_attach_meta: Arc::new(RwLock::new(HashMap::new())),
             schema_manager: SchemaManager::new(),
             plugin_manager: PluginManager::new(),
             trace_manager: TraceManager::new(),
@@ -1268,7 +1276,10 @@ async fn delete_stream(State(state): State<AppState>, Path(name): Path<String>) 
         return resp;
     }
     match state.stream_manager.delete_stream(&name).await {
-        Ok(_) => (StatusCode::OK, format!("Stream {} is dropped.", name)).into_response(),
+        Ok(_) => {
+            cancel_stream_sources(&state, &name);
+            (StatusCode::OK, format!("Stream {} is dropped.", name)).into_response()
+        }
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
     }
 }
@@ -2100,10 +2111,97 @@ fn resolve_proto_message(
         })
 }
 
+fn cancel_stream_sources(state: &AppState, stream_name: &str) {
+    if let Some(cancels) = state.stream_source_cancels.write().remove(stream_name) {
+        for tx in cancels {
+            let _ = tx.send(true);
+        }
+    }
+    state.stream_active_rules.write().remove(stream_name);
+    state.stream_attach_meta.write().remove(stream_name);
+}
+
+fn register_rule_stream_source(
+    state: &AppState,
+    stream_name: &str,
+    rule_id: &str,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+) {
+    state
+        .stream_source_cancels
+        .write()
+        .entry(stream_name.to_string())
+        .or_default()
+        .push(cancel_tx);
+    state
+        .stream_active_rules
+        .write()
+        .entry(stream_name.to_string())
+        .or_default()
+        .insert(rule_id.to_string());
+    state
+        .rule_streams
+        .write()
+        .entry(rule_id.to_string())
+        .or_default()
+        .insert(stream_name.to_string());
+    let (rule_cancel_tx, _rule_cancel_rx) = tokio::sync::watch::channel(false);
+    state
+        .source_cancels
+        .write()
+        .entry(rule_id.to_string())
+        .or_default()
+        .push(rule_cancel_tx);
+}
+
 /// Start source producers for one stream (MQTT/file/HTTP-pull/WebSocket/
 /// RedisSub/Kafka/SQL/simulator, whichever its TYPE declares). `needs_meta`
 /// asks message sources to attach per-message metadata for `meta()`.
+/// Multiple rules reading from the same stream share a single underlying
+/// source producer, preventing duplicate message ingestion.
 fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, needs_meta: bool) {
+    // If this rule is already registered for this stream, avoid duplicate registration.
+    if let Some(rules) = state.stream_active_rules.read().get(stream_name) {
+        if rules.contains(rule_id) {
+            if needs_meta {
+                if let Some(flag) = state.stream_attach_meta.read().get(stream_name) {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            return;
+        }
+    }
+
+    // If a source task is already running for this stream, register this rule as
+    // another consumer of the stream and do not spawn a duplicate source.
+    if state.stream_source_cancels.read().contains_key(stream_name) {
+        state
+            .stream_active_rules
+            .write()
+            .entry(stream_name.to_string())
+            .or_default()
+            .insert(rule_id.to_string());
+        state
+            .rule_streams
+            .write()
+            .entry(rule_id.to_string())
+            .or_default()
+            .insert(stream_name.to_string());
+        if needs_meta {
+            if let Some(flag) = state.stream_attach_meta.read().get(stream_name) {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let (rule_cancel_tx, _rule_cancel_rx) = tokio::sync::watch::channel(false);
+        state
+            .source_cancels
+            .write()
+            .entry(rule_id.to_string())
+            .or_default()
+            .push(rule_cancel_tx);
+        return;
+    }
+
     // MQTT is the default streaming source: typeless streams and TYPE="mqtt"
     // subscribe to the broker topic and feed the rule pipeline.
     if let Some(mut config) = resolve_mqtt_source(
@@ -2113,18 +2211,21 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
         stream_name,
         rule_id,
     ) {
+        let meta_flag = Arc::new(std::sync::atomic::AtomicBool::new(needs_meta));
         config.attach_meta = needs_meta;
+        state
+            .stream_attach_meta
+            .write()
+            .insert(stream_name.to_string(), meta_flag.clone());
+
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         MqttSource::new(config, stream_tx)
             .with_rule_counters(state.rule_manager.rule_counters(rule_id))
+            .with_meta_flag(Some(meta_flag))
             .spawn(cancel_rx);
+        return;
     }
 
     // EdgeX source streams connect to EdgeX MQTT message bus and decode Event / Reading DTOs.
@@ -2135,18 +2236,21 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
         stream_name,
         rule_id,
     ) {
+        let meta_flag = Arc::new(std::sync::atomic::AtomicBool::new(needs_meta));
         config.attach_meta = needs_meta;
+        state
+            .stream_attach_meta
+            .write()
+            .insert(stream_name.to_string(), meta_flag.clone());
+
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         MqttSource::new(config, stream_tx)
             .with_rule_counters(state.rule_manager.rule_counters(rule_id))
+            .with_meta_flag(Some(meta_flag))
             .spawn(cancel_rx);
+        return;
     }
 
     // File source streams tail a line-delimited file into the stream bus.
@@ -2158,13 +2262,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         FileSource::new(config, stream_tx).spawn(cancel_rx);
+        return;
     }
 
     // HTTP pull source streams poll a remote endpoint into the stream bus.
@@ -2176,17 +2276,13 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         HttpPullSource {
             config: conf,
             tx: stream_tx,
         }
         .spawn(cancel_rx);
+        return;
     }
 
     // WebSocket source streams forward incoming messages into the stream bus.
@@ -2198,13 +2294,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         WebSocketSource { url, tx: stream_tx }.spawn(cancel_rx);
+        return;
     }
 
     // Redis subscription streams forward channel messages into the stream bus.
@@ -2216,18 +2308,14 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         RedisSubSource {
             url,
             channel,
             tx: stream_tx,
         }
         .spawn(cancel_rx);
+        return;
     }
 
     // Kafka source streams consume a topic partition into the stream bus.
@@ -2239,17 +2327,13 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         KafkaSource {
             config,
             tx: stream_tx,
         }
         .spawn(cancel_rx);
+        return;
     }
 
     // SQL source streams poll a database table into the stream bus.
@@ -2261,13 +2345,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     ) {
         let stream_tx = state.stream_bus.get_or_create(stream_name);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        state
-            .source_cancels
-            .write()
-            .entry(rule_id.to_string())
-            .or_default()
-            .push(cancel_tx);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         SqlSource::new(config, stream_tx).spawn(cancel_rx);
+        return;
     }
 
     // RabbitMQ source streams consume an AMQP queue into the stream bus.
@@ -2318,13 +2398,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
             }
             let stream_tx = state.stream_bus.get_or_create(stream_name);
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-            state
-                .source_cancels
-                .write()
-                .entry(rule_id.to_string())
-                .or_default()
-                .push(cancel_tx);
+            register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
             RabbitMqSource::new(config, stream_tx).spawn(cancel_rx);
+            return;
         }
     }
 
@@ -2341,17 +2417,32 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
                 if let Some(conf_val) = state.source_configs.read().get(&lookup).cloned() {
                     match serde_json::from_value::<SimulatorConfig>(conf_val) {
                         Ok(conf) => {
-                            let stream_name = stream_name.to_string();
+                            let stream_name_str = stream_name.to_string();
                             let bus = state.stream_bus.clone();
+                            let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+                            register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
                             tokio::spawn(async move {
                                 let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamRecord>(1024);
                                 let sim_handle = tokio::spawn(async move {
                                     SimulatorSource::new(conf).run(tx).await
                                 });
-                                while let Some(record) = rx.recv().await {
-                                    // Backpressure reaches the simulator bridge:
-                                    // await subscriber capacity (lossless).
-                                    let _ = bus.publish_async(&stream_name, record).await;
+                                loop {
+                                    tokio::select! {
+                                        record = rx.recv() => {
+                                            match record {
+                                                Some(record) => {
+                                                    let _ = bus.publish_async(&stream_name_str, record).await;
+                                                }
+                                                None => break,
+                                            }
+                                        }
+                                        changed = cancel_rx.changed() => {
+                                            if changed.is_err() || *cancel_rx.borrow() {
+                                                sim_handle.abort();
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
                                 let _ = sim_handle.await;
                             });
@@ -2747,17 +2838,34 @@ fn resolve_file_source(
     Some(config)
 }
 
-/// Signal cancellation to ALL of a rule's background streaming sources
-/// (MQTT, file, HTTP pull, WebSocket, Redis subscription, Kafka consumer,
-/// SQL poller, join-target producers), if any are registered. Sources are
-/// kept in a per-rule list so bootstrapping a second source (e.g. the join
-/// target of a stream-stream join) never drops — and thereby kills — the
-/// first: dropping a watch sender reads as `Err` (sender gone) in the
-/// source task, which exits immediately.
+/// Signal cancellation to a rule's background streaming sources.
+/// Streams shared with other running rules remain active; when the last
+/// rule consuming a stream stops, the stream's background source task
+/// is cancelled and cleanly disconnected.
 fn cancel_rule_source(state: &AppState, rule_id: &str) {
     if let Some(txs) = state.source_cancels.write().remove(rule_id) {
         for tx in txs {
             let _ = tx.send(true);
+        }
+    }
+    let streams = state.rule_streams.write().remove(rule_id);
+    if let Some(streams) = streams {
+        let mut active_rules = state.stream_active_rules.write();
+        let mut source_cancels = state.stream_source_cancels.write();
+        let mut attach_meta = state.stream_attach_meta.write();
+        for stream in streams {
+            if let Some(rules) = active_rules.get_mut(&stream) {
+                rules.remove(rule_id);
+                if rules.is_empty() {
+                    active_rules.remove(&stream);
+                    attach_meta.remove(&stream);
+                    if let Some(cancels) = source_cancels.remove(&stream) {
+                        for tx in cancels {
+                            let _ = tx.send(true);
+                        }
+                    }
+                }
+            }
         }
     }
 }
