@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-async fn spawn_test_server(enable_private_net: bool) -> (String, tokio::task::JoinHandle<()>, AppState) {
+async fn spawn_test_server(
+    enable_private_net: bool,
+) -> (String, tokio::task::JoinHandle<()>, AppState) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind ephemeral port");
@@ -118,7 +120,10 @@ async fn test_rest_sink_blocks_private_net_by_default() {
             break;
         }
     }
-    assert!(got_exception, "Expected internal network exception in rule status");
+    assert!(
+        got_exception,
+        "Expected internal network exception in rule status"
+    );
     // Mock server must never have received the request
     assert_eq!(requests_received.load(Ordering::SeqCst), 0);
 }
@@ -241,27 +246,61 @@ async fn test_rest_sink_validation_rejects_bad_method_and_form() {
 #[test]
 fn test_is_private_or_internal_ip_unit() {
     // IPv4 private/internal
-    assert!(is_private_or_internal_ip("127.0.0.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("127.0.0.2".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("10.0.0.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("172.16.0.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("192.168.1.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("192.168.77.246".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("169.254.1.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("100.64.0.1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("0.0.0.0".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("255.255.255.255".parse::<IpAddr>().unwrap()));
+    assert!(is_private_or_internal_ip(
+        "127.0.0.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "127.0.0.2".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "10.0.0.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "172.16.0.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "192.168.1.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "192.168.77.246".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "169.254.1.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "100.64.0.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "0.0.0.0".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "255.255.255.255".parse::<IpAddr>().unwrap()
+    ));
 
     // IPv6 private/internal
     assert!(is_private_or_internal_ip("::1".parse::<IpAddr>().unwrap()));
     assert!(is_private_or_internal_ip("::".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("fe80::1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("fc00::1".parse::<IpAddr>().unwrap()));
-    assert!(is_private_or_internal_ip("fd00::1".parse::<IpAddr>().unwrap()));
+    assert!(is_private_or_internal_ip(
+        "fe80::1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "fc00::1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(is_private_or_internal_ip(
+        "fd00::1".parse::<IpAddr>().unwrap()
+    ));
 
     // Public IPs
-    assert!(!is_private_or_internal_ip("8.8.8.8".parse::<IpAddr>().unwrap()));
-    assert!(!is_private_or_internal_ip("1.1.1.1".parse::<IpAddr>().unwrap()));
-    assert!(!is_private_or_internal_ip("93.184.216.34".parse::<IpAddr>().unwrap()));
-    assert!(!is_private_or_internal_ip("2606:4700:4700::1111".parse::<IpAddr>().unwrap()));
+    assert!(!is_private_or_internal_ip(
+        "8.8.8.8".parse::<IpAddr>().unwrap()
+    ));
+    assert!(!is_private_or_internal_ip(
+        "1.1.1.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(!is_private_or_internal_ip(
+        "93.184.216.34".parse::<IpAddr>().unwrap()
+    ));
+    assert!(!is_private_or_internal_ip(
+        "2606:4700:4700::1111".parse::<IpAddr>().unwrap()
+    ));
 }

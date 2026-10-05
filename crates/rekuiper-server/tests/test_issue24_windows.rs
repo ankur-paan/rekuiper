@@ -205,7 +205,10 @@ async fn test_tumbling_window_zero_duration_emits_nothing() {
 
     // Must timeout without any output emitted
     let res = tokio::time::timeout(Duration::from_millis(300), sink_rx.recv()).await;
-    assert!(res.is_err(), "TUMBLINGWINDOW(ss, 0) should not emit any output");
+    assert!(
+        res.is_err(),
+        "TUMBLINGWINDOW(ss, 0) should not emit any output"
+    );
 }
 
 #[tokio::test]
@@ -245,17 +248,29 @@ async fn test_window_start_and_end_event_time() {
     // Send events in window [0, 2000): ts = 500, ts = 1500
     let _ = state.stream_bus.publish(
         "s",
-        StreamRecord::new([("ts".to_string(), json!(500)), ("v".to_string(), json!(1))].into_iter().collect()),
+        StreamRecord::new(
+            [("ts".to_string(), json!(500)), ("v".to_string(), json!(1))]
+                .into_iter()
+                .collect(),
+        ),
     );
     let _ = state.stream_bus.publish(
         "s",
-        StreamRecord::new([("ts".to_string(), json!(1500)), ("v".to_string(), json!(2))].into_iter().collect()),
+        StreamRecord::new(
+            [("ts".to_string(), json!(1500)), ("v".to_string(), json!(2))]
+                .into_iter()
+                .collect(),
+        ),
     );
 
     // Advance watermark past 2000 by sending ts = 2500
     let _ = state.stream_bus.publish(
         "s",
-        StreamRecord::new([("ts".to_string(), json!(2500)), ("v".to_string(), json!(3))].into_iter().collect()),
+        StreamRecord::new(
+            [("ts".to_string(), json!(2500)), ("v".to_string(), json!(3))]
+                .into_iter()
+                .collect(),
+        ),
     );
 
     let rec = tokio::time::timeout(Duration::from_secs(2), sink_rx.recv())
@@ -457,7 +472,11 @@ async fn test_session_window_event_time_gap() {
     for i in 1..=4 {
         let _ = state.stream_bus.publish(
             "s",
-            StreamRecord::new([("ts".to_string(), json!(60000 + i * 1000))].into_iter().collect()),
+            StreamRecord::new(
+                [("ts".to_string(), json!(60000 + i * 1000))]
+                    .into_iter()
+                    .collect(),
+            ),
         );
     }
 

@@ -166,17 +166,23 @@ async fn test_defect1_stream_table_lookup_join() {
     let _ = state.stream_bus.publish(
         "j/t",
         rekuiper_core::StreamRecord::new(
-            [("id".to_string(), json!(1)), ("label".to_string(), json!("one"))]
-                .into_iter()
-                .collect(),
+            [
+                ("id".to_string(), json!(1)),
+                ("label".to_string(), json!("one")),
+            ]
+            .into_iter()
+            .collect(),
         ),
     );
     let _ = state.stream_bus.publish(
         "j/t",
         rekuiper_core::StreamRecord::new(
-            [("id".to_string(), json!(2)), ("label".to_string(), json!("two"))]
-                .into_iter()
-                .collect(),
+            [
+                ("id".to_string(), json!(2)),
+                ("label".to_string(), json!("two")),
+            ]
+            .into_iter()
+            .collect(),
         ),
     );
 
@@ -237,9 +243,12 @@ async fn test_defect1_stream_table_lookup_join() {
     let _ = state.stream_bus.publish(
         "j/t",
         rekuiper_core::StreamRecord::new(
-            [("id".to_string(), json!(3)), ("label".to_string(), json!("three"))]
-                .into_iter()
-                .collect(),
+            [
+                ("id".to_string(), json!(3)),
+                ("label".to_string(), json!("three")),
+            ]
+            .into_iter()
+            .collect(),
         ),
     );
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;

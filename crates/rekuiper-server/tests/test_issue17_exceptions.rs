@@ -89,8 +89,12 @@ async fn test_select_runtime_error_drops_row_and_counts_exception() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Wait a moment; no output should be emitted since sendError is false
-    let timeout_res = tokio::time::timeout(std::time::Duration::from_millis(300), sink_rx.recv()).await;
-    assert!(timeout_res.is_err(), "row with runtime error should be dropped");
+    let timeout_res =
+        tokio::time::timeout(std::time::Duration::from_millis(300), sink_rx.recv()).await;
+    assert!(
+        timeout_res.is_err(),
+        "row with runtime error should be dropped"
+    );
 
     // 3. Verify rule status has exceptions_total = 1 and last_exception recorded
     let resp = client
@@ -100,7 +104,10 @@ async fn test_select_runtime_error_drops_row_and_counts_exception() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let status: serde_json::Value = resp.json().await.unwrap();
-    let exc_total = status.get("exceptions_total").and_then(|v| v.as_u64()).unwrap_or(0);
+    let exc_total = status
+        .get("exceptions_total")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     assert_eq!(exc_total, 1, "exceptions_total must be 1");
 
     let last_exc = status
@@ -187,10 +194,7 @@ async fn test_select_runtime_error_with_send_error_true() {
         "unexpected error message: {}",
         err_msg
     );
-    assert_eq!(
-        rec.data.get("rule_id"),
-        Some(&json!("rule_abs_send_error"))
-    );
+    assert_eq!(rec.data.get("rule_id"), Some(&json!("rule_abs_send_error")));
 }
 
 #[tokio::test]
@@ -236,7 +240,9 @@ async fn test_math_and_cast_runtime_errors() {
         .unwrap();
     let err = rec.data.get("error").and_then(|v| v.as_str()).unwrap();
     assert!(
-        err.contains("call func ln error: The argument must be a strictly positive number but got 0"),
+        err.contains(
+            "call func ln error: The argument must be a strictly positive number but got 0"
+        ),
         "unexpected ln(0) error: {}",
         err
     );
@@ -384,7 +390,9 @@ async fn test_where_clause_runtime_error() {
         .unwrap();
     let err = rec.data.get("error").and_then(|v| v.as_str()).unwrap();
     assert!(
-        err.contains("run Where error: invalid condition that returns non-bool value float64(25.5)"),
+        err.contains(
+            "run Where error: invalid condition that returns non-bool value float64(25.5)"
+        ),
         "unexpected non-bool WHERE error: {}",
         err
     );

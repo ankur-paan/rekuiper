@@ -146,7 +146,11 @@ impl Expr {
                     UnaryOperator::Not => "NOT",
                     UnaryOperator::Neg => "-",
                 };
-                format!("unaryExpr:{{ {} {} }}", op_str, expr.to_ekuiper_string_qualified(stream))
+                format!(
+                    "unaryExpr:{{ {} {} }}",
+                    op_str,
+                    expr.to_ekuiper_string_qualified(stream)
+                )
             }
             Expr::FieldAccess { parent, field } => {
                 format!("{}.{}", parent.to_ekuiper_string_qualified(""), field)
@@ -203,7 +207,12 @@ impl Expr {
                     .map(|e| e.to_ekuiper_string_qualified(stream))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{} {} ({})", expr.to_ekuiper_string_qualified(stream), prefix, items)
+                format!(
+                    "{} {} ({})",
+                    expr.to_ekuiper_string_qualified(stream),
+                    prefix,
+                    items
+                )
             }
             Expr::IsNull { expr, negated } => {
                 let suffix = if *negated { "IS NOT NULL" } else { "IS NULL" };
@@ -214,7 +223,6 @@ impl Expr {
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {

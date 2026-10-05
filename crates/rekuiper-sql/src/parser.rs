@@ -266,7 +266,9 @@ impl<'a> Parser<'a> {
                             let col = self.parse_column_identifier()?;
                             except.push(col);
                             self.skip_whitespace();
-                            if self.pos < self.input.len() && self.input[self.pos..].starts_with(',') {
+                            if self.pos < self.input.len()
+                                && self.input[self.pos..].starts_with(',')
+                            {
                                 self.pos += 1;
                             } else {
                                 break;
@@ -288,7 +290,9 @@ impl<'a> Parser<'a> {
                             let col = self.parse_column_identifier()?;
                             replace.push((rep_expr, col));
                             self.skip_whitespace();
-                            if self.pos < self.input.len() && self.input[self.pos..].starts_with(',') {
+                            if self.pos < self.input.len()
+                                && self.input[self.pos..].starts_with(',')
+                            {
                                 self.pos += 1;
                             } else {
                                 break;
@@ -444,7 +448,10 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 // Allow trailing commas / empty? No — require an expression.
                 let item = self.parse_expr()?;
-                if let Expr::Over { partition_by, when, .. } = &item {
+                if let Expr::Over {
+                    partition_by, when, ..
+                } = &item
+                {
                     if window_partition_by.is_none() {
                         window_partition_by = partition_by.as_deref().cloned();
                     }
@@ -591,10 +598,7 @@ impl<'a> Parser<'a> {
         match name.to_ascii_lowercase().as_str() {
             "statewindow" => {
                 if args.is_empty() || args.len() > 2 {
-                    bail!(
-                        "STATEWINDOW expects 1 or 2 arguments, got {}",
-                        args.len()
-                    );
+                    bail!("STATEWINDOW expects 1 or 2 arguments, got {}", args.len());
                 }
                 let start_condition = args[0].clone();
                 let end_condition = if args.len() == 2 {
@@ -1408,7 +1412,9 @@ impl<'a> Parser<'a> {
             if self.pos < self.input.len() && self.input[self.pos..].starts_with('.') {
                 self.pos += 1;
                 self.skip_whitespace();
-                let field = if self.pos < self.input.len() && self.input[self.pos..].starts_with('*') {
+                let field = if self.pos < self.input.len()
+                    && self.input[self.pos..].starts_with('*')
+                {
                     self.pos += 1;
                     "*".to_string()
                 } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
@@ -1458,13 +1464,12 @@ impl<'a> Parser<'a> {
                 if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
                     self.pos += 1;
                     self.skip_whitespace();
-                    let hi = if self.pos < self.input.len()
-                        && self.input[self.pos..].starts_with(']')
-                    {
-                        None
-                    } else {
-                        Some(Box::new(self.parse_expr()?))
-                    };
+                    let hi =
+                        if self.pos < self.input.len() && self.input[self.pos..].starts_with(']') {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
                     self.skip_whitespace();
                     self.expect_char(']')?;
                     expr = Expr::Slice {

@@ -831,7 +831,8 @@ pub async fn run_qualification(
                         } else {
                             Some(&v)
                         };
-                        if let Some(seq) = item.and_then(|m| m.get("seq")).and_then(|s| s.as_u64()) {
+                        if let Some(seq) = item.and_then(|m| m.get("seq")).and_then(|s| s.as_u64())
+                        {
                             trk_clone.lock().await.record(seq);
                         }
                     }

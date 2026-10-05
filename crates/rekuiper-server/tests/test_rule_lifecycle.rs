@@ -709,7 +709,11 @@ async fn test_rule_validation_rejections() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("duplicate field definition id"), "expected duplicate field error, got: {}", body);
+    assert!(
+        body.contains("duplicate field definition id"),
+        "expected duplicate field error, got: {}",
+        body
+    );
 
     // 2. Duplicate output fields (aliased duplicate)
     let resp = client
@@ -724,7 +728,11 @@ async fn test_rule_validation_rejections() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("duplicate field definition id"), "expected duplicate field error, got: {}", body);
+    assert!(
+        body.contains("duplicate field definition id"),
+        "expected duplicate field error, got: {}",
+        body
+    );
 
     // 3. Rule with missing actions
     let resp = client
@@ -739,7 +747,11 @@ async fn test_rule_validation_rejections() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("Missing rule actions."), "expected missing rule actions error, got: {}", body);
+    assert!(
+        body.contains("Missing rule actions."),
+        "expected missing rule actions error, got: {}",
+        body
+    );
 
     // 4. Rule option with wrong type (qos: "high" instead of integer)
     let resp = client
@@ -757,8 +769,11 @@ async fn test_rule_validation_rejections() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("invalid rule json"), "expected invalid rule json error, got: {}", body);
+    assert!(
+        body.contains("invalid rule json"),
+        "expected invalid rule json error, got: {}",
+        body
+    );
 
     server.shutdown().await;
 }
-

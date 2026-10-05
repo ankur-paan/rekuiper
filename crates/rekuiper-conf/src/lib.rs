@@ -344,11 +344,17 @@ mod tests {
         let mut config = KuiperConfig::default();
         assert!(!config.basic.enable_private_net);
 
-        let vars = vec![("KUIPER__BASIC__ENABLEPRIVATENET".to_string(), "true".to_string())];
+        let vars = vec![(
+            "KUIPER__BASIC__ENABLEPRIVATENET".to_string(),
+            "true".to_string(),
+        )];
         apply_env_overrides_from_iter(&mut config, vars);
         assert!(config.basic.enable_private_net);
 
-        let vars_rekuiper = vec![("REKUIPER__BASIC__ENABLE_PRIVATE_NET".to_string(), "false".to_string())];
+        let vars_rekuiper = vec![(
+            "REKUIPER__BASIC__ENABLE_PRIVATE_NET".to_string(),
+            "false".to_string(),
+        )];
         apply_env_overrides_from_iter(&mut config, vars_rekuiper);
         assert!(!config.basic.enable_private_net);
     }

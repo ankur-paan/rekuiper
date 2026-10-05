@@ -40,7 +40,10 @@ fn test_bitwise_operators() {
 
     // Bitwise operators on booleans (logical AND/OR/XOR)
     let b_rec = json!({"t": true, "f": false});
-    let b_res = run_sql("SELECT t & f AS a, t | f AS b, t ^ f AS c, t ^ t AS d FROM demo", &b_rec);
+    let b_res = run_sql(
+        "SELECT t & f AS a, t | f AS b, t ^ f AS c, t ^ t AS d FROM demo",
+        &b_rec,
+    );
     assert_eq!(b_res["a"], false);
     assert_eq!(b_res["b"], true);
     assert_eq!(b_res["c"], true);
@@ -96,7 +99,10 @@ fn test_postfix_navigation() {
         "meta": {"info": {"ver": 2}}
     });
 
-    let res = run_sql("SELECT items[1]->temp AS v, meta->info->ver AS ver FROM demo", &rec);
+    let res = run_sql(
+        "SELECT items[1]->temp AS v, meta->info->ver AS ver FROM demo",
+        &rec,
+    );
     assert_eq!(res["v"], 30);
     assert_eq!(res["ver"], 2);
 }
@@ -111,14 +117,20 @@ fn test_analytic_over_when() {
         json!({"id": 4, "temp": 30}), // WHEN true (previous qualifying was 25)
     ];
 
-    let results = run_sql_records("SELECT id, lag(temp) OVER (WHEN temp > 20) AS v FROM demo", &stream);
+    let results = run_sql_records(
+        "SELECT id, lag(temp) OVER (WHEN temp > 20) AS v FROM demo",
+        &stream,
+    );
     assert_eq!(results[0]["v"], Value::Null); // temp=15 <= 20, no prior qualifying
     assert_eq!(results[1]["v"], Value::Null); // temp=25 > 20, first qualifying, no prior lag
-    assert_eq!(results[2]["v"], 25);          // temp=18 <= 20, returns last qualifying value (25)
-    assert_eq!(results[3]["v"], 25);          // temp=30 > 20, previous qualifying was 25
+    assert_eq!(results[2]["v"], 25); // temp=18 <= 20, returns last qualifying value (25)
+    assert_eq!(results[3]["v"], 25); // temp=30 > 20, previous qualifying was 25
 
     // acc_count OVER (WHEN <cond>)
-    let results2 = run_sql_records("SELECT id, acc_count(temp) OVER (WHEN temp > 20) AS c FROM demo", &stream);
+    let results2 = run_sql_records(
+        "SELECT id, acc_count(temp) OVER (WHEN temp > 20) AS c FROM demo",
+        &stream,
+    );
     assert_eq!(results2[0]["c"], 0); // skipped, initial count is 0
     assert_eq!(results2[1]["c"], 1); // count = 1
     assert_eq!(results2[2]["c"], 1); // skipped, retains 1
@@ -142,7 +154,9 @@ fn test_builtin_functions_parity() {
 
     // regexp_substr
     let rec2 = json!({"s": "temperature: 36.5C"});
-    let res2 = run_sql("SELECT regexp_substr(s, '[0-9]+\\.[0-9]+') AS m FROM demo", &rec2);
+    let res2 = run_sql(
+        "SELECT regexp_substr(s, '[0-9]+\\.[0-9]+') AS m FROM demo",
+        &rec2,
+    );
     assert_eq!(res2["m"], "36.5");
 }
-

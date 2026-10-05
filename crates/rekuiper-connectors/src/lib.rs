@@ -4155,7 +4155,14 @@ mod tests {
             serde_json::from_value(json!({"topic": "bench/telemetry"})).unwrap();
         let mut batch = vec![super::decode_mqtt_payload(br#"{"id":1}"#).unwrap()];
         let counters = super::RuleCounters::default();
-        super::drain_buffered_publishes(&config, &mut events, &mut batch, 1024, Some(&counters), None);
+        super::drain_buffered_publishes(
+            &config,
+            &mut events,
+            &mut batch,
+            1024,
+            Some(&counters),
+            None,
+        );
         assert_eq!(
             counters
                 .exceptions

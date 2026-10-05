@@ -103,7 +103,9 @@ impl Evaluator {
             }
         }
         let state = RuleState::default();
-        Self::eval_select_stateful_fallible(stmt, record, &state).ok().flatten()
+        Self::eval_select_stateful_fallible(stmt, record, &state)
+            .ok()
+            .flatten()
     }
 
     pub fn eval_select_fallible(
@@ -113,7 +115,6 @@ impl Evaluator {
         let state = RuleState::default();
         Self::eval_select_stateful_fallible(stmt, record, &state)
     }
-
 
     /// Batch evaluation over a window of records.
     ///
@@ -169,7 +170,9 @@ impl Evaluator {
                     if let Some(rec) = first {
                         for (k, v) in rec {
                             if k != META_KEY && !k.starts_with("__") {
-                                if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
+                                if except.iter().any(|e| e == k)
+                                    && !replace.iter().any(|(_, c)| c == k)
+                                {
                                     continue;
                                 }
                                 output.entry(k.clone()).or_insert_with(|| v.clone());
@@ -194,7 +197,10 @@ impl Evaluator {
                             .unwrap_or(Value::Null)
                     });
                 }
-                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
+                Expr::FieldAccess {
+                    parent,
+                    field: leaf,
+                } if leaf == "*" => {
                     if let Some(rec) = first {
                         let parent_val = Self::eval_val(parent, rec);
                         if let Value::Object(map) = parent_val {
@@ -499,7 +505,9 @@ impl Evaluator {
         record: &HashMap<String, Value>,
         state: &RuleState,
     ) -> Option<HashMap<String, Value>> {
-        Self::eval_select_stateful_fallible(stmt, record, state).ok().flatten()
+        Self::eval_select_stateful_fallible(stmt, record, state)
+            .ok()
+            .flatten()
     }
 
     pub fn eval_select_stateful_fallible(
@@ -508,7 +516,8 @@ impl Evaluator {
         state: &RuleState,
     ) -> Result<Option<HashMap<String, Value>>, String> {
         if let Some((_, rhs)) = &stmt.set_op {
-            let left = Self::eval_select_stateful_fallible(&Self::without_set_op(stmt), record, state)?;
+            let left =
+                Self::eval_select_stateful_fallible(&Self::without_set_op(stmt), record, state)?;
             let right = Self::eval_select_stateful_fallible(rhs, record, state)?;
             return Ok(Self::merge_union_rows(left, right));
         }
@@ -527,7 +536,8 @@ impl Evaluator {
                 Expr::WildcardModified { except, replace } => {
                     for (k, v) in record {
                         if k != META_KEY && !k.starts_with("__") {
-                            if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k) {
+                            if except.iter().any(|e| e == k) && !replace.iter().any(|(_, c)| c == k)
+                            {
                                 continue;
                             }
                             output.insert(k.clone(), v.clone());
@@ -561,11 +571,17 @@ impl Evaluator {
                         output.insert(key, Value::Null);
                     }
                 }
-                Expr::FieldAccess { parent, field: leaf } if leaf == "*" => {
+                Expr::FieldAccess {
+                    parent,
+                    field: leaf,
+                } if leaf == "*" => {
                     let parent_val = Self::eval_stateful_expr_fallible(parent, record, state)
                         .map_err(|err| {
                             let a = alias.as_deref().unwrap_or("*");
-                            format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                            format!(
+                                "run Select error: alias: {} expr: {} meet error, err:{}",
+                                a, expr_str, err
+                            )
                         })?;
                     if let Value::Object(map) = parent_val {
                         for (k, v) in map {
@@ -590,20 +606,27 @@ impl Evaluator {
                     parent: _,
                     field: leaf,
                 } => {
-                    let val = Self::eval_stateful_expr_fallible(field, record, state)
-                        .map_err(|err| {
+                    let val =
+                        Self::eval_stateful_expr_fallible(field, record, state).map_err(|err| {
                             let a = alias.as_deref().unwrap_or(leaf);
-                            format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                            format!(
+                                "run Select error: alias: {} expr: {} meet error, err:{}",
+                                a, expr_str, err
+                            )
                         })?;
                     output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("extract") => {
                     if let Some(arg) = args.first() {
-                        let val = Self::eval_stateful_expr_fallible(arg, record, state)
-                            .map_err(|err| {
+                        let val = Self::eval_stateful_expr_fallible(arg, record, state).map_err(
+                            |err| {
                                 let a = alias.as_deref().unwrap_or("extract");
-                                format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
-                            })?;
+                                format!(
+                                    "run Select error: alias: {} expr: {} meet error, err:{}",
+                                    a, expr_str, err
+                                )
+                            },
+                        )?;
                         if let Value::Object(map) = val {
                             for (k, v) in map {
                                 output.insert(k, v);
@@ -664,12 +687,18 @@ impl Evaluator {
                     }
                 }
                 _ => {
-                    let val = Self::eval_stateful_expr_fallible(field, record, state)
-                        .map_err(|err| {
+                    let val =
+                        Self::eval_stateful_expr_fallible(field, record, state).map_err(|err| {
                             if let Some(ref a) = alias {
-                                format!("run Select error: alias: {} expr: {} meet error, err:{}", a, expr_str, err)
+                                format!(
+                                    "run Select error: alias: {} expr: {} meet error, err:{}",
+                                    a, expr_str, err
+                                )
                             } else {
-                                format!("run Select error: expr: {} meet error, err:{}", expr_str, err)
+                                format!(
+                                    "run Select error: expr: {} meet error, err:{}",
+                                    expr_str, err
+                                )
                             }
                         })?;
                     let name = alias.unwrap_or_else(|| Self::column_name(field, idx));
@@ -889,7 +918,9 @@ impl Evaluator {
                 when,
             } => {
                 let partition_key = match partition_by {
-                    Some(p) => Self::value_to_key(&Self::eval_stateful_expr_fallible(p, record, state)?),
+                    Some(p) => {
+                        Self::value_to_key(&Self::eval_stateful_expr_fallible(p, record, state)?)
+                    }
                     None => String::new(),
                 };
                 let skip_update = if let Some(cond) = when {
@@ -898,7 +929,13 @@ impl Evaluator {
                 } else {
                     false
                 };
-                Self::eval_stateful_call_fallible(call, record, state, Some(&partition_key), skip_update)
+                Self::eval_stateful_call_fallible(
+                    call,
+                    record,
+                    state,
+                    Some(&partition_key),
+                    skip_update,
+                )
             }
             Expr::Case {
                 operand,
@@ -909,7 +946,6 @@ impl Evaluator {
             }),
         }
     }
-
 
     fn eval_stateful_call_fallible(
         expr: &Expr,
@@ -1016,10 +1052,7 @@ impl Evaluator {
             let call_id = Self::column_name(expr, 0);
             let state_key = format!("row_number:{}:{}", call_id, partition_key.unwrap_or(""));
             let mut guard = state.state.write();
-            let current = guard
-                .get(&state_key)
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            let current = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
             if skip_update {
                 return Ok(Value::from(current));
             }
@@ -1056,8 +1089,15 @@ impl Evaluator {
         if let Some(v) = Self::eval_context_call(name, args, record) {
             return Ok(v);
         }
-        if matches!(name.to_ascii_lowercase().as_str(), "count" | "sum" | "avg" | "min" | "max") {
-            return Ok(Self::eval_aggregate_call(name, args, std::slice::from_ref(record)));
+        if matches!(
+            name.to_ascii_lowercase().as_str(),
+            "count" | "sum" | "avg" | "min" | "max"
+        ) {
+            return Ok(Self::eval_aggregate_call(
+                name,
+                args,
+                std::slice::from_ref(record),
+            ));
         }
         let vals: Vec<Value> = args
             .iter()
@@ -2069,8 +2109,12 @@ impl Evaluator {
                 if let Some(w) = when {
                     parts.push(format!("WHEN {}", Self::column_name(w, idx)));
                 }
-                format!("{} OVER ({})", Self::column_name(call, idx), parts.join(" "))
-            },
+                format!(
+                    "{} OVER ({})",
+                    Self::column_name(call, idx),
+                    parts.join(" ")
+                )
+            }
             Expr::Case {
                 operand,
                 when_clauses,
@@ -2102,7 +2146,10 @@ impl Evaluator {
     /// infer to `"any"`.
     pub fn infer_expr_type(expr: &Expr) -> &'static str {
         match expr {
-            Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::FieldAccess { .. } => "any",
+            Expr::Wildcard
+            | Expr::WildcardModified { .. }
+            | Expr::Identifier(_)
+            | Expr::FieldAccess { .. } => "any",
             Expr::Index { .. } => "any",
             Expr::Slice { .. } => "array",
             Expr::Literal(val) => match val {
@@ -2156,10 +2203,10 @@ impl Evaluator {
             },
             Expr::Between { .. } | Expr::InList { .. } | Expr::IsNull { .. } => "boolean",
             Expr::Call { name, .. } => match name.to_ascii_lowercase().as_str() {
-                "avg" | "stddev" | "stddevs" | "var" | "vars" | "percentile" | "percentile_cont" | "sin" | "cos"
-                | "tan" | "asin" | "acos" | "atan" | "atan2" | "cosh" | "sinh" | "tanh" | "cot"
-                | "radians" | "degrees" | "exp" | "ln" | "log" | "log2" | "log10" | "sqrt"
-                | "pi" | "rand" => "float",
+                "avg" | "stddev" | "stddevs" | "var" | "vars" | "percentile"
+                | "percentile_cont" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
+                | "atan2" | "cosh" | "sinh" | "tanh" | "cot" | "radians" | "degrees" | "exp"
+                | "ln" | "log" | "log2" | "log10" | "sqrt" | "pi" | "rand" => "float",
                 "count" | "length" | "cardinality" | "array_cardinality" | "array_length"
                 | "array_position" | "row_number" | "acc_count" | "year" | "month" | "day"
                 | "day_of_week" | "day_of_month" | "day_of_year" | "hour" | "minute" | "second"
@@ -2170,11 +2217,10 @@ impl Evaluator {
                 | "array_contains" | "array_contains_any" => "boolean",
                 "concat" | "lower" | "upper" | "trim" | "ltrim" | "rtrim" | "lpad" | "rpad"
                 | "replace" | "reverse" | "substr" | "substring" | "regexp_replace"
-                | "regexp_substring" | "regexp_substr" | "split_value" | "chr" | "hex2dec" | "dec2hex" | "encode"
-                | "base64_encode" | "decode" | "base64_decode" | "uuid" | "newuuid"
-                | "format_date" | "day_name" | "month_name" | "to_json" | "tojson" | "rule_id" => {
-                    "string"
-                }
+                | "regexp_substring" | "regexp_substr" | "split_value" | "chr" | "hex2dec"
+                | "dec2hex" | "encode" | "base64_encode" | "decode" | "base64_decode" | "uuid"
+                | "newuuid" | "format_date" | "day_name" | "month_name" | "to_json" | "tojson"
+                | "rule_id" => "string",
                 "split"
                 | "array_create"
                 | "array_slice"
@@ -2247,7 +2293,10 @@ impl Evaluator {
         schema
     }
 
-    pub fn eval_bool_fallible(expr: &Expr, record: &HashMap<String, Value>) -> Result<bool, String> {
+    pub fn eval_bool_fallible(
+        expr: &Expr,
+        record: &HashMap<String, Value>,
+    ) -> Result<bool, String> {
         Self::eval_bool_stateful_fallible(expr, record, &RuleState::new())
     }
 
@@ -2457,7 +2506,9 @@ impl Evaluator {
                 if left.is_number() && right.is_number() {
                     if left.is_i64() && right.is_i64() {
                         Ok(Value::from(
-                            left.as_i64().unwrap().saturating_add(right.as_i64().unwrap()),
+                            left.as_i64()
+                                .unwrap()
+                                .saturating_add(right.as_i64().unwrap()),
                         ))
                     } else {
                         let lf = left.as_f64().unwrap();
@@ -2476,7 +2527,9 @@ impl Evaluator {
                 if left.is_number() && right.is_number() {
                     if left.is_i64() && right.is_i64() {
                         Ok(Value::from(
-                            left.as_i64().unwrap().saturating_sub(right.as_i64().unwrap()),
+                            left.as_i64()
+                                .unwrap()
+                                .saturating_sub(right.as_i64().unwrap()),
                         ))
                     } else {
                         let lf = left.as_f64().unwrap();
@@ -2495,7 +2548,9 @@ impl Evaluator {
                 if left.is_number() && right.is_number() {
                     if left.is_i64() && right.is_i64() {
                         Ok(Value::from(
-                            left.as_i64().unwrap().saturating_mul(right.as_i64().unwrap()),
+                            left.as_i64()
+                                .unwrap()
+                                .saturating_mul(right.as_i64().unwrap()),
                         ))
                     } else {
                         let lf = left.as_f64().unwrap();
@@ -2616,7 +2671,6 @@ impl Evaluator {
         }
         None
     }
-
 
     fn eval_between_fallible(
         val: &Value,
@@ -3616,7 +3670,9 @@ impl Evaluator {
                 if s.is_empty() {
                     Ok(Value::String(String::new()))
                 } else {
-                    Ok(Value::String(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
+                    Ok(Value::String(
+                        base64::engine::general_purpose::STANDARD.encode(s.as_bytes()),
+                    ))
                 }
             }
             _ => Ok(Value::Null),
@@ -6154,11 +6210,7 @@ impl Evaluator {
         };
         // 0-based indexing for positive indices; negatives count back from the end (-1 is last).
         let len = arr.len() as i64;
-        let pos = if index >= 0 {
-            index
-        } else {
-            len + index
-        };
+        let pos = if index >= 0 { index } else { len + index };
         if pos < 0 || pos >= len {
             return Value::Null;
         }

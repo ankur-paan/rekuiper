@@ -2059,7 +2059,13 @@ fn resolve_payload_format(
     def: &rekuiper_core::model::StreamDefinition,
     rule_id: &str,
 ) -> Option<rekuiper_connectors::PayloadFormat> {
-    resolve_payload_format_options(schemas, &def.options, &def.stream_fields, &def.name, rule_id)
+    resolve_payload_format_options(
+        schemas,
+        &def.options,
+        &def.stream_fields,
+        &def.name,
+        rule_id,
+    )
 }
 
 fn resolve_payload_format_options(
@@ -2206,13 +2212,21 @@ fn resolve_mqtt_table_source(
             }
         }
     }
-    if let Some((_, srv)) = table_def.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("SERVER")) {
+    if let Some((_, srv)) = table_def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("SERVER"))
+    {
         let srv = srv.trim();
         if !srv.is_empty() {
             config.server = srv.to_string();
         }
     }
-    if let Some((_, top)) = table_def.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("topic")) {
+    if let Some((_, top)) = table_def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("topic"))
+    {
         let top = top.trim();
         if !top.is_empty() {
             config.topic = top.to_string();
@@ -2221,7 +2235,11 @@ fn resolve_mqtt_table_source(
     if config.topic.trim().is_empty() {
         config.topic = table_def.name.clone();
     }
-    if let Some(id) = table_def.options.get("CLIENTID").or_else(|| table_def.options.get("CLIENT_ID")) {
+    if let Some(id) = table_def
+        .options
+        .get("CLIENTID")
+        .or_else(|| table_def.options.get("CLIENT_ID"))
+    {
         if !id.trim().is_empty() {
             config.client_id = Some(id.clone());
         }
@@ -2241,7 +2259,13 @@ fn resolve_mqtt_table_source(
             config.qos = q;
         }
     }
-    config.format = resolve_payload_format_options(schemas, &table_def.options, &table_def.stream_fields, &table_def.name, &table_def.name)?;
+    config.format = resolve_payload_format_options(
+        schemas,
+        &table_def.options,
+        &table_def.stream_fields,
+        &table_def.name,
+        &table_def.name,
+    )?;
     Some(config)
 }
 
@@ -2321,7 +2345,9 @@ fn bootstrap_table_source(state: &AppState, table_name: &str) {
     let is_sql = table_type.eq_ignore_ascii_case("sql");
     let is_file = table_type.eq_ignore_ascii_case("file");
     if !is_memory && !is_redis && !is_sql && !is_file {
-        if let Some(config) = resolve_mqtt_table_source(&def, &state.source_configs, &state.schema_manager) {
+        if let Some(config) =
+            resolve_mqtt_table_source(&def, &state.source_configs, &state.schema_manager)
+        {
             let bus_topic = format!("$table_mqtt/{}", table_name);
             let stream_tx = state.stream_bus.get_or_create(&bus_topic);
             let mut mqtt_rx = state.stream_bus.subscribe(&bus_topic);
@@ -3137,15 +3163,31 @@ struct CommonSinkOpts {
 }
 
 fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
-    let send_single = opts.get("sendSingle").and_then(|v| v.as_bool()).unwrap_or(false);
-    let send_nil_field = opts.get("sendNilField").and_then(|v| v.as_bool()).unwrap_or(false);
+    let send_single = opts
+        .get("sendSingle")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let send_nil_field = opts
+        .get("sendNilField")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let fields = opts.get("fields").and_then(|v| v.as_array()).map(|arr| {
-        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+        arr.iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect()
     });
-    let exclude_fields = opts.get("excludeFields").and_then(|v| v.as_array()).map(|arr| {
-        arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
-    });
-    let data_field = opts.get("dataField").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let exclude_fields = opts
+        .get("excludeFields")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+    let data_field = opts
+        .get("dataField")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     CommonSinkOpts {
         send_single,
         send_nil_field,
@@ -3157,9 +3199,11 @@ fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
 
 fn clean_sink_value(v: &Value, send_nil_field: bool) -> Value {
     match v {
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(|item| clean_sink_value(item, send_nil_field)).collect())
-        }
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| clean_sink_value(item, send_nil_field))
+                .collect(),
+        ),
         Value::Object(obj) => {
             let mut map = std::collections::BTreeMap::new();
             for (k, val) in obj {
@@ -3372,7 +3416,10 @@ fn prepare_actions(
                             }
                         }
                     }
-                    let format = opts.get("format").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let format = opts
+                        .get("format")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let delimiter = opts
                         .get("delimiter")
                         .and_then(|v| v.as_str())
@@ -3392,7 +3439,10 @@ fn prepare_actions(
                 }
                 "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
                     Ok(config) => {
-                        let format = opts.get("format").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let format = opts
+                            .get("format")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                         let delimiter = opts
                             .get("delimiter")
                             .and_then(|v| v.as_str())
@@ -3451,7 +3501,10 @@ fn prepare_actions(
                     }),
                 },
                 "memory" => {
-                    let send_nil_field = opts.get("sendNilField").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let send_nil_field = opts
+                        .get("sendNilField")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     out.push(PreparedAction::Memory {
                         topic: opts
                             .get("topic")
@@ -3982,14 +4035,22 @@ fn spawn_rule_task(
     let mut source_ts_fields = HashMap::new();
     let from_topic = resolve_source_topic(stream_manager, &select_stmt.from);
     if let Some(s) = stream_manager.get_stream(&from_topic) {
-        if let Some((_, v)) = s.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP")) {
+        if let Some((_, v)) = s
+            .options
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
+        {
             source_ts_fields.insert(select_stmt.from.clone(), v.clone());
         }
     }
     for join in &select_stmt.joins {
         let topic = resolve_source_topic(stream_manager, &join.target);
         if let Some(s) = stream_manager.get_stream(&topic) {
-            if let Some((_, v)) = s.options.iter().find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP")) {
+            if let Some((_, v)) = s
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
+            {
                 source_ts_fields.insert(join.target.clone(), v.clone());
             }
         }
@@ -4123,43 +4184,39 @@ fn spawn_rule_task(
             unit,
             max_duration,
             timeout,
-        }) => {
-            tokio::spawn(run_session_window_rule(
-                loop_counters,
-                loop_running,
-                rule_id.clone(),
-                select_stmt,
-                rx,
-                tumbling_window_duration(&unit, max_duration),
-                tumbling_window_duration(&unit, timeout),
-                sink_tx,
-                event_time,
-                send_error,
-                join_rxs,
-                tables.clone(),
-                confs.clone(),
-            ))
-        }
+        }) => tokio::spawn(run_session_window_rule(
+            loop_counters,
+            loop_running,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            tumbling_window_duration(&unit, max_duration),
+            tumbling_window_duration(&unit, timeout),
+            sink_tx,
+            event_time,
+            send_error,
+            join_rxs,
+            tables.clone(),
+            confs.clone(),
+        )),
         Some(WindowDef::State {
             start_condition,
             end_condition,
-        }) => {
-            tokio::spawn(run_state_window_rule(
-                loop_counters,
-                loop_running,
-                rule_id.clone(),
-                select_stmt,
-                rx,
-                start_condition,
-                end_condition,
-                sink_tx,
-                event_time,
-                send_error,
-                join_rxs,
-                tables.clone(),
-                confs.clone(),
-            ))
-        }
+        }) => tokio::spawn(run_state_window_rule(
+            loop_counters,
+            loop_running,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            start_condition,
+            end_condition,
+            sink_tx,
+            event_time,
+            send_error,
+            join_rxs,
+            tables.clone(),
+            confs.clone(),
+        )),
     };
     rule_manager.set_rule_handle(&rule_id, handle);
 }
@@ -4415,12 +4472,7 @@ fn http_op_name(method: &str) -> String {
     }
 }
 
-fn make_internal_net_error(
-    method: &str,
-    url: &str,
-    ip: std::net::IpAddr,
-    port: u16,
-) -> SendError {
+fn make_internal_net_error(method: &str, url: &str, ip: std::net::IpAddr, port: u16) -> SendError {
     let op = http_op_name(method);
     let dial_target = match ip {
         std::net::IpAddr::V4(v4) => format!("{}:{}", v4, port),
@@ -4593,7 +4645,9 @@ async fn send_action(
                     None => {
                         let formatted = format_record_for_sink(&output.data, opts);
                         serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
-                            .map_err(|e| SendError::Permanent(format!("json encode error: {}", e)))?
+                            .map_err(|e| {
+                                SendError::Permanent(format!("json encode error: {}", e))
+                            })?
                     }
                 };
                 req_builder = req_builder.body(body_str);
@@ -4633,7 +4687,9 @@ async fn send_action(
                             let mut k: Vec<String> = output
                                 .data
                                 .keys()
-                                .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                                .filter(|k| {
+                                    *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__")
+                                })
                                 .cloned()
                                 .collect();
                             k.sort();
@@ -4647,8 +4703,9 @@ async fn send_action(
                         row.into_bytes()
                     } else {
                         let formatted = format_record_for_sink(&output.data, opts);
-                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
-                            .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?
+                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
+                            |e| SendError::Permanent(format!("mqtt payload encode: {}", e)),
+                        )?
                     }
                 }
             };
@@ -4666,7 +4723,11 @@ async fn send_action(
                 .await
                 .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
         }
-        PreparedAction::WebSocket { url, template, opts } => {
+        PreparedAction::WebSocket {
+            url,
+            template,
+            opts,
+        } => {
             let sink = WebSocketSink { url: url.clone() };
             let res = match template {
                 Some(tpl) => {
@@ -4678,8 +4739,9 @@ async fn send_action(
                 }
                 None => {
                     let formatted = format_record_for_sink(&output.data, opts);
-                    let text = serde_json::to_string(&formatted)
-                        .map_err(|e| SendError::Permanent(format!("websocket payload encode: {}", e)))?;
+                    let text = serde_json::to_string(&formatted).map_err(|e| {
+                        SendError::Permanent(format!("websocket payload encode: {}", e))
+                    })?;
                     sink.send_text(&text).await
                 }
             };
@@ -4712,7 +4774,10 @@ async fn send_action(
                 .await
                 .map_err(|e| SendError::Retry(format!("sql action failed: {}", e)))
         }
-        PreparedAction::Memory { topic, send_nil_field } => {
+        PreparedAction::Memory {
+            topic,
+            send_nil_field,
+        } => {
             let final_topic = if topic.contains("{{") {
                 apply_data_template(topic, &record_template_map(&output.data))
             } else {
@@ -4748,7 +4813,7 @@ async fn send_action(
                     Err(SendError::Dropped)
                 }
             }
-        },
+        }
         PreparedAction::RabbitMq { config, template } => {
             if rt.rabbitmq.is_none() {
                 rt.rabbitmq = Some(RabbitMqSink::new((**config).clone()));
@@ -5947,7 +6012,11 @@ async fn run_stateless_rule(
                 None => true,
             };
             if passes {
-                match Evaluator::eval_select_stateful_fallible(&select_stmt, &record.data, &rule_state) {
+                match Evaluator::eval_select_stateful_fallible(
+                    &select_stmt,
+                    &record.data,
+                    &rule_state,
+                ) {
                     Ok(Some(output)) => {
                         let output_record = StreamRecord::new(output);
                         if !enqueue_sink_record(&counters, &sink, output_record).await {
@@ -5987,8 +6056,10 @@ async fn emit_window_batch(
     }
     if let Some((start_ms, end_ms)) = window_bounds {
         for row in &mut batch {
-            row.data.insert("__window_start__".to_string(), Value::from(start_ms));
-            row.data.insert("__window_end__".to_string(), Value::from(end_ms));
+            row.data
+                .insert("__window_start__".to_string(), Value::from(start_ms));
+            row.data
+                .insert("__window_end__".to_string(), Value::from(end_ms));
         }
     }
     let outputs = if select_stmt.joins.is_empty() {
@@ -6331,12 +6402,13 @@ async fn run_tumbling_window_rule(
                     .get(&tagged.source)
                     .map(|s| s.as_str())
                     .or(event_time.timestamp_field.as_deref());
-                let event_ts =
-                    extract_event_timestamp(&tagged.data, ts_field);
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
                     *cur_max = (*cur_max).max(event_ts);
 
                     let all_active_seen = input_streams
@@ -6524,7 +6596,9 @@ async fn run_session_window_rule(
                 if event_ts < watermark {
                     // Drop late arrival
                 } else {
-                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
                     *cur_max = (*cur_max).max(event_ts);
 
                     let all_active_seen = input_streams
@@ -6547,11 +6621,15 @@ async fn run_session_window_rule(
                     if window_ingest_passes(&select_stmt, &tagged.data) {
                         if let Some(last_ts) = last_event_ts {
                             if event_ts.saturating_sub(last_ts) > timeout_ms
-                                || event_ts.saturating_sub(session_start.unwrap_or(event_ts)) >= max_duration_ms
+                                || event_ts.saturating_sub(session_start.unwrap_or(event_ts))
+                                    >= max_duration_ms
                             {
                                 let s_start = session_start.unwrap_or(last_ts);
                                 let s_end = last_ts.saturating_add(timeout_ms);
-                                let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer).into_iter().map(|(_, r)| r).collect();
+                                let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer)
+                                    .into_iter()
+                                    .map(|(_, r)| r)
+                                    .collect();
                                 session_start = Some(event_ts);
                                 last_event_ts = Some(event_ts);
                                 session_buffer.push((event_ts, tagged));
@@ -6564,7 +6642,8 @@ async fn run_session_window_rule(
                                     true,
                                     Some((s_start, s_end)),
                                     &sink,
-                                ).await;
+                                )
+                                .await;
                             } else {
                                 last_event_ts = Some(event_ts);
                                 session_buffer.push((event_ts, tagged));
@@ -6581,7 +6660,10 @@ async fn run_session_window_rule(
                             let s_start = session_start.take().unwrap_or(last_ts);
                             let s_end = last_ts.saturating_add(timeout_ms);
                             last_event_ts = None;
-                            let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer).into_iter().map(|(_, r)| r).collect();
+                            let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer)
+                                .into_iter()
+                                .map(|(_, r)| r)
+                                .collect();
                             emit_window_batch(
                                 &counters,
                                 &table_manager,
@@ -6591,7 +6673,8 @@ async fn run_session_window_rule(
                                 true,
                                 Some((s_start, s_end)),
                                 &sink,
-                            ).await;
+                            )
+                            .await;
                         }
                     }
                 }
@@ -6676,7 +6759,8 @@ async fn run_session_window_rule(
             true,
             Some((s_start, s_end)),
             &sink,
-        ).await;
+        )
+        .await;
     }
 }
 
@@ -6739,7 +6823,9 @@ async fn run_hopping_window_rule(
                 if event_ts < watermark {
                     // Late arrival beyond tolerance: drop
                 } else {
-                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
                     *cur_max = (*cur_max).max(event_ts);
 
                     let all_active_seen = input_streams
@@ -6915,12 +7001,13 @@ async fn run_sliding_window_rule(
                     .get(&tagged.source)
                     .map(|s| s.as_str())
                     .or(event_time.timestamp_field.as_deref());
-                let event_ts =
-                    extract_event_timestamp(&tagged.data, ts_field);
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    let cur_max = stream_max_ts.entry(tagged.source.clone()).or_insert(event_ts);
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
                     *cur_max = (*cur_max).max(event_ts);
 
                     let all_active_seen = input_streams
@@ -6994,7 +7081,10 @@ async fn run_sliding_window_rule(
                         .await;
                     }
 
-                    let min_pending = pending_triggers.first().map(|(ts, _)| *ts).unwrap_or(event_ts);
+                    let min_pending = pending_triggers
+                        .first()
+                        .map(|(ts, _)| *ts)
+                        .unwrap_or(event_ts);
                     let retain_ts = min_pending.min(event_ts).saturating_sub(window_millis);
                     et_buffer.retain(|(ts, _)| *ts >= retain_ts);
                 }
@@ -7017,8 +7107,7 @@ async fn run_sliding_window_rule(
                     }
                     let now_ms = chrono::Utc::now().timestamp_millis();
                     let start_ms = now_ms.saturating_sub(window_millis);
-                    let batch: Vec<TaggedRow> =
-                        buffer.iter().map(|(_, row)| row.clone()).collect();
+                    let batch: Vec<TaggedRow> = buffer.iter().map(|(_, row)| row.clone()).collect();
                     emit_window_batch(
                         &counters,
                         &table_manager,
@@ -7129,16 +7218,22 @@ async fn run_state_window_rule(
                     None => String::new(),
                 };
 
-                let state = partitions.entry(partition_key).or_insert_with(|| StateWindowState {
-                    on_begin: false,
-                    start_time: 0,
-                    buffer: Vec::new(),
-                });
+                let state = partitions
+                    .entry(partition_key)
+                    .or_insert_with(|| StateWindowState {
+                        on_begin: false,
+                        start_time: 0,
+                        buffer: Vec::new(),
+                    });
 
                 match &end_condition {
                     Some(end_cond) => {
                         if !state.on_begin {
-                            if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                            if Evaluator::eval_bool_stateful(
+                                &start_condition,
+                                &tagged.data,
+                                &rule_state,
+                            ) {
                                 state.start_time = ts;
                                 state.on_begin = true;
                                 state.buffer.push(tagged);
@@ -7164,12 +7259,20 @@ async fn run_state_window_rule(
                     }
                     None => {
                         if !state.on_begin {
-                            if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                            if Evaluator::eval_bool_stateful(
+                                &start_condition,
+                                &tagged.data,
+                                &rule_state,
+                            ) {
                                 state.start_time = ts;
                                 state.on_begin = true;
                                 state.buffer.push(tagged);
                             }
-                        } else if Evaluator::eval_bool_stateful(&start_condition, &tagged.data, &rule_state) {
+                        } else if Evaluator::eval_bool_stateful(
+                            &start_condition,
+                            &tagged.data,
+                            &rule_state,
+                        ) {
                             let batch = std::mem::take(&mut state.buffer);
                             let prev_start = state.start_time;
                             state.start_time = ts;
@@ -7252,8 +7355,14 @@ async fn get_rule_status(State(state): State<AppState>, Path(name): Path<String>
     if let Some(status) = state.rule_manager.get_rule_status(&name) {
         let mut val = serde_json::to_value(&status).unwrap_or(Value::Null);
         if let Value::Object(ref mut map) = val {
-            map.insert("last_exception".to_string(), Value::String(status.last_exception.clone()));
-            map.insert("exceptions_total".to_string(), Value::from(status.exceptions_total));
+            map.insert(
+                "last_exception".to_string(),
+                Value::String(status.last_exception.clone()),
+            );
+            map.insert(
+                "exceptions_total".to_string(),
+                Value::from(status.exceptions_total),
+            );
         }
         Json(val).into_response()
     } else {
@@ -7342,7 +7451,11 @@ fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
                 collect_called_functions(e, out);
             }
         }
-        Expr::Over { call, partition_by, when } => {
+        Expr::Over {
+            call,
+            partition_by,
+            when,
+        } => {
             collect_called_functions(call, out);
             if let Some(p) = partition_by {
                 collect_called_functions(p, out);
@@ -7351,7 +7464,8 @@ fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
                 collect_called_functions(w, out);
             }
         }
-        Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::Literal(_) => {}
+        Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::Literal(_) => {
+        }
     }
 }
 
@@ -7425,12 +7539,16 @@ fn check_rule_functions(state: &AppState, stmt: &SelectStmt) -> Option<Response>
 }
 
 fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(), String> {
-    let Some(opts) = options else { return Ok(()); };
+    let Some(opts) = options else {
+        return Ok(());
+    };
     for (k, v) in opts {
         match k.as_str() {
             "qos" => {
                 if !v.is_i64() && !v.is_u64() {
-                    return Err("invalid rule json: qos must be an integer (0, 1, or 2)".to_string());
+                    return Err(
+                        "invalid rule json: qos must be an integer (0, 1, or 2)".to_string()
+                    );
                 }
                 let q = v.as_i64().unwrap_or(-1);
                 if !(0..=2).contains(&q) {
@@ -7457,7 +7575,10 @@ fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), Strin
             if kind.eq_ignore_ascii_case("rest") || kind.eq_ignore_ascii_case("http") {
                 if let Some(m) = opts.get("method").and_then(|v| v.as_str()) {
                     let m_upper = m.to_uppercase();
-                    if !matches!(m_upper.as_str(), "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "PATCH") {
+                    if !matches!(
+                        m_upper.as_str(),
+                        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "PATCH"
+                    ) {
                         return Err(format!("Not supported HTTP method {}.", m));
                     }
                 }
@@ -7611,7 +7732,9 @@ async fn validate_rule(
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
                         Ok(stmt) => {
-                            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref()) {
+                            if let Some(resp) =
+                                reject_invalid_rule(&state, &stmt, rule.options.as_ref())
+                            {
                                 return resp;
                             }
                             check_rule_functions(&state, &stmt).unwrap_or_else(|| {

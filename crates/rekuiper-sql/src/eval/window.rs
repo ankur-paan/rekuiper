@@ -76,11 +76,12 @@ impl Evaluator {
                     || partition_by
                         .as_ref()
                         .is_some_and(|e| Self::contains_aggregate(e))
-                    || when
-                        .as_ref()
-                        .is_some_and(|e| Self::contains_aggregate(e))
+                    || when.as_ref().is_some_and(|e| Self::contains_aggregate(e))
             }
-            Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::Literal(_) => false,
+            Expr::Wildcard
+            | Expr::WildcardModified { .. }
+            | Expr::Identifier(_)
+            | Expr::Literal(_) => false,
         }
     }
 

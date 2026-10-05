@@ -48,7 +48,12 @@ const T0: i64 = 1_704_067_200_000;
 fn test_datetime_now() {
     let v = eval_one("SELECT now() AS v FROM demo", &empty());
     let s = v.as_str().expect("now() returns a string");
-    assert_eq!(s.len(), 19, "now() format should be YYYY-MM-DD HH:mm:ss: {}", s);
+    assert_eq!(
+        s.len(),
+        19,
+        "now() format should be YYYY-MM-DD HH:mm:ss: {}",
+        s
+    );
     // Arity is strict.
     assert_eq!(
         eval_one("SELECT now(1) AS v FROM demo", &empty()),
@@ -1409,7 +1414,13 @@ fn test_datetime_calendar_parity() {
     for func in ["current_timestamp", "local_timestamp"] {
         let v = eval_one(&format!("SELECT {}() AS v FROM demo", func), &empty);
         let s = v.as_str().expect("timestamp alias returns a string");
-        assert_eq!(s.len(), 19, "{} format should be YYYY-MM-DD HH:mm:ss: {}", func, s);
+        assert_eq!(
+            s.len(),
+            19,
+            "{} format should be YYYY-MM-DD HH:mm:ss: {}",
+            func,
+            s
+        );
     }
 
     // Unix time formatting (1700000000000 = 2023-11-14 22:13:20 UTC).
@@ -2269,7 +2280,10 @@ fn test_newly_implemented_functions() {
         json!("1234567.89")
     );
     assert_eq!(
-        eval_one("SELECT format(1234567.891, 2, 'en_US') AS v FROM demo", &empty()),
+        eval_one(
+            "SELECT format(1234567.891, 2, 'en_US') AS v FROM demo",
+            &empty()
+        ),
         json!("1,234,567.89")
     );
     assert_eq!(

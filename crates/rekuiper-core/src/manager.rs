@@ -157,7 +157,9 @@ impl TableManager {
         let key_col = def.as_ref().and_then(|d| {
             d.options
                 .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("KEY") || k.eq_ignore_ascii_case("PRIMARY_KEY"))
+                .find(|(k, _)| {
+                    k.eq_ignore_ascii_case("KEY") || k.eq_ignore_ascii_case("PRIMARY_KEY")
+                })
                 .map(|(_, v)| v.clone())
         });
         let retain_size: Option<usize> = def.as_ref().and_then(|d| {
