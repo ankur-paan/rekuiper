@@ -70,7 +70,7 @@ async fn test_rest_sink_blocks_private_net_by_default() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -158,7 +158,7 @@ async fn test_rest_sink_allows_private_net_when_configured() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s_allowed () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s_allowed () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -188,21 +188,23 @@ async fn test_rest_sink_allows_private_net_when_configured() {
         .unwrap();
     assert!(resp.status().is_success());
 
-    // Wait for delivery to mock server
+    // Wait for completed delivery, not just the request entering the mock handler.
+    let mut status = json!(null);
     for _ in 0..50 {
-        if requests_received.load(Ordering::SeqCst) > 0 {
+        status = client
+            .get(format!("{}/rules/r_allowed/status", base_url))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+        if status["sinkRecordsOutTotal"] == json!(1) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert_eq!(requests_received.load(Ordering::SeqCst), 1);
-
-    let resp = client
-        .get(format!("{}/rules/r_allowed/status", base_url))
-        .send()
-        .await
-        .unwrap();
-    let status: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(status["exceptionsTotal"], json!(0));
     assert_eq!(status["sinkRecordsOutTotal"], json!(1));
 }

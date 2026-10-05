@@ -41,7 +41,7 @@ async fn test_validation_group_by_requires_window() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -95,7 +95,7 @@ async fn test_validation_event_time_requires_timestamp_option() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -132,7 +132,7 @@ async fn test_stateless_single_row_aggregate() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -174,7 +174,7 @@ async fn test_tumbling_window_zero_duration_emits_nothing() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -219,7 +219,7 @@ async fn test_window_start_and_end_event_time() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\", TIMESTAMP=\"ts\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
         }))
         .send()
         .await
@@ -291,7 +291,7 @@ async fn test_window_filter_clause() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -338,7 +338,7 @@ async fn test_hopping_window_event_time() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\", TIMESTAMP=\"ts\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
         }))
         .send()
         .await
@@ -418,7 +418,7 @@ async fn test_session_window_event_time_gap() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\", TIMESTAMP=\"ts\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
         }))
         .send()
         .await
@@ -504,7 +504,7 @@ async fn test_sliding_window_over_when() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -557,7 +557,7 @@ async fn test_state_window_two_conditions() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -619,7 +619,7 @@ async fn test_state_window_single_condition() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await

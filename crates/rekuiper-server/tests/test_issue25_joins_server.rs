@@ -41,7 +41,7 @@ async fn test_defect4_reject_join_without_window_for_multiple_streams() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM a () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM a () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -51,7 +51,7 @@ async fn test_defect4_reject_join_without_window_for_multiple_streams() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM b () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM b () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -125,11 +125,11 @@ async fn test_defect1_stream_table_lookup_join() {
     let (base_url, _handle, state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();
 
-    // Create stream s
+    // HTTP injection publishes under the stream name, so no memory bus alias is needed.
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (DATASOURCE=\"j/s\", FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -280,7 +280,7 @@ async fn test_defect2_event_time_window_stream_join_pairing() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM a () WITH (DATASOURCE=\"j/a\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
+            "sql": "CREATE STREAM a () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
         }))
         .send()
         .await
@@ -291,7 +291,7 @@ async fn test_defect2_event_time_window_stream_join_pairing() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM b () WITH (DATASOURCE=\"j/b\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
+            "sql": "CREATE STREAM b () WITH (TYPE=\"memory\", FORMAT=\"json\", TIMESTAMP=\"ts\")"
         }))
         .send()
         .await
