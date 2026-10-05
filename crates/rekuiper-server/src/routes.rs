@@ -7024,8 +7024,9 @@ async fn run_sliding_window_rule(
                     }
 
                     while !pending_triggers.is_empty() && watermark >= pending_triggers[0].1 {
-                        // Delay extends the right edge to include arrivals after the trigger.
-                        let (trigger_ts, window_end_ts) = pending_triggers.remove(0);
+                        // Close at the current watermark, which may jump past the delay deadline.
+                        let (trigger_ts, _) = pending_triggers.remove(0);
+                        let window_end_ts = watermark;
                         let start_ts = trigger_ts.saturating_sub(window_millis);
                         let batch: Vec<TaggedRow> = et_buffer
                             .iter()

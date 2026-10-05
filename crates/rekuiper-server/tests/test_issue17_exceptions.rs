@@ -37,11 +37,11 @@ async fn test_select_runtime_error_drops_row_and_counts_exception() {
     let (base_url, _handle, state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();
 
-    // Create stream s
+    // Inputs are injected over HTTP; a memory source isolates SQL errors from broker failures.
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -143,11 +143,11 @@ async fn test_select_runtime_error_with_send_error_true() {
     let (base_url, _handle, state) = spawn_test_server_with_state().await;
     let client = reqwest::Client::new();
 
-    // Create stream s
+    // Inputs are injected over HTTP; a memory source isolates SQL errors from broker failures.
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -205,7 +205,7 @@ async fn test_math_and_cast_runtime_errors() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
@@ -322,7 +322,7 @@ async fn test_where_clause_runtime_error() {
     let resp = client
         .post(format!("{}/streams", base_url))
         .json(&json!({
-            "sql": "CREATE STREAM s () WITH (FORMAT=\"json\")"
+            "sql": "CREATE STREAM s () WITH (TYPE=\"memory\", FORMAT=\"json\")"
         }))
         .send()
         .await
