@@ -1476,12 +1476,14 @@ async fn create_table(
                 stream_fields: to_stream_fields(stmt.fields),
                 options: stmt.options,
             };
+            let table_name = stmt.name.clone();
             if let Err(e) = state.table_manager.create_table(table_def).await {
                 return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
             }
+            bootstrap_table_source(&state, &table_name);
             (
                 StatusCode::CREATED,
-                format!("Table {} is created.", stmt.name),
+                format!("Table {} is created.", table_name),
             )
                 .into_response()
         }
@@ -1514,6 +1516,7 @@ async fn delete_table(State(state): State<AppState>, Path(name): Path<String>) -
     if let Err(resp) = check_valid_name(&name) {
         return resp;
     }
+    cancel_table_source(&state, &name);
     match state.table_manager.delete_table(&name).await {
         Ok(_) => (StatusCode::OK, format!("Table {} is dropped.", name)).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
@@ -1561,9 +1564,11 @@ async fn update_table(
         stream_fields: to_stream_fields(stmt.fields),
         options: stmt.options,
     };
+    cancel_table_source(&state, &name);
     if let Err(e) = state.table_manager.update_table(table_def).await {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
+    bootstrap_table_source(&state, &name);
     (StatusCode::OK, format!("Table {} is replaced.", name)).into_response()
 }
 
@@ -1710,6 +1715,12 @@ async fn create_rule(
     State(state): State<AppState>,
     Json(mut rule): Json<RuleDefinition>,
 ) -> Response {
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    if let Err(e) = validate_sink_actions(&rule.actions) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     // Graph rules carry no SQL: compile the DAG into SQL + actions first.
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
@@ -1730,6 +1741,13 @@ async fn create_rule(
             }
         }
     }
+    if rule.actions.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
+    }
     let mut parser = Parser::new(&rule.sql);
     let select_stmt = match parser.parse_select() {
         Ok(s) => s,
@@ -1737,7 +1755,7 @@ async fn create_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref(), false) {
         return resp;
     }
 
@@ -1757,6 +1775,7 @@ async fn create_rule(
         &state.source_configs,
         &state.http_client,
         &state.trace_manager,
+        &state.config,
         rule_id.clone(),
         select_stmt.clone(),
         rule.actions.clone(),
@@ -2040,9 +2059,25 @@ fn resolve_payload_format(
     def: &rekuiper_core::model::StreamDefinition,
     rule_id: &str,
 ) -> Option<rekuiper_connectors::PayloadFormat> {
+    resolve_payload_format_options(
+        schemas,
+        &def.options,
+        &def.stream_fields,
+        &def.name,
+        rule_id,
+    )
+}
+
+fn resolve_payload_format_options(
+    schemas: &SchemaManager,
+    options: &HashMap<String, String>,
+    stream_fields: &[StreamField],
+    source_name: &str,
+    rule_id: &str,
+) -> Option<rekuiper_connectors::PayloadFormat> {
     use rekuiper_connectors::{DelimitedCodec, PayloadFormat};
     let opt = |name: &str| {
-        def.options
+        options
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.trim())
@@ -2056,7 +2091,7 @@ fn resolve_payload_format(
                 .filter(|d| !d.is_empty())
                 .map(DelimitedCodec::delimiter_from_name)
                 .unwrap_or(',');
-            let headers = def.stream_fields.iter().map(|f| f.name.clone()).collect();
+            let headers = stream_fields.iter().map(|f| f.name.clone()).collect();
             Some(PayloadFormat::Delimited(DelimitedCodec::new(
                 delimiter, headers,
             )))
@@ -2064,15 +2099,15 @@ fn resolve_payload_format(
         "protobuf" => match resolve_proto_message(schemas, opt("SCHEMAID").unwrap_or("")) {
             Ok(message) => Some(PayloadFormat::Protobuf(Arc::new(message))),
             Err(e) => {
-                tracing::warn!("[RULE {}] stream '{}': {}", rule_id, def.name, e);
+                tracing::warn!("[RULE {}] source '{}': {}", rule_id, source_name, e);
                 None
             }
         },
         other => {
             tracing::warn!(
-                "[RULE {}] stream '{}': FORMAT '{}' is not supported for this source; decoding as JSON",
+                "[RULE {}] source '{}': FORMAT '{}' is not supported for this source; decoding as JSON",
                 rule_id,
-                def.name,
+                source_name,
                 other
             );
             Some(PayloadFormat::Json)
@@ -2119,6 +2154,226 @@ fn cancel_stream_sources(state: &AppState, stream_name: &str) {
     }
     state.stream_active_rules.write().remove(stream_name);
     state.stream_attach_meta.write().remove(stream_name);
+}
+
+fn cancel_table_source(state: &AppState, table_name: &str) {
+    let table_key = format!("$table/{}", table_name);
+    if let Some(cancels) = state.stream_source_cancels.write().remove(&table_key) {
+        for tx in cancels {
+            let _ = tx.send(true);
+        }
+    }
+}
+
+fn resolve_mqtt_table_source(
+    table_def: &TableDefinition,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    schemas: &SchemaManager,
+) -> Option<MqttConfig> {
+    if let Some(kind) = table_def.options.get("TYPE") {
+        if !kind.trim().is_empty() && !kind.eq_ignore_ascii_case("mqtt") {
+            return None;
+        }
+    }
+    let mut config = MqttConfig::default();
+    let conf_key = table_def
+        .options
+        .iter()
+        .find(|(k, _)| {
+            k.eq_ignore_ascii_case("CONF_KEY")
+                || k.eq_ignore_ascii_case("confKey")
+                || k.eq_ignore_ascii_case("connectionSelector")
+        })
+        .map(|(_, v)| v.trim());
+    if let Some(key) = conf_key {
+        if !key.is_empty() {
+            let lookup1 = format!("mqtt/{}", key);
+            let configs_guard = source_configs.read();
+            let conf_val = configs_guard
+                .get(&lookup1)
+                .or_else(|| configs_guard.get(key))
+                .or_else(|| configs_guard.get(&format!("connections/{}", key)))
+                .cloned();
+            drop(configs_guard);
+            if let Some(val) = conf_val {
+                if let Ok(stored) = serde_json::from_value::<MqttConfig>(val.clone()) {
+                    config = stored;
+                } else if let Some(srv) = val.get("server").and_then(|v| v.as_str()) {
+                    if !srv.trim().is_empty() {
+                        config.server = srv.to_string();
+                    }
+                    if let Some(u) = val.get("username").and_then(|v| v.as_str()) {
+                        config.username = Some(u.to_string());
+                    }
+                    if let Some(p) = val.get("password").and_then(|v| v.as_str()) {
+                        config.password = Some(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if let Some((_, srv)) = table_def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("SERVER"))
+    {
+        let srv = srv.trim();
+        if !srv.is_empty() {
+            config.server = srv.to_string();
+        }
+    }
+    if let Some((_, top)) = table_def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("topic"))
+    {
+        let top = top.trim();
+        if !top.is_empty() {
+            config.topic = top.to_string();
+        }
+    }
+    if config.topic.trim().is_empty() {
+        config.topic = table_def.name.clone();
+    }
+    if let Some(id) = table_def
+        .options
+        .get("CLIENTID")
+        .or_else(|| table_def.options.get("CLIENT_ID"))
+    {
+        if !id.trim().is_empty() {
+            config.client_id = Some(id.clone());
+        }
+    }
+    if let Some(user) = table_def.options.get("USERNAME") {
+        if !user.is_empty() {
+            config.username = Some(user.clone());
+        }
+    }
+    if let Some(pass) = table_def.options.get("PASSWORD") {
+        if !pass.is_empty() {
+            config.password = Some(pass.clone());
+        }
+    }
+    if let Some(qos) = table_def.options.get("QOS") {
+        if let Ok(q) = qos.trim().parse::<u8>() {
+            config.qos = q;
+        }
+    }
+    config.format = resolve_payload_format_options(
+        schemas,
+        &table_def.options,
+        &table_def.stream_fields,
+        &table_def.name,
+        &table_def.name,
+    )?;
+    Some(config)
+}
+
+fn bootstrap_table_source(state: &AppState, table_name: &str) {
+    let table_key = format!("$table/{}", table_name);
+    if state.stream_source_cancels.read().contains_key(&table_key) {
+        return;
+    }
+    let Some(def) = state.table_manager.get_table(table_name) else {
+        return;
+    };
+    let datasource = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("DATASOURCE") || k.eq_ignore_ascii_case("TOPIC"))
+        .map(|(_, v)| v.trim().to_string())
+        .unwrap_or_else(|| table_name.to_string());
+    let table_type = def
+        .options
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("TYPE"))
+        .map(|(_, v)| v.trim().to_string())
+        .unwrap_or_default();
+
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    state
+        .stream_source_cancels
+        .write()
+        .insert(table_key.clone(), vec![cancel_tx]);
+
+    let t_name = table_name.to_string();
+    let table_mgr = state.table_manager.clone();
+
+    // 1. Listen on the stream bus for this table's datasource topic (handles memory sinks and internal publication)
+    let mut bus_rx = state.stream_bus.subscribe(&datasource);
+    let mut table_bus_rx = if datasource != table_name {
+        Some(state.stream_bus.subscribe(table_name))
+    } else {
+        None
+    };
+    let mut bus_cancel_rx = cancel_rx.clone();
+    let t_name_bus = t_name.clone();
+    let table_mgr_bus = table_mgr.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                record = bus_rx.recv() => {
+                    match record {
+                        Some(rec) => table_mgr_bus.insert_table_row(&t_name_bus, rec.data),
+                        None => break,
+                    }
+                }
+                record = async {
+                    if let Some(ref mut rx) = table_bus_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    match record {
+                        Some(rec) => table_mgr_bus.insert_table_row(&t_name_bus, rec.data),
+                        None => break,
+                    }
+                }
+                changed = bus_cancel_rx.changed() => {
+                    if changed.is_err() || *bus_cancel_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // 2. If table is MQTT source (TYPE="mqtt" or default when not memory/file/redis/sql):
+    let is_memory = table_type.eq_ignore_ascii_case("memory");
+    let is_redis = table_type.eq_ignore_ascii_case("redis");
+    let is_sql = table_type.eq_ignore_ascii_case("sql");
+    let is_file = table_type.eq_ignore_ascii_case("file");
+    if !is_memory && !is_redis && !is_sql && !is_file {
+        if let Some(config) =
+            resolve_mqtt_table_source(&def, &state.source_configs, &state.schema_manager)
+        {
+            let bus_topic = format!("$table_mqtt/{}", table_name);
+            let stream_tx = state.stream_bus.get_or_create(&bus_topic);
+            let mut mqtt_rx = state.stream_bus.subscribe(&bus_topic);
+            let mut mqtt_cancel = cancel_rx.clone();
+            let t_name_mqtt = t_name.clone();
+            let table_mgr_mqtt = table_mgr.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        record = mqtt_rx.recv() => {
+                            match record {
+                                Some(rec) => table_mgr_mqtt.insert_table_row(&t_name_mqtt, rec.data),
+                                None => break,
+                            }
+                        }
+                        changed = mqtt_cancel.changed() => {
+                            if changed.is_err() || *mqtt_cancel.borrow() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            MqttSource::new(config, stream_tx).spawn(cancel_rx.clone());
+        }
+    }
 }
 
 fn register_rule_stream_source(
@@ -2462,19 +2717,23 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     }
 }
 
-/// Start source producers for a rule: its FROM stream plus every joined
-/// stream (stream-stream joins fan in both sides; table targets resolve
-/// per-row through lookups and need no producer).
+/// Start source producers for a rule: its FROM source plus every joined
+/// source (streams fan in messages; table targets bootstrap their source listeners).
 fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectStmt) {
     // Metadata costs an allocation per message: attach it only for rules
     // that read it.
     let needs_meta = stmt_called_functions(select_stmt)
         .iter()
         .any(|f| f.eq_ignore_ascii_case("meta") || f.eq_ignore_ascii_case("mqtt"));
-    bootstrap_stream_sources(state, rule_id, &select_stmt.from, needs_meta);
+    if state.table_manager.get_table(&select_stmt.from).is_some() {
+        bootstrap_table_source(state, &select_stmt.from);
+    } else {
+        bootstrap_stream_sources(state, rule_id, &select_stmt.from, needs_meta);
+    }
     for join in &select_stmt.joins {
-        if state.table_manager.get_table(&join.target).is_none() && join.target != select_stmt.from
-        {
+        if state.table_manager.get_table(&join.target).is_some() {
+            bootstrap_table_source(state, &join.target);
+        } else if join.target != select_stmt.from {
             bootstrap_stream_sources(state, rule_id, &join.target, needs_meta);
         }
     }
@@ -2484,6 +2743,9 @@ fn bootstrap_rule_sources(state: &AppState, rule_id: &str, select_stmt: &SelectS
 /// persisted status is `running`, so a restarted daemon resumes processing
 /// without manual intervention.
 pub async fn restore_running_rules(state: &AppState) {
+    for table_name in state.table_manager.list_tables() {
+        bootstrap_table_source(state, &table_name);
+    }
     for rule in state.rule_manager.list_rules() {
         let running = state
             .rule_manager
@@ -2508,6 +2770,7 @@ pub async fn restore_running_rules(state: &AppState) {
             &state.source_configs,
             &state.http_client,
             &state.trace_manager,
+            &state.config,
             rule.id.clone(),
             select_stmt.clone(),
             rule.actions.clone(),
@@ -2890,6 +3153,124 @@ fn resolve_source_topic(stream_manager: &StreamManager, stream_name: &str) -> St
     stream_name.to_string()
 }
 
+#[derive(Debug, Clone, Default)]
+struct CommonSinkOpts {
+    send_single: bool,
+    send_nil_field: bool,
+    fields: Option<Vec<String>>,
+    exclude_fields: Option<Vec<String>>,
+    data_field: Option<String>,
+}
+
+fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
+    let send_single = opts
+        .get("sendSingle")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let send_nil_field = opts
+        .get("sendNilField")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let fields = opts.get("fields").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect()
+    });
+    let exclude_fields = opts
+        .get("excludeFields")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+    let data_field = opts
+        .get("dataField")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    CommonSinkOpts {
+        send_single,
+        send_nil_field,
+        fields,
+        exclude_fields,
+        data_field,
+    }
+}
+
+fn clean_sink_value(v: &Value, send_nil_field: bool) -> Value {
+    match v {
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| clean_sink_value(item, send_nil_field))
+                .collect(),
+        ),
+        Value::Object(obj) => {
+            let mut map = std::collections::BTreeMap::new();
+            for (k, val) in obj {
+                if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                    continue;
+                }
+                if val.is_null() && !send_nil_field {
+                    continue;
+                }
+                map.insert(k.clone(), clean_sink_value(val, send_nil_field));
+            }
+            serde_json::to_value(map).unwrap_or_else(|_| Value::Object(obj.clone()))
+        }
+        other => other.clone(),
+    }
+}
+
+fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) -> Value {
+    if data.contains_key("__raw_error__") {
+        let mut map = std::collections::BTreeMap::new();
+        if let Some(err) = data.get("error") {
+            map.insert("error".to_string(), err.clone());
+        }
+        if let Some(rid) = data.get("rule_id") {
+            map.insert("rule_id".to_string(), rid.clone());
+        }
+        return serde_json::to_value(map).unwrap_or(Value::Null);
+    }
+    if let Some(ref df) = opts.data_field {
+        if let Some(val) = data.get(df) {
+            return clean_sink_value(val, opts.send_nil_field);
+        }
+        return Value::Null;
+    }
+    let mut map = std::collections::BTreeMap::new();
+    if let Some(ref fields) = opts.fields {
+        for f in fields {
+            let val = data.get(f).unwrap_or(&Value::Null);
+            map.insert(f.clone(), clean_sink_value(val, true));
+        }
+    } else {
+        for (k, v) in data {
+            if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                continue;
+            }
+            if let Some(ref ex) = opts.exclude_fields {
+                if ex.contains(k) {
+                    continue;
+                }
+            }
+            if v.is_null() && !opts.send_nil_field {
+                continue;
+            }
+            map.insert(k.clone(), clean_sink_value(v, opts.send_nil_field));
+        }
+    }
+    serde_json::to_value(map).unwrap_or(Value::Null)
+}
+
+fn to_sink_payload(val: Value, send_single: bool) -> Value {
+    if send_single {
+        val
+    } else {
+        Value::Array(vec![val])
+    }
+}
+
 /// One sink action parsed once at rule start (never per record).
 #[derive(Debug, Clone)]
 enum PreparedAction {
@@ -2902,18 +3283,29 @@ enum PreparedAction {
         parquet: bool,
         has_header: bool,
         delimiter: String,
+        opts: CommonSinkOpts,
     },
     Rest {
         url: String,
+        method: String,
+        headers: HashMap<String, String>,
+        body_type: String,
         template: Option<String>,
+        opts: CommonSinkOpts,
+        format: Option<String>,
+        delimiter: String,
     },
     Mqtt {
         config: Box<MqttConfig>,
         template: Option<String>,
+        opts: CommonSinkOpts,
+        format: Option<String>,
+        delimiter: String,
     },
     WebSocket {
         url: String,
         template: Option<String>,
+        opts: CommonSinkOpts,
     },
     Redis {
         config: Box<RedisSinkConfig>,
@@ -2926,6 +3318,7 @@ enum PreparedAction {
     },
     Memory {
         topic: String,
+        send_nil_field: bool,
     },
     RabbitMq {
         config: Box<RabbitMqConfig>,
@@ -2977,6 +3370,7 @@ fn prepare_actions(
                                 .extension()
                                 .and_then(|ext| ext.to_str())
                                 .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
+                        let common_opts = parse_common_opts(opts);
                         out.push(PreparedAction::File {
                             path: sink.path.clone(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -2988,34 +3382,94 @@ fn prepare_actions(
                                 .clone()
                                 .filter(|d| !d.is_empty())
                                 .unwrap_or_else(|| ",".to_string()),
+                            opts: common_opts,
                         });
                     }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "file".to_string(),
                     }),
                 },
-                "rest" | "http" => out.push(PreparedAction::Rest {
-                    url: opts
+                "rest" | "http" => {
+                    let url = opts
                         .get("url")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    template: action_template(opts).map(|s| s.to_string()),
-                }),
-                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
-                    Ok(config) => out.push(PreparedAction::Mqtt {
-                        config: Box::new(config),
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("http://localhost")
+                        .to_string();
+                    let method = opts
+                        .get("method")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("post")
+                        .to_uppercase();
+                    let body_type = opts
+                        .get("bodyType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("json")
+                        .to_lowercase();
+                    let mut headers = HashMap::new();
+                    if let Some(h) = opts.get("headers").and_then(|v| v.as_object()) {
+                        for (k, v) in h {
+                            if let Some(s) = v.as_str() {
+                                headers.insert(k.clone(), s.to_string());
+                            } else {
+                                headers.insert(k.clone(), v.to_string());
+                            }
+                        }
+                    }
+                    let format = opts
+                        .get("format")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let delimiter = opts
+                        .get("delimiter")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(",")
+                        .to_string();
+                    let common_opts = parse_common_opts(opts);
+                    out.push(PreparedAction::Rest {
+                        url,
+                        method,
+                        headers,
+                        body_type,
                         template: action_template(opts).map(|s| s.to_string()),
-                    }),
+                        opts: common_opts,
+                        format,
+                        delimiter,
+                    });
+                }
+                "mqtt" => match serde_json::from_value::<MqttConfig>(opts.clone()) {
+                    Ok(config) => {
+                        let format = opts
+                            .get("format")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let delimiter = opts
+                            .get("delimiter")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(",")
+                            .to_string();
+                        let common_opts = parse_common_opts(opts);
+                        out.push(PreparedAction::Mqtt {
+                            config: Box::new(config),
+                            template: action_template(opts).map(|s| s.to_string()),
+                            opts: common_opts,
+                            format,
+                            delimiter,
+                        });
+                    }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "mqtt".to_string(),
                     }),
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
-                    Ok(ws_cfg) => out.push(PreparedAction::WebSocket {
-                        url: ws_cfg.target_url(),
-                        template: action_template(opts).map(|s| s.to_string()),
-                    }),
+                    Ok(ws_cfg) => {
+                        let common_opts = parse_common_opts(opts);
+                        out.push(PreparedAction::WebSocket {
+                            url: ws_cfg.target_url(),
+                            template: action_template(opts).map(|s| s.to_string()),
+                            opts: common_opts,
+                        });
+                    }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "websocket".to_string(),
                     }),
@@ -3046,13 +3500,20 @@ fn prepare_actions(
                         kind: "sql".to_string(),
                     }),
                 },
-                "memory" => out.push(PreparedAction::Memory {
-                    topic: opts
-                        .get("topic")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("default")
-                        .to_string(),
-                }),
+                "memory" => {
+                    let send_nil_field = opts
+                        .get("sendNilField")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    out.push(PreparedAction::Memory {
+                        topic: opts
+                            .get("topic")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default")
+                            .to_string(),
+                        send_nil_field,
+                    });
+                }
                 "rabbitmq" | "amqp" => {
                     match serde_json::from_value::<RabbitMqConfig>(opts.clone()) {
                         Ok(config) => out.push(PreparedAction::RabbitMq {
@@ -3251,8 +3712,9 @@ impl FileBatchWriter {
         Ok(())
     }
 
-    fn push_json(&mut self, data: &HashMap<String, Value>) {
-        if let Ok(mut line) = serde_json::to_string(data) {
+    fn push_json(&mut self, data: &HashMap<String, Value>, opts: &CommonSinkOpts) {
+        let formatted = format_record_for_sink(data, opts);
+        if let Ok(mut line) = serde_json::to_string(&formatted) {
             line.push('\n');
             self.buf.extend_from_slice(line.as_bytes());
             self.pending += 1;
@@ -3267,9 +3729,24 @@ impl FileBatchWriter {
         self.pending += 1;
     }
 
-    fn push_delimited(&mut self, data: &HashMap<String, Value>, delimiter: &str, header: bool) {
-        let mut keys: Vec<String> = data.keys().cloned().collect();
-        keys.sort();
+    fn push_delimited(
+        &mut self,
+        data: &HashMap<String, Value>,
+        delimiter: &str,
+        header: bool,
+        opts: &CommonSinkOpts,
+    ) {
+        let keys: Vec<String> = if let Some(ref f) = opts.fields {
+            f.clone()
+        } else {
+            let mut k: Vec<String> = data
+                .keys()
+                .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                .cloned()
+                .collect();
+            k.sort();
+            k
+        };
         if header && !self.has_header_written {
             let h = keys.join(delimiter);
             self.buf.extend_from_slice(h.as_bytes());
@@ -3335,6 +3812,7 @@ fn spawn_rule_task(
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     http_client: &reqwest::Client,
     trace_manager: &TraceManager,
+    config: &Arc<RwLock<KuiperConfig>>,
     rule_id: String,
     select_stmt: SelectStmt,
     actions: Vec<HashMap<String, Value>>,
@@ -3395,6 +3873,7 @@ fn spawn_rule_task(
     let sink_stream_bus = stream_bus.clone();
     let sink_http_client = http_client.clone();
     let sink_trace_mgr = trace_manager.clone();
+    let sink_config = config.clone();
     let sink_counters = rule_manager
         .rule_counters(&rule_id)
         .unwrap_or_else(|| Arc::new(RuleCounters::default()));
@@ -3468,11 +3947,13 @@ fn spawn_rule_task(
                         &output_record.data,
                         Some(&output_record.data),
                     );
+                    let enable_private_net = sink_config.read().basic.enable_private_net;
                     let ctx = SinkContext {
                         rule_id: &sink_rule_id,
                         rule_mgr: &sink_rule_mgr,
                         stream_bus: &sink_stream_bus,
                         http_client: &sink_http_client,
+                        enable_private_net,
                     };
                     match deliver_record(&mut runtimes, &output_record, &ctx, &mut files).await {
                         Delivery::Delivered => {
@@ -3524,11 +4005,13 @@ fn spawn_rule_task(
                         sink_counters.sink_out.fetch_add(pending_file_records, Relaxed);
                         pending_file_records = 0;
                     }
+                    let enable_private_net = sink_config.read().basic.enable_private_net;
                     let ctx = SinkContext {
                         rule_id: &sink_rule_id,
                         rule_mgr: &sink_rule_mgr,
                         stream_bus: &sink_stream_bus,
                         http_client: &sink_http_client,
+                        enable_private_net,
                     };
                     let live_recent = last_live.elapsed() < SINK_TICK * 2;
                     for rt in runtimes.iter_mut() {
@@ -3549,6 +4032,29 @@ fn spawn_rule_task(
     // Event-time mode for windowed rules: boundaries derive from payload
     // timestamps (stream TIMESTAMP field or well-known keys) instead of the
     // wall clock, with a late-tolerance grace window for out-of-order rows.
+    let mut source_ts_fields = HashMap::new();
+    let from_topic = resolve_source_topic(stream_manager, &select_stmt.from);
+    if let Some(s) = stream_manager.get_stream(&from_topic) {
+        if let Some((_, v)) = s
+            .options
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
+        {
+            source_ts_fields.insert(select_stmt.from.clone(), v.clone());
+        }
+    }
+    for join in &select_stmt.joins {
+        let topic = resolve_source_topic(stream_manager, &join.target);
+        if let Some(s) = stream_manager.get_stream(&topic) {
+            if let Some((_, v)) = s
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
+            {
+                source_ts_fields.insert(join.target.clone(), v.clone());
+            }
+        }
+    }
     let event_time = EventTimeConfig {
         enabled: rule_options
             .as_ref()
@@ -3560,14 +4066,8 @@ fn spawn_rule_task(
             .and_then(|o| o.get("lateTolerance"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0),
-        timestamp_field: stream_manager
-            .get_stream(&resolve_source_topic(stream_manager, &select_stmt.from))
-            .and_then(|s| {
-                s.options
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("TIMESTAMP"))
-                    .map(|(_, v)| v.clone())
-            }),
+        timestamp_field: source_ts_fields.get(&select_stmt.from).cloned(),
+        source_timestamp_fields: source_ts_fields,
     };
 
     // Hot-path handles cloned once: rule loops bump lock-free atomics and
@@ -3606,21 +4106,33 @@ fn spawn_rule_task(
             confs.clone(),
         )),
         Some(WindowDef::TumblingTime { unit, length }) => {
-            let duration = tumbling_window_duration(&unit, length);
-            tokio::spawn(run_tumbling_window_rule(
-                loop_counters,
-                loop_running,
-                rule_id.clone(),
-                select_stmt,
-                rx,
-                duration,
-                sink_tx,
-                event_time,
-                send_error,
-                join_rxs,
-                tables.clone(),
-                confs.clone(),
-            ))
+            if length == 0 {
+                tokio::spawn(async move {
+                    let mut rx = rx;
+                    while rx.recv().await.is_some() {
+                        if !is_rule_running(&loop_running) {
+                            continue;
+                        }
+                        loop_counters.inc_source(1);
+                    }
+                })
+            } else {
+                let duration = tumbling_window_duration(&unit, length);
+                tokio::spawn(run_tumbling_window_rule(
+                    loop_counters,
+                    loop_running,
+                    rule_id.clone(),
+                    select_stmt,
+                    rx,
+                    duration,
+                    sink_tx,
+                    event_time,
+                    send_error,
+                    join_rxs,
+                    tables.clone(),
+                    confs.clone(),
+                ))
+            }
         }
         Some(WindowDef::HoppingTime {
             unit,
@@ -3638,6 +4150,7 @@ fn spawn_rule_task(
                 window_length,
                 hop_interval,
                 sink_tx,
+                event_time,
                 send_error,
                 join_rxs,
                 tables.clone(),
@@ -3671,28 +4184,39 @@ fn spawn_rule_task(
             unit,
             max_duration,
             timeout,
-        }) => {
-            if event_time.enabled {
-                tracing::warn!(
-                    "[RULE {}] SESSIONWINDOW runs on processing time; event-time options are ignored",
-                    rule_id
-                );
-            }
-            tokio::spawn(run_session_window_rule(
-                loop_counters,
-                loop_running,
-                rule_id.clone(),
-                select_stmt,
-                rx,
-                tumbling_window_duration(&unit, max_duration),
-                tumbling_window_duration(&unit, timeout),
-                sink_tx,
-                send_error,
-                join_rxs,
-                tables.clone(),
-                confs.clone(),
-            ))
-        }
+        }) => tokio::spawn(run_session_window_rule(
+            loop_counters,
+            loop_running,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            tumbling_window_duration(&unit, max_duration),
+            tumbling_window_duration(&unit, timeout),
+            sink_tx,
+            event_time,
+            send_error,
+            join_rxs,
+            tables.clone(),
+            confs.clone(),
+        )),
+        Some(WindowDef::State {
+            start_condition,
+            end_condition,
+        }) => tokio::spawn(run_state_window_rule(
+            loop_counters,
+            loop_running,
+            rule_id.clone(),
+            select_stmt,
+            rx,
+            start_condition,
+            end_condition,
+            sink_tx,
+            event_time,
+            send_error,
+            join_rxs,
+            tables.clone(),
+            confs.clone(),
+        )),
     };
     rule_manager.set_rule_handle(&rule_id, handle);
 }
@@ -3720,6 +4244,23 @@ fn check_record_error(data: &HashMap<String, Value>) -> Option<String> {
     None
 }
 
+async fn handle_runtime_error(
+    counters: &RuleCounters,
+    rule_id: &str,
+    send_error: bool,
+    sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    err_msg: String,
+) {
+    counters.record_exception(&err_msg);
+    if send_error {
+        let mut err_data = HashMap::new();
+        err_data.insert("error".to_string(), Value::String(err_msg.clone()));
+        err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
+        err_data.insert("__raw_error__".to_string(), Value::String(err_msg));
+        enqueue_sink_record(counters, sink, StreamRecord::new(err_data)).await;
+    }
+}
+
 /// Handles an upstream error record per the rule `sendError` option. Returns
 /// `true` when the record was an error record (counted as an exception and,
 /// when enabled, forwarded immediately to the sink); the caller must then
@@ -3735,13 +4276,7 @@ async fn handle_error_record(
     let Some(err_msg) = check_record_error(&record.data) else {
         return false;
     };
-    counters.inc_exceptions(1);
-    if send_error {
-        let mut err_data = HashMap::new();
-        err_data.insert("error".to_string(), Value::String(err_msg));
-        err_data.insert("rule_id".to_string(), Value::String(rule_id.to_string()));
-        enqueue_sink_record(counters, sink, StreamRecord::new(err_data)).await;
-    }
+    handle_runtime_error(counters, rule_id, send_error, sink, err_msg).await;
     true
 }
 
@@ -3753,6 +4288,7 @@ struct EventTimeConfig {
     enabled: bool,
     late_tolerance_ms: i64,
     timestamp_field: Option<String>,
+    source_timestamp_fields: HashMap<String, String>,
 }
 
 fn parse_timestamp_val(v: &Value) -> Option<i64> {
@@ -3860,6 +4396,7 @@ struct SinkContext<'a> {
     rule_mgr: &'a RuleManager,
     stream_bus: &'a StreamBus,
     http_client: &'a reqwest::Client,
+    enable_private_net: bool,
 }
 
 /// Why an action did not deliver a record.
@@ -3878,6 +4415,73 @@ enum Delivery {
     Delivered,
     Cached,
     Failed,
+}
+
+/// Check whether an IP address belongs to private/internal networks:
+/// loopback, link-local, RFC 1918, carrier-grade NAT, or unspecified.
+pub fn is_private_or_internal_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 0.0.0.0/8 (current network / unspecified RFC 1122)
+            octets[0] == 0
+                // 127.0.0.0/8 (loopback RFC 1122)
+                || ipv4.is_loopback()
+                // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (private RFC 1918)
+                || ipv4.is_private()
+                // 169.254.0.0/16 (link-local RFC 3927)
+                || ipv4.is_link_local()
+                // 100.64.0.0/10 (carrier-grade NAT RFC 6598)
+                || (octets[0] == 100 && (octets[1] & 0b1100_0000) == 64)
+                // 192.0.0.0/24 (IETF protocol assignments RFC 6890)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+                // 192.0.2.0/24 (TEST-NET-1 RFC 5737)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                // 198.18.0.0/15 (benchmarking RFC 2544)
+                || (octets[0] == 198 && (octets[1] & 0b1111_1110) == 18)
+                // 198.51.100.0/24 (TEST-NET-2 RFC 5737)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                // 203.0.113.0/24 (TEST-NET-3 RFC 5737)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                // 255.255.255.255 (broadcast)
+                || ipv4.is_broadcast()
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            // ::1 (loopback)
+            ipv6.is_loopback()
+                // :: (unspecified)
+                || ipv6.is_unspecified()
+                // fe80::/10 (link-local unicast)
+                || (ipv6.segments()[0] & 0xffc0) == 0xfe80
+                // fc00::/7 (unique local address RFC 4193, includes fd00::/8)
+                || (ipv6.segments()[0] & 0xfe00) == 0xfc00
+                // IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+                || match ipv6.to_ipv4() {
+                    Some(ipv4) => is_private_or_internal_ip(std::net::IpAddr::V4(ipv4)),
+                    None => false,
+                }
+        }
+    }
+}
+
+fn http_op_name(method: &str) -> String {
+    let mut chars = method.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+    }
+}
+
+fn make_internal_net_error(method: &str, url: &str, ip: std::net::IpAddr, port: u16) -> SendError {
+    let op = http_op_name(method);
+    let dial_target = match ip {
+        std::net::IpAddr::V4(v4) => format!("{}:{}", v4, port),
+        std::net::IpAddr::V6(v6) => format!("[{}]:{}", v6, port),
+    };
+    SendError::Permanent(format!(
+        "rest sink fails to send out the data:err={} \"{}\": dial tcp {}: ip {} is in internal network recoverAble=false method={} path=\"{}\"",
+        op, url, dial_target, ip, method, url
+    ))
 }
 
 /// Send one record through one action. File actions buffer into the rule's
@@ -3905,6 +4509,7 @@ async fn send_action(
             parquet,
             has_header,
             delimiter,
+            opts,
         } => {
             if *parquet {
                 rekuiper_connectors::parquet_io::append_record_to_parquet(output, path)
@@ -3914,38 +4519,151 @@ async fn send_action(
                     .entry(path.clone())
                     .or_insert_with(|| FileBatchWriter::new(path.clone()));
                 if *delimited {
-                    writer.push_delimited(&output.data, delimiter, *has_header);
+                    writer.push_delimited(&output.data, delimiter, *has_header, opts);
                 } else if let Some(tpl) = template {
                     writer.push_text(&apply_data_template(
                         tpl,
                         &record_template_map(&output.data),
                     ));
                 } else {
-                    writer.push_json(&output.data);
+                    writer.push_json(&output.data, opts);
                 }
             }
             Ok(())
         }
-        PreparedAction::Rest { url, template } => {
-            let url = destination.unwrap_or(url);
-            if url.is_empty() {
+        PreparedAction::Rest {
+            url,
+            method,
+            headers,
+            body_type,
+            template,
+            opts,
+            format,
+            delimiter,
+        } => {
+            let base_url = destination.unwrap_or(url);
+            if base_url.is_empty() {
                 return Err(SendError::Permanent("rest action missing url".to_string()));
             }
-            let res = match template {
-                Some(tpl) => {
-                    ctx.http_client
-                        .post(url)
-                        .header(reqwest::header::CONTENT_TYPE, "application/json")
-                        .body(apply_data_template(tpl, &record_template_map(&output.data)))
-                        .send()
-                        .await
-                }
-                None => ctx.http_client.post(url).json(&output.data).send().await,
+            let final_url = if base_url.contains("{{") {
+                apply_data_template(base_url, &record_template_map(&output.data))
+            } else {
+                base_url.to_string()
             };
+
+            if !ctx.enable_private_net {
+                if let Ok(url_obj) = reqwest::Url::parse(&final_url) {
+                    let port = url_obj.port_or_known_default().unwrap_or(80);
+                    if let Some(host_str) = url_obj.host_str() {
+                        let cleaned = host_str.trim_start_matches('[').trim_end_matches(']');
+                        if let Ok(ip) = cleaned.parse::<std::net::IpAddr>() {
+                            if is_private_or_internal_ip(ip) {
+                                return Err(make_internal_net_error(method, &final_url, ip, port));
+                            }
+                        } else if let Ok(addrs) = tokio::net::lookup_host((cleaned, port)).await {
+                            for addr in addrs {
+                                if is_private_or_internal_ip(addr.ip()) {
+                                    return Err(make_internal_net_error(
+                                        method,
+                                        &final_url,
+                                        addr.ip(),
+                                        port,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let req_method = match method.as_str() {
+                "GET" => reqwest::Method::GET,
+                "PUT" => reqwest::Method::PUT,
+                "DELETE" => reqwest::Method::DELETE,
+                "HEAD" => reqwest::Method::HEAD,
+                "PATCH" => reqwest::Method::PATCH,
+                _ => reqwest::Method::POST,
+            };
+
+            let mut req_builder = ctx.http_client.request(req_method.clone(), &final_url);
+
+            for (hk, hv) in headers {
+                let final_hv = if hv.contains("{{") {
+                    apply_data_template(hv, &record_template_map(&output.data))
+                } else {
+                    hv.clone()
+                };
+                req_builder = req_builder.header(hk.as_str(), final_hv);
+            }
+
+            if req_method == reqwest::Method::GET || body_type == "none" {
+                // No body, no content-type
+            } else if body_type == "text" {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        to_sink_payload(formatted, opts.send_single).to_string()
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            } else if body_type == "html" {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/html");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        to_sink_payload(formatted, opts.send_single).to_string()
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            } else if format.as_deref() == Some("delimited") {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
+                let keys = if let Some(ref f) = opts.fields {
+                    f.clone()
+                } else {
+                    let mut k: Vec<String> = output
+                        .data
+                        .keys()
+                        .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+                        .cloned()
+                        .collect();
+                    k.sort();
+                    k
+                };
+                let row = keys
+                    .iter()
+                    .map(|k| csv_cell(output.data.get(k), delimiter))
+                    .collect::<Vec<_>>()
+                    .join(delimiter);
+                req_builder = req_builder.body(row);
+            } else {
+                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "application/json");
+                let body_str = match template {
+                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
+                            .map_err(|e| {
+                                SendError::Permanent(format!("json encode error: {}", e))
+                            })?
+                    }
+                };
+                req_builder = req_builder.body(body_str);
+            }
+
+            let res = req_builder.send().await;
             res.map(|_| ())
                 .map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
         }
-        PreparedAction::Mqtt { config, template } => {
+        PreparedAction::Mqtt {
+            config,
+            template,
+            opts,
+            format,
+            delimiter,
+        } => {
             if rt.mqtt.is_none() {
                 let sink = MqttSink::new((**config).clone()).map_err(|e| {
                     SendError::Permanent(format!("mqtt action configuration invalid: {}", e))
@@ -3959,14 +4677,57 @@ async fn send_action(
                 Some(tpl) => {
                     apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
                 }
-                None => serde_json::to_vec(&output.data)
-                    .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?,
+                None => {
+                    if let Some(Value::String(raw_err)) = output.data.get("__raw_error__") {
+                        raw_err.as_bytes().to_vec()
+                    } else if format.as_deref() == Some("delimited") {
+                        let keys = if let Some(ref f) = opts.fields {
+                            f.clone()
+                        } else {
+                            let mut k: Vec<String> = output
+                                .data
+                                .keys()
+                                .filter(|k| {
+                                    *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__")
+                                })
+                                .cloned()
+                                .collect();
+                            k.sort();
+                            k
+                        };
+                        let row = keys
+                            .iter()
+                            .map(|k| csv_cell(output.data.get(k), delimiter))
+                            .collect::<Vec<_>>()
+                            .join(delimiter);
+                        row.into_bytes()
+                    } else {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
+                            |e| SendError::Permanent(format!("mqtt payload encode: {}", e)),
+                        )?
+                    }
+                }
             };
-            sink.send_raw_to(destination.unwrap_or(&config.topic), payload)
+            let topic = match destination {
+                Some(d) => d.to_string(),
+                None => {
+                    if config.topic.contains("{{") {
+                        apply_data_template(&config.topic, &record_template_map(&output.data))
+                    } else {
+                        config.topic.clone()
+                    }
+                }
+            };
+            sink.send_raw_to(&topic, payload)
                 .await
                 .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
         }
-        PreparedAction::WebSocket { url, template } => {
+        PreparedAction::WebSocket {
+            url,
+            template,
+            opts,
+        } => {
             let sink = WebSocketSink { url: url.clone() };
             let res = match template {
                 Some(tpl) => {
@@ -3976,7 +4737,13 @@ async fn send_action(
                     ))
                     .await
                 }
-                None => sink.send(output).await,
+                None => {
+                    let formatted = format_record_for_sink(&output.data, opts);
+                    let text = serde_json::to_string(&formatted).map_err(|e| {
+                        SendError::Permanent(format!("websocket payload encode: {}", e))
+                    })?;
+                    sink.send_text(&text).await
+                }
             };
             res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
         }
@@ -4007,25 +4774,46 @@ async fn send_action(
                 .await
                 .map_err(|e| SendError::Retry(format!("sql action failed: {}", e)))
         }
-        PreparedAction::Memory { topic } => match ctx.stream_bus.try_publish(topic, output.clone())
-        {
-            Ok(_) => Ok(()),
-            // Produced data with nobody listening: not an error.
-            Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
-            Err(rekuiper_core::PublishError::Full) => {
-                tracing::warn!(
-                    "[RULE {}] memory feedback queue full, dropping record",
-                    ctx.rule_id
-                );
-                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
-                Err(SendError::Dropped)
+        PreparedAction::Memory {
+            topic,
+            send_nil_field,
+        } => {
+            let final_topic = if topic.contains("{{") {
+                apply_data_template(topic, &record_template_map(&output.data))
+            } else {
+                topic.clone()
+            };
+            let mut clean_data = HashMap::new();
+            for (k, v) in &output.data {
+                if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                    continue;
+                }
+                if v.is_null() && !send_nil_field {
+                    continue;
+                }
+                clean_data.insert(k.clone(), clean_sink_value(v, *send_nil_field));
             }
-            Err(rekuiper_core::PublishError::Closed) => {
-                ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                Err(SendError::Dropped)
+            let mut clean_rec = output.clone();
+            clean_rec.data = clean_data;
+            match ctx.stream_bus.try_publish(&final_topic, clean_rec) {
+                Ok(_) => Ok(()),
+                // Produced data with nobody listening: not an error.
+                Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
+                Err(rekuiper_core::PublishError::Full) => {
+                    tracing::warn!(
+                        "[RULE {}] memory feedback queue full, dropping record",
+                        ctx.rule_id
+                    );
+                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+                    Err(SendError::Dropped)
+                }
+                Err(rekuiper_core::PublishError::Closed) => {
+                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                    Err(SendError::Dropped)
+                }
             }
-        },
+        }
         PreparedAction::RabbitMq { config, template } => {
             if rt.rabbitmq.is_none() {
                 rt.rabbitmq = Some(RabbitMqSink::new((**config).clone()));
@@ -4082,7 +4870,7 @@ fn report_send_error(rt: &mut ActionRuntime, ctx: &SinkContext<'_>, err: &SendEr
         SendError::Retry(m) | SendError::Permanent(m) => m,
         SendError::Dropped => return,
     };
-    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+    ctx.rule_mgr.record_exception(ctx.rule_id, msg);
     let now = std::time::Instant::now();
     if rt
         .last_warn
@@ -5180,41 +5968,32 @@ async fn run_stateless_rule(
             joined
                 .entry("__rule_start__".to_string())
                 .or_insert_with(|| Value::from(start_time_ms));
-            let output_opt = Evaluator::eval_select_stateful(&select_stmt, &joined, &rule_state);
-            let passes = match &select_stmt.where_clause {
-                Some(cond) => Evaluator::eval_bool(cond, &joined),
-                None => true,
-            };
-            if passes {
-                if let Some(output) = output_opt {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+            match Evaluator::eval_select_filtered_stateful_fallible(
+                &select_stmt,
+                &joined,
+                &rule_state,
+            ) {
+                Ok(Some(output)) => {
+                    if !enqueue_sink_record(&counters, &sink, StreamRecord::new(output)).await {
                         break;
                     }
-                } else {
-                    counters.inc_filtered(1);
                 }
-            } else {
-                counters.inc_filtered(1);
+                Ok(None) => counters.inc_filtered(1),
+                Err(err) => handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await,
             }
         } else {
-            let output_opt =
-                Evaluator::eval_select_stateful(&select_stmt, &record.data, &rule_state);
-            let passes = match &select_stmt.where_clause {
-                Some(cond) => Evaluator::eval_bool(cond, &record.data),
-                None => true,
-            };
-            if passes {
-                if let Some(output) = output_opt {
-                    let output_record = StreamRecord::new(output);
-                    if !enqueue_sink_record(&counters, &sink, output_record).await {
+            match Evaluator::eval_select_filtered_stateful_fallible(
+                &select_stmt,
+                &record.data,
+                &rule_state,
+            ) {
+                Ok(Some(output)) => {
+                    if !enqueue_sink_record(&counters, &sink, StreamRecord::new(output)).await {
                         break;
                     }
-                } else {
-                    counters.inc_filtered(1);
                 }
-            } else {
-                counters.inc_filtered(1);
+                Ok(None) => counters.inc_filtered(1),
+                Err(err) => handle_runtime_error(&counters, &rule_id, send_error, &sink, err).await,
             }
         }
     }
@@ -5223,17 +6002,27 @@ async fn run_stateless_rule(
 /// Emit one window trigger: plain windows aggregate the batch; rules with
 /// JOIN clauses resolve matches first (stream fan-in, table lookups, ON
 /// conditions) and project each match.
+#[allow(clippy::too_many_arguments)]
 async fn emit_window_batch(
     counters: &RuleCounters,
     table_manager: &TableManager,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     select_stmt: &SelectStmt,
-    batch: Vec<TaggedRow>,
+    mut batch: Vec<TaggedRow>,
     prefiltered: bool,
+    window_bounds: Option<(i64, i64)>,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
 ) {
     if batch.is_empty() {
         return;
+    }
+    if let Some((start_ms, end_ms)) = window_bounds {
+        for row in &mut batch {
+            row.data
+                .insert("__window_start__".to_string(), Value::from(start_ms));
+            row.data
+                .insert("__window_end__".to_string(), Value::from(end_ms));
+        }
     }
     let outputs = if select_stmt.joins.is_empty() {
         let rows: Vec<HashMap<String, Value>> = batch.into_iter().map(|r| r.data).collect();
@@ -5264,9 +6053,16 @@ async fn emit_window_outputs(
 /// Time-window ingest filter: without joins, `WHERE` is pushed below the
 /// window (as eKuiper's predicate push-down does), so rejected rows are
 /// never buffered. With joins it may reference joined columns and runs at
-/// trigger time instead.
+/// trigger time instead. FILTER (WHERE ...) is always evaluated before the window.
 fn window_ingest_passes(select_stmt: &SelectStmt, data: &HashMap<String, Value>) -> bool {
-    !select_stmt.joins.is_empty() || Evaluator::passes_where(select_stmt, data)
+    let where_pass = !select_stmt.joins.is_empty() || Evaluator::passes_where(select_stmt, data);
+    if !where_pass {
+        return false;
+    }
+    if let Some(filter) = &select_stmt.window_filter {
+        return Evaluator::eval_bool(filter, data);
+    }
+    true
 }
 
 /// Contents of one open time window: row-free accumulators when the
@@ -5312,6 +6108,7 @@ impl WindowRows {
         table_manager: &TableManager,
         source_configs: &Arc<RwLock<HashMap<String, Value>>>,
         select_stmt: &SelectStmt,
+        window_bounds: Option<(i64, i64)>,
         sink: &tokio::sync::mpsc::Sender<StreamRecord>,
     ) {
         match self {
@@ -5329,6 +6126,7 @@ impl WindowRows {
                     select_stmt,
                     batch,
                     true,
+                    window_bounds,
                     sink,
                 )
                 .await;
@@ -5410,6 +6208,9 @@ async fn run_count_window_rule(
                 if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
+                if !window_ingest_passes(&select_stmt, &record.data) {
+                    continue;
+                }
                 buffer.push(TaggedRow { source: from_source.clone(), data: record.data });
                 events_since_trigger += 1;
                 if hop <= count {
@@ -5423,7 +6224,8 @@ async fn run_count_window_rule(
                             buffer.drain(0..hop.min(buffer.len()));
                             batch
                         };
-                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
+                        let now_ms = chrono::Utc::now().timestamp_millis();
+                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
                     }
                 } else {
                     // Sparsely sampled count window with gap (hop > count)
@@ -5432,7 +6234,8 @@ async fn run_count_window_rule(
                     }
                     if events_since_trigger >= hop {
                         if !buffer.is_empty() {
-                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
+                            let now_ms = chrono::Utc::now().timestamp_millis();
+                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
                         }
                         events_since_trigger = 0;
                         buffer.clear();
@@ -5453,6 +6256,9 @@ async fn run_count_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
+                        if !window_ingest_passes(&select_stmt, &tagged.data) {
+                            continue;
+                        }
                         buffer.push(tagged);
                         events_since_trigger += 1;
                         if hop <= count {
@@ -5464,14 +6270,16 @@ async fn run_count_window_rule(
                                     buffer.drain(0..hop.min(buffer.len()));
                                     batch
                                 };
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, &sink).await;
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
                             }
                         } else if events_since_trigger >= hop {
                             if buffer.len() > count {
                                 buffer.remove(0);
                             }
                             if !buffer.is_empty() {
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, &sink).await;
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
                             }
                             events_since_trigger = 0;
                             buffer.clear();
@@ -5529,23 +6337,66 @@ async fn run_tumbling_window_rule(
     let mut window_start: Option<i64> = None;
     let window_millis = duration.as_millis() as i64;
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
     // Ingest one row (FROM or joined stream) into the wall/event buffers.
     macro_rules! ingest {
         ($tagged:expr) => {{
             let tagged: TaggedRow = $tagged;
             if event_time.enabled {
-                let event_ts =
-                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    watermark =
-                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
                     let aligned = event_ts - event_ts.rem_euclid(window_millis.max(1));
                     if window_start.is_none() {
                         window_start = Some(aligned);
+                    } else if let Some(ws) = window_start {
+                        if aligned < ws {
+                            window_start = Some(aligned);
+                        }
                     }
                     // Rows rejected by WHERE still advance the watermark.
                     if window_ingest_passes(&select_stmt, &tagged.data) {
@@ -5575,6 +6426,7 @@ async fn run_tumbling_window_rule(
                             &select_stmt,
                             batch,
                             true,
+                            Some((t0, t_end)),
                             &sink,
                         )
                         .await;
@@ -5619,6 +6471,9 @@ async fn run_tumbling_window_rule(
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
@@ -5630,17 +6485,18 @@ async fn run_tumbling_window_rule(
                 if window.is_empty() {
                     continue;
                 }
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let end_ms = now_ms - now_ms.rem_euclid(window_millis.max(1));
+                let start_ms = end_ms - window_millis;
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, end_ms)), &sink).await;
             }
         }
     }
 }
 
-/// SESSIONWINDOW over processing time (eKuiper semantics): a session opens
-/// at the first row that passes `WHERE`, closes `timeout` after the last
-/// such row, and is also cut at a natural-time `max_duration` check once it
-/// has lasted at least `max_duration`. Sessions are stream-wide; `GROUP BY`
-/// partitions rows inside a session.
+/// SESSIONWINDOW: in event time, groups events within consecutive gaps <= timeout,
+/// cutting on max_duration or gap > timeout. In processing time, operates on idle timeout
+/// and aligned max_duration intervals.
 #[allow(clippy::too_many_arguments)]
 async fn run_session_window_rule(
     counters: Arc<RuleCounters>,
@@ -5651,6 +6507,7 @@ async fn run_session_window_rule(
     max_duration: std::time::Duration,
     timeout: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
     send_error: bool,
     join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
@@ -5658,24 +6515,142 @@ async fn run_session_window_rule(
 ) {
     let mut max_check = aligned_interval(max_duration);
     let mut window = WindowRows::new(&select_stmt);
-    // When the open session started; `None` while no session is open.
     let mut opened_at: Option<tokio::time::Instant> = None;
+    let mut opened_at_ms: Option<i64> = None;
     let idle = tokio::time::sleep(timeout);
     tokio::pin!(idle);
     let from_source = select_stmt.from.clone();
+
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
-    macro_rules! ingest {
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
+    let mut watermark: i64 = i64::MIN;
+    let mut session_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut session_start: Option<i64> = None;
+    let mut last_event_ts: Option<i64> = None;
+    let timeout_ms = (timeout.as_millis() as i64).max(1);
+    let max_duration_ms = (max_duration.as_millis() as i64).max(1);
+
+    macro_rules! ingest_session {
         ($tagged:expr) => {{
-            if window.push(&select_stmt, $tagged) {
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
+                if event_ts < watermark {
+                    // Drop late arrival
+                } else {
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
+                    if window_ingest_passes(&select_stmt, &tagged.data) {
+                        if let Some(last_ts) = last_event_ts {
+                            if event_ts.saturating_sub(last_ts) > timeout_ms
+                                || event_ts.saturating_sub(session_start.unwrap_or(event_ts))
+                                    >= max_duration_ms
+                            {
+                                let s_start = session_start.unwrap_or(last_ts);
+                                let s_end = last_ts.saturating_add(timeout_ms);
+                                let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer)
+                                    .into_iter()
+                                    .map(|(_, r)| r)
+                                    .collect();
+                                session_start = Some(event_ts);
+                                last_event_ts = Some(event_ts);
+                                session_buffer.push((event_ts, tagged));
+                                emit_window_batch(
+                                    &counters,
+                                    &table_manager,
+                                    &source_configs,
+                                    &select_stmt,
+                                    batch,
+                                    true,
+                                    Some((s_start, s_end)),
+                                    &sink,
+                                )
+                                .await;
+                            } else {
+                                last_event_ts = Some(event_ts);
+                                session_buffer.push((event_ts, tagged));
+                            }
+                        } else {
+                            session_start = Some(event_ts);
+                            last_event_ts = Some(event_ts);
+                            session_buffer.push((event_ts, tagged));
+                        }
+                    }
+
+                    if let Some(last_ts) = last_event_ts {
+                        if watermark >= last_ts.saturating_add(timeout_ms) {
+                            let s_start = session_start.take().unwrap_or(last_ts);
+                            let s_end = last_ts.saturating_add(timeout_ms);
+                            last_event_ts = None;
+                            let batch: Vec<TaggedRow> = std::mem::take(&mut session_buffer)
+                                .into_iter()
+                                .map(|(_, r)| r)
+                                .collect();
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((s_start, s_end)),
+                                &sink,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            } else if window.push(&select_stmt, tagged) {
                 let now = tokio::time::Instant::now();
                 if opened_at.is_none() {
                     opened_at = Some(now);
+                    opened_at_ms = Some(chrono::Utc::now().timestamp_millis());
                 }
                 idle.as_mut().reset(now + timeout);
             }
         }};
     }
+
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -5690,7 +6665,7 @@ async fn run_session_window_rule(
                         {
                             continue;
                         }
-                        ingest!(TaggedRow { source: from_source.clone(), data: record.data });
+                        ingest_session!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
                     None => break,
                 }
@@ -5706,24 +6681,48 @@ async fn run_session_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        ingest!(tagged);
+                        ingest_session!(tagged);
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
-            _ = &mut idle, if opened_at.is_some() => {
+            _ = &mut idle, if opened_at.is_some() && !event_time.enabled => {
                 opened_at = None;
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let start_ms = opened_at_ms.take().unwrap_or(now_ms);
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
             }
             _ = max_check.tick() => {
-                if opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
+                if !event_time.enabled && opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
                     opened_at = None;
-                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, &sink).await;
+                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let start_ms = opened_at_ms.take().unwrap_or(now_ms);
+                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
                 }
             }
         }
+    }
+
+    if event_time.enabled && !session_buffer.is_empty() {
+        let s_start = session_start.unwrap_or(0);
+        let s_end = last_event_ts.unwrap_or(0).saturating_add(timeout_ms);
+        let batch: Vec<TaggedRow> = session_buffer.into_iter().map(|(_, r)| r).collect();
+        emit_window_batch(
+            &counters,
+            &table_manager,
+            &source_configs,
+            &select_stmt,
+            batch,
+            true,
+            Some((s_start, s_end)),
+            &sink,
+        )
+        .await;
     }
 }
 
@@ -5737,17 +6736,120 @@ async fn run_hopping_window_rule(
     length: std::time::Duration,
     hop: std::time::Duration,
     sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
     send_error: bool,
     join_rxs: Vec<(String, StreamReceiver)>,
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let length_ms = length.as_millis() as i64;
+    let hop_ms = (hop.as_millis() as i64).max(1);
+
     // Hops end on natural-time multiples of the hop (eKuiper alignment).
     let mut ticker = aligned_interval(hop);
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
+
+    let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut watermark: i64 = i64::MIN;
+    let mut next_hop_end: Option<i64> = None;
+
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
+
+    macro_rules! ingest_hop {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if event_time.enabled {
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
+                if event_ts < watermark {
+                    // Late arrival beyond tolerance: drop
+                } else {
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
+                    if next_hop_end.is_none() {
+                        let aligned = event_ts - event_ts.rem_euclid(hop_ms) + hop_ms;
+                        next_hop_end = Some(aligned);
+                    }
+
+                    if window_ingest_passes(&select_stmt, &tagged.data) {
+                        et_buffer.push((event_ts, tagged));
+                    }
+
+                    while let Some(cur_end) = next_hop_end {
+                        if watermark < cur_end {
+                            break;
+                        }
+                        let cur_start = cur_end.saturating_sub(length_ms);
+                        let batch: Vec<TaggedRow> = et_buffer
+                            .iter()
+                            .filter(|(ts, _)| *ts >= cur_start && *ts < cur_end)
+                            .map(|(_, row)| row.clone())
+                            .collect();
+                        next_hop_end = Some(cur_end.saturating_add(hop_ms));
+                        let retain_after = cur_end.saturating_add(hop_ms).saturating_sub(length_ms);
+                        et_buffer.retain(|(ts, _)| *ts >= retain_after);
+                        if !batch.is_empty() {
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((cur_start, cur_end)),
+                                &sink,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            } else if window_ingest_passes(&select_stmt, &tagged.data) {
+                buffer.push((std::time::Instant::now(), tagged));
+            }
+        }};
+    }
+
     loop {
         tokio::select! {
             res = rx.recv() => {
@@ -5762,9 +6864,7 @@ async fn run_hopping_window_rule(
                         {
                             continue;
                         }
-                        if window_ingest_passes(&select_stmt, &record.data) {
-                            buffer.push((std::time::Instant::now(), TaggedRow { source: from_source.clone(), data: record.data }));
-                        }
+                        ingest_hop!(TaggedRow { source: from_source.clone(), data: record.data });
                     }
                     None => break,
                 }
@@ -5780,23 +6880,32 @@ async fn run_hopping_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        buffer.push((std::time::Instant::now(), tagged));
+                        ingest_hop!(tagged);
                     }
                     None => {
                         joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
                     }
                 }
             }
             _ = ticker.tick() => {
+                if event_time.enabled {
+                    continue;
+                }
                 let now = std::time::Instant::now();
                 // Expire and discard records older than the full window length
                 buffer.retain(|(ts, _)| now.duration_since(*ts) <= length);
                 if buffer.is_empty() {
                     continue;
                 }
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let end_ms = now_ms - now_ms.rem_euclid(hop_ms);
+                let start_ms = end_ms.saturating_sub(length_ms);
                 let batch: Vec<TaggedRow> =
                     buffer.iter().map(|(_, row)| row.clone()).collect();
-                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, &sink).await;
+                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, Some((start_ms, end_ms)), &sink).await;
             }
         }
     }
@@ -5821,54 +6930,149 @@ async fn run_sliding_window_rule(
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
     // Event-time state: event-timestamped rows plus the watermark.
     let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
+    let mut pending_triggers: Vec<(i64, i64)> = Vec::new();
     let mut watermark: i64 = i64::MIN;
     let window_millis = length.as_millis() as i64;
     let from_source = select_stmt.from.clone();
+    let mut input_streams: Vec<String> = Vec::new();
+    if table_manager.get_table(&from_source).is_none() {
+        input_streams.push(from_source.clone());
+    }
+    let mut join_stream_names: Vec<String> = Vec::new();
+    for (name, _) in &join_rxs {
+        if !input_streams.contains(name) {
+            input_streams.push(name.clone());
+        }
+        if !join_stream_names.contains(name) {
+            join_stream_names.push(name.clone());
+        }
+    }
     let mut join_rx = spawn_join_forwarders(join_rxs);
     let mut joins_open = true;
-    // Ingest one row then evaluate the trailing horizon (shared by FROM
-    // and joined-stream rows).
+    let mut stream_max_ts: HashMap<String, i64> = HashMap::new();
+    let mut closed_streams: HashSet<String> = HashSet::new();
+
     macro_rules! ingest_slide {
         ($tagged:expr) => {{
             let tagged: TaggedRow = $tagged;
             if !window_ingest_passes(&select_stmt, &tagged.data) {
                 // Filtered below the window: neither buffered nor a trigger.
             } else if event_time.enabled {
-                let event_ts =
-                    extract_event_timestamp(&tagged.data, event_time.timestamp_field.as_deref());
+                let ts_field = event_time
+                    .source_timestamp_fields
+                    .get(&tagged.source)
+                    .map(|s| s.as_str())
+                    .or(event_time.timestamp_field.as_deref());
+                let event_ts = extract_event_timestamp(&tagged.data, ts_field);
                 if event_ts < watermark {
                     // Late arrival beyond the tolerance horizon: drop.
                 } else {
-                    watermark =
-                        watermark.max(event_ts.saturating_sub(event_time.late_tolerance_ms));
-                    et_buffer.push((event_ts, tagged));
+                    let cur_max = stream_max_ts
+                        .entry(tagged.source.clone())
+                        .or_insert(event_ts);
+                    *cur_max = (*cur_max).max(event_ts);
+
+                    let all_active_seen = input_streams
+                        .iter()
+                        .filter(|s| !closed_streams.contains(*s))
+                        .all(|s| stream_max_ts.contains_key(s));
+
+                    if all_active_seen {
+                        let min_source_ts = input_streams
+                            .iter()
+                            .filter(|s| !closed_streams.contains(*s))
+                            .filter_map(|s| stream_max_ts.get(s))
+                            .min()
+                            .copied()
+                            .unwrap_or(event_ts);
+                        let new_wm = min_source_ts.saturating_sub(event_time.late_tolerance_ms);
+                        watermark = watermark.max(new_wm);
+                    }
+
+                    et_buffer.push((event_ts, tagged.clone()));
                     et_buffer.sort_by_key(|(ts, _)| *ts);
-                    // Lower-bounded horizon only: expiry is purely age-based
-                    // (`ts >= event_ts - length`). Newer buffered rows must
-                    // survive out-of-order arrivals within the window.
-                    et_buffer.retain(|(ts, _)| *ts >= event_ts.saturating_sub(window_millis));
-                    let batch: Vec<TaggedRow> =
-                        et_buffer.iter().map(|(_, row)| row.clone()).collect();
-                    emit_window_batch(
-                        &counters,
-                        &table_manager,
-                        &source_configs,
-                        &select_stmt,
-                        batch,
-                        true,
-                        &sink,
-                    )
-                    .await;
+
+                    let should_trigger = match &select_stmt.window_trigger_condition {
+                        Some(cond) => Evaluator::eval_bool(cond, &tagged.data),
+                        None => true,
+                    };
+
+                    let delay_ms = delay.map(|d| d.as_millis() as i64).unwrap_or(0);
+                    if should_trigger {
+                        if delay_ms > 0 {
+                            pending_triggers.push((event_ts, event_ts.saturating_add(delay_ms)));
+                            pending_triggers.sort_by_key(|(_, end)| *end);
+                        } else {
+                            let start_ts = event_ts.saturating_sub(window_millis);
+                            let batch: Vec<TaggedRow> = et_buffer
+                                .iter()
+                                .filter(|(ts, _)| *ts >= start_ts && *ts <= event_ts)
+                                .map(|(_, row)| row.clone())
+                                .collect();
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((start_ts, event_ts)),
+                                &sink,
+                            )
+                            .await;
+                        }
+                    }
+
+                    while !pending_triggers.is_empty() && watermark >= pending_triggers[0].1 {
+                        // Close at the current watermark, which may jump past the delay deadline.
+                        let (trigger_ts, _) = pending_triggers.remove(0);
+                        let window_end_ts = watermark;
+                        let start_ts = trigger_ts.saturating_sub(window_millis);
+                        let batch: Vec<TaggedRow> = et_buffer
+                            .iter()
+                            .filter(|(ts, _)| *ts >= start_ts && *ts <= window_end_ts)
+                            .map(|(_, row)| row.clone())
+                            .collect();
+                        emit_window_batch(
+                            &counters,
+                            &table_manager,
+                            &source_configs,
+                            &select_stmt,
+                            batch,
+                            true,
+                            Some((start_ts, window_end_ts)),
+                            &sink,
+                        )
+                        .await;
+                    }
+
+                    let min_pending = pending_triggers
+                        .first()
+                        .map(|(ts, _)| *ts)
+                        .unwrap_or(event_ts);
+                    let retain_ts = min_pending.min(event_ts).saturating_sub(window_millis);
+                    et_buffer.retain(|(ts, _)| *ts >= retain_ts);
                 }
             } else {
                 let now = std::time::Instant::now();
-                buffer.push((now, tagged));
+                buffer.push((now, tagged.clone()));
                 let eval_time = std::time::Instant::now();
-                // Retain only events within the sliding trailing horizon: [eval_time - length, eval_time]
                 buffer.retain(|(ts, _)| eval_time.duration_since(*ts) <= length);
-                if !buffer.is_empty() {
-                    let batch: Vec<TaggedRow> =
-                        buffer.iter().map(|(_, row)| row.clone()).collect();
+
+                let should_trigger = match &select_stmt.window_trigger_condition {
+                    Some(cond) => Evaluator::eval_bool(cond, &tagged.data),
+                    None => true,
+                };
+
+                if should_trigger && !buffer.is_empty() {
+                    if let Some(delay_dur) = delay {
+                        if !delay_dur.is_zero() {
+                            tokio::time::sleep(delay_dur).await;
+                        }
+                    }
+                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let start_ms = now_ms.saturating_sub(window_millis);
+                    let batch: Vec<TaggedRow> = buffer.iter().map(|(_, row)| row.clone()).collect();
                     emit_window_batch(
                         &counters,
                         &table_manager,
@@ -5876,6 +7080,7 @@ async fn run_sliding_window_rule(
                         &select_stmt,
                         batch,
                         true,
+                        Some((start_ms, now_ms)),
                         &sink,
                     )
                     .await;
@@ -5895,13 +7100,6 @@ async fn run_sliding_window_rule(
                 if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
                     continue;
                 }
-                // If delay is configured, wait for the delay duration before evaluating
-                // so events arriving during the delay window are captured.
-                if let Some(delay_dur) = delay {
-                    if !delay_dur.is_zero() {
-                        tokio::time::sleep(delay_dur).await;
-                    }
-                }
                 ingest_slide!(TaggedRow { source: from_source.clone(), data: record.data });
             }
             None => break,
@@ -5918,12 +7116,182 @@ async fn run_sliding_window_rule(
                         if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
                             continue;
                         }
-                        if let Some(delay_dur) = delay {
-                            if !delay_dur.is_zero() {
-                                tokio::time::sleep(delay_dur).await;
+                        ingest_slide!(tagged);
+                    }
+                    None => {
+                        joins_open = false;
+                        for s in &join_stream_names {
+                            closed_streams.insert(s.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// STATEWINDOW: creates dynamic windows based on condition matches.
+/// Two conditions: begins on start_condition, emits on end_condition.
+/// Single condition: begins on start_condition, emits prior window when start_condition matches again.
+#[allow(clippy::too_many_arguments)]
+async fn run_state_window_rule(
+    counters: Arc<RuleCounters>,
+    running: Arc<RwLock<RuleStatus>>,
+    rule_id: String,
+    select_stmt: SelectStmt,
+    mut rx: StreamReceiver,
+    start_condition: Expr,
+    end_condition: Option<Expr>,
+    sink: tokio::sync::mpsc::Sender<StreamRecord>,
+    event_time: EventTimeConfig,
+    send_error: bool,
+    join_rxs: Vec<(String, StreamReceiver)>,
+    table_manager: TableManager,
+    source_configs: Arc<RwLock<HashMap<String, Value>>>,
+) {
+    struct StateWindowState {
+        on_begin: bool,
+        start_time: i64,
+        buffer: Vec<TaggedRow>,
+    }
+
+    let rule_state = RuleState::default();
+    let mut partitions: HashMap<String, StateWindowState> = HashMap::new();
+    let from_source = select_stmt.from.clone();
+    let mut join_rx = spawn_join_forwarders(join_rxs);
+    let mut joins_open = true;
+
+    macro_rules! ingest_state {
+        ($tagged:expr) => {{
+            let tagged: TaggedRow = $tagged;
+            if !window_ingest_passes(&select_stmt, &tagged.data) {
+                // Filtered below the window
+            } else {
+                let ts = if event_time.enabled {
+                    let ts_field = event_time
+                        .source_timestamp_fields
+                        .get(&tagged.source)
+                        .map(|s| s.as_str())
+                        .or(event_time.timestamp_field.as_deref());
+                    extract_event_timestamp(&tagged.data, ts_field)
+                } else {
+                    chrono::Utc::now().timestamp_millis()
+                };
+
+                let partition_key = match &select_stmt.window_partition_by {
+                    Some(p_expr) => Evaluator::eval_val(p_expr, &tagged.data).to_string(),
+                    None => String::new(),
+                };
+
+                let state = partitions
+                    .entry(partition_key)
+                    .or_insert_with(|| StateWindowState {
+                        on_begin: false,
+                        start_time: 0,
+                        buffer: Vec::new(),
+                    });
+
+                match &end_condition {
+                    Some(end_cond) => {
+                        if !state.on_begin {
+                            if Evaluator::eval_bool_stateful(
+                                &start_condition,
+                                &tagged.data,
+                                &rule_state,
+                            ) {
+                                state.start_time = ts;
+                                state.on_begin = true;
+                                state.buffer.push(tagged);
+                            }
+                        } else {
+                            state.buffer.push(tagged.clone());
+                            if Evaluator::eval_bool_stateful(end_cond, &tagged.data, &rule_state) {
+                                state.on_begin = false;
+                                let batch = std::mem::take(&mut state.buffer);
+                                emit_window_batch(
+                                    &counters,
+                                    &table_manager,
+                                    &source_configs,
+                                    &select_stmt,
+                                    batch,
+                                    true,
+                                    Some((state.start_time, ts)),
+                                    &sink,
+                                )
+                                .await;
                             }
                         }
-                        ingest_slide!(tagged);
+                    }
+                    None => {
+                        if !state.on_begin {
+                            if Evaluator::eval_bool_stateful(
+                                &start_condition,
+                                &tagged.data,
+                                &rule_state,
+                            ) {
+                                state.start_time = ts;
+                                state.on_begin = true;
+                                state.buffer.push(tagged);
+                            }
+                        } else if Evaluator::eval_bool_stateful(
+                            &start_condition,
+                            &tagged.data,
+                            &rule_state,
+                        ) {
+                            let batch = std::mem::take(&mut state.buffer);
+                            let prev_start = state.start_time;
+                            state.start_time = ts;
+                            state.on_begin = true;
+                            state.buffer.push(tagged);
+                            emit_window_batch(
+                                &counters,
+                                &table_manager,
+                                &source_configs,
+                                &select_stmt,
+                                batch,
+                                true,
+                                Some((prev_start, ts)),
+                                &sink,
+                            )
+                            .await;
+                        } else {
+                            state.buffer.push(tagged);
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
+    loop {
+        tokio::select! {
+            res = rx.recv() => {
+                match res {
+                    Some(record) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &record).await {
+                            continue;
+                        }
+                        ingest_state!(TaggedRow { source: from_source.clone(), data: record.data });
+                    }
+                    None => break,
+                }
+            }
+            jrec = join_rx.recv(), if joins_open => {
+                match jrec {
+                    Some(tagged) => {
+                        if !is_rule_running(&running) {
+                            continue;
+                        }
+                        counters.inc_source(1);
+                        let probe = StreamRecord::new(tagged.data.clone());
+                        if handle_error_record(&counters, &rule_id, send_error, &sink, &probe).await {
+                            continue;
+                        }
+                        ingest_state!(tagged);
                     }
                     None => {
                         joins_open = false;
@@ -5950,7 +7318,18 @@ async fn get_rule_status(State(state): State<AppState>, Path(name): Path<String>
         return resp;
     }
     if let Some(status) = state.rule_manager.get_rule_status(&name) {
-        Json(status).into_response()
+        let mut val = serde_json::to_value(&status).unwrap_or(Value::Null);
+        if let Value::Object(ref mut map) = val {
+            map.insert(
+                "last_exception".to_string(),
+                Value::String(status.last_exception.clone()),
+            );
+            map.insert(
+                "exceptions_total".to_string(),
+                Value::from(status.exceptions_total),
+            );
+        }
+        Json(val).into_response()
     } else {
         (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response()
     }
@@ -5960,11 +7339,16 @@ async fn get_all_rule_status(State(state): State<AppState>) -> impl IntoResponse
     let mut all = HashMap::new();
     for rule in state.rule_manager.list_rules() {
         if let Some(status) = state.rule_manager.get_rule_status(&rule.id) {
+            let last_exc = if !status.last_exception.is_empty() {
+                status.last_exception
+            } else {
+                status.message
+            };
             all.insert(
                 rule.id,
                 json!({
                     "status": status.status,
-                    "last_exception": status.message,
+                    "last_exception": last_exc,
                     "exceptions_total": status.exceptions_total,
                 }),
             );
@@ -6032,13 +7416,21 @@ fn collect_called_functions(expr: &Expr, out: &mut Vec<String>) {
                 collect_called_functions(e, out);
             }
         }
-        Expr::Over { call, partition_by } => {
+        Expr::Over {
+            call,
+            partition_by,
+            when,
+        } => {
             collect_called_functions(call, out);
             if let Some(p) = partition_by {
                 collect_called_functions(p, out);
             }
+            if let Some(w) = when {
+                collect_called_functions(w, out);
+            }
         }
-        Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => {}
+        Expr::Wildcard | Expr::WildcardModified { .. } | Expr::Identifier(_) | Expr::Literal(_) => {
+        }
     }
 }
 
@@ -6111,16 +7503,158 @@ fn check_rule_functions(state: &AppState, stmt: &SelectStmt) -> Option<Response>
     })
 }
 
+fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(), String> {
+    let Some(opts) = options else {
+        return Ok(());
+    };
+    for (k, v) in opts {
+        match k.as_str() {
+            "qos" => {
+                if !v.is_i64() && !v.is_u64() {
+                    return Err(
+                        "invalid rule json: qos must be an integer (0, 1, or 2)".to_string()
+                    );
+                }
+                let q = v.as_i64().unwrap_or(-1);
+                if !(0..=2).contains(&q) {
+                    return Err("invalid rule json: qos must be 0, 1, or 2".to_string());
+                }
+            }
+            "debug" | "isEventTime" | "sendMetaToSink" | "sendNilField" | "sendError"
+                if !v.is_boolean() =>
+            {
+                return Err(format!("invalid rule json: {} must be a boolean", k));
+            }
+            "concurrency" | "bufferLength" if !v.is_i64() && !v.is_u64() => {
+                return Err(format!("invalid rule json: {} must be an integer", k));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), String> {
+    for action in actions {
+        for (kind, opts) in action {
+            if kind.eq_ignore_ascii_case("rest") || kind.eq_ignore_ascii_case("http") {
+                if let Some(m) = opts.get("method").and_then(|v| v.as_str()) {
+                    let m_upper = m.to_uppercase();
+                    if !matches!(
+                        m_upper.as_str(),
+                        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "PATCH"
+                    ) {
+                        return Err(format!("Not supported HTTP method {}.", m));
+                    }
+                }
+                if let Some(bt) = opts.get("bodyType").and_then(|v| v.as_str()) {
+                    if bt.eq_ignore_ascii_case("form") {
+                        let fmt = opts.get("format").and_then(|v| v.as_str()).unwrap_or("");
+                        if !fmt.eq_ignore_ascii_case("urlencoded") {
+                            return Err("format must be urlencoded if bodyType is form".to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_duplicate_fields(stmt: &SelectStmt) -> Option<Response> {
+    let mut seen_fields = HashSet::new();
+    for (idx, field) in stmt.fields.iter().enumerate() {
+        if matches!(field, Expr::Wildcard | Expr::WildcardModified { .. }) {
+            continue;
+        }
+        let name = stmt
+            .field_aliases
+            .get(idx)
+            .and_then(|a| a.clone())
+            .unwrap_or_else(|| Evaluator::column_name(field, idx));
+        if !seen_fields.insert(name.clone()) {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("duplicate field definition {}", name),
+                )
+                    .into_response(),
+            );
+        }
+    }
+    None
+}
+
 /// Shared create/update gate: the source stream or table must exist and
 /// every called function must be known. Returns the rejection response
 /// when the rule is invalid.
-fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> {
+fn reject_invalid_rule(
+    state: &AppState,
+    stmt: &SelectStmt,
+    options: Option<&HashMap<String, Value>>,
+    validation: bool,
+) -> Option<Response> {
+    if let Some(resp) = check_duplicate_fields(stmt) {
+        return Some(resp);
+    }
+    if !stmt.group_by.is_empty() && stmt.window.is_none() {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                "select stmt group by should be used with window",
+            )
+                .into_response(),
+        );
+    }
+    let is_event_time = options
+        .and_then(|opts| opts.get("isEventTime"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if is_event_time {
+        if let Some(stream) = state.stream_manager.get_stream(&stmt.from) {
+            let has_timestamp = stream
+                .options
+                .keys()
+                .any(|k| k.eq_ignore_ascii_case("TIMESTAMP"));
+            if !has_timestamp {
+                return Some(
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "preprocessor is set to be event time but stream option TIMESTAMP not found",
+                    )
+                        .into_response(),
+                );
+            }
+        }
+    }
+    if !stmt.joins.is_empty() && stmt.window.is_none() {
+        let has_stream_target = stmt
+            .joins
+            .iter()
+            .any(|j| state.table_manager.get_table(&j.target).is_none());
+        if has_stream_target {
+            return Some(
+                (
+                    StatusCode::BAD_REQUEST,
+                    "a time window or count window is required to join multiple streams",
+                )
+                    .into_response(),
+            );
+        }
+    }
+    // Validation uses 422 for unresolved sources/functions; creation/update use 400.
+    // Both paths reject the same invalid rule rather than skipping the checks.
+    let resolution_status = if validation {
+        StatusCode::UNPROCESSABLE_ENTITY
+    } else {
+        StatusCode::BAD_REQUEST
+    };
     let stream_exists = state.stream_manager.get_stream(&stmt.from).is_some()
         || state.table_manager.get_table(&stmt.from).is_some();
     if !stream_exists {
         return Some(
             (
-                StatusCode::BAD_REQUEST,
+                resolution_status,
                 Json(json!({
                     "error": 1000,
                     "message": format!(
@@ -6135,7 +7669,7 @@ fn reject_invalid_rule(state: &AppState, stmt: &SelectStmt) -> Option<Response> 
     if let Some(bad_fn) = find_unknown_function(stmt, &state.plugin_manager) {
         return Some(
             (
-                StatusCode::BAD_REQUEST,
+                resolution_status,
                 Json(json!({
                     "error": 1000,
                     "message": format!(
@@ -6154,19 +7688,36 @@ async fn validate_rule(
     State(state): State<AppState>,
     Json(rule): Json<RuleDefinition>,
 ) -> Response {
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    if rule.actions.is_empty() && rule.graph.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
+    }
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
             return match compile_graph_to_sql_and_actions(graph) {
                 Ok((sql, _)) => {
                     let mut parser = Parser::new(&sql);
                     match parser.parse_select() {
-                        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
-                            Json(json!({
-                                "sources": graph.topo.sources,
-                                "valid": true
-                            }))
-                            .into_response()
-                        }),
+                        Ok(stmt) => {
+                            if let Some(resp) =
+                                reject_invalid_rule(&state, &stmt, rule.options.as_ref(), true)
+                            {
+                                return resp;
+                            }
+                            check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+                                Json(json!({
+                                    "sources": graph.topo.sources,
+                                    "valid": true
+                                }))
+                                .into_response()
+                            })
+                        }
                         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e))
                             .into_response(),
                     }
@@ -6181,13 +7732,18 @@ async fn validate_rule(
     }
     let mut parser = Parser::new(&rule.sql);
     match parser.parse_select() {
-        Ok(stmt) => check_rule_functions(&state, &stmt).unwrap_or_else(|| {
-            Json(json!({
-                "sources": [stmt.from],
-                "valid": true
-            }))
-            .into_response()
-        }),
+        Ok(stmt) => {
+            if let Some(resp) = reject_invalid_rule(&state, &stmt, rule.options.as_ref(), true) {
+                return resp;
+            }
+            check_rule_functions(&state, &stmt).unwrap_or_else(|| {
+                Json(json!({
+                    "sources": [stmt.from],
+                    "valid": true
+                }))
+                .into_response()
+            })
+        }
         Err(e) => (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response(),
     }
 }
@@ -6352,12 +7908,37 @@ fn window_to_string(window: &WindowDef) -> String {
             max_duration,
             timeout
         ),
+        WindowDef::State {
+            start_condition,
+            end_condition,
+        } => match end_condition {
+            Some(end) => format!(
+                "STATEWINDOW({}, {})",
+                expr_to_string(start_condition),
+                expr_to_string(end)
+            ),
+            None => format!("STATEWINDOW({})", expr_to_string(start_condition)),
+        },
     }
 }
 
 fn expr_to_string(expr: &Expr) -> String {
     match expr {
         Expr::Wildcard => "*".to_string(),
+        Expr::WildcardModified { except, replace } => {
+            let mut s = "*".to_string();
+            if !except.is_empty() {
+                s.push_str(&format!(" EXCEPT({})", except.join(", ")));
+            }
+            if !replace.is_empty() {
+                let reps: Vec<String> = replace
+                    .iter()
+                    .map(|(e, c)| format!("{} AS {}", expr_to_string(e), c))
+                    .collect();
+                s.push_str(&format!(" REPLACE({})", reps.join(", ")));
+            }
+            s
+        }
         Expr::Identifier(name) => name.clone(),
         Expr::Literal(v) => v.to_string(),
         Expr::BinaryOp { left, op, right } => {
@@ -6376,6 +7957,9 @@ fn expr_to_string(expr: &Expr) -> String {
                 rekuiper_sql::BinaryOperator::Div => "/",
                 rekuiper_sql::BinaryOperator::Mod => "%",
                 rekuiper_sql::BinaryOperator::Like => "LIKE",
+                rekuiper_sql::BinaryOperator::BitAnd => "&",
+                rekuiper_sql::BinaryOperator::BitOr => "|",
+                rekuiper_sql::BinaryOperator::BitXor => "^",
             };
             format!(
                 "{} {} {}",
@@ -6455,6 +8039,7 @@ fn activate_rule(state: &AppState, rule_id: &str) {
                 &state.source_configs,
                 &state.http_client,
                 &state.trace_manager,
+                &state.config,
                 rule_id.to_string(),
                 select_stmt.clone(),
                 rule.actions.clone(),
@@ -6472,6 +8057,11 @@ async fn start_rule(State(state): State<AppState>, Path(name): Path<String>) -> 
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
     }
+    if let Some(status) = state.rule_manager.get_rule_status(&name) {
+        if status.status == "running" {
+            return (StatusCode::OK, format!("Rule {} was started", name)).into_response();
+        }
+    }
     match state.rule_manager.start_rule(&name).await {
         Ok(_) => {
             activate_rule(&state, &name);
@@ -6487,6 +8077,11 @@ async fn stop_rule(State(state): State<AppState>, Path(name): Path<String>) -> R
     }
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
+    }
+    if let Some(status) = state.rule_manager.get_rule_status(&name) {
+        if status.status == "stopped" {
+            return (StatusCode::OK, format!("Rule {} was stopped.", name)).into_response();
+        }
     }
     match state.rule_manager.stop_rule(&name).await {
         Ok(_) => {
@@ -6548,6 +8143,9 @@ async fn update_rule(
     if state.rule_manager.get_rule(&name).is_none() {
         return (StatusCode::NOT_FOUND, format!("Rule {} not found", name)).into_response();
     }
+    if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     rule.id = name.clone();
     // Graph rules carry no SQL: compile the DAG first (mirrors creation).
     if rule.sql.trim().is_empty() {
@@ -6569,6 +8167,13 @@ async fn update_rule(
             }
         }
     }
+    if rule.actions.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid rule json: Missing rule actions.".to_string(),
+        )
+            .into_response();
+    }
     let mut parser = Parser::new(&rule.sql);
     let select_stmt = match parser.parse_select() {
         Ok(s) => s,
@@ -6576,8 +8181,11 @@ async fn update_rule(
             return (StatusCode::BAD_REQUEST, format!("Invalid rule SQL: {}", e)).into_response();
         }
     };
-    if let Some(resp) = reject_invalid_rule(&state, &select_stmt) {
+    if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref(), false) {
         return resp;
+    }
+    if let Err(e) = validate_sink_actions(&rule.actions) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
     }
     let was_running = match state.rule_manager.update_rule(rule.clone()).await {
         Ok(running) => running,
@@ -6596,6 +8204,7 @@ async fn update_rule(
             &state.source_configs,
             &state.http_client,
             &state.trace_manager,
+            &state.config,
             name.clone(),
             select_stmt.clone(),
             rule.actions.clone(),
@@ -6932,6 +8541,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCoun
                 &state.source_configs,
                 &state.http_client,
                 &state.trace_manager,
+                &state.config,
                 def.id.clone(),
                 select_stmt.clone(),
                 def.actions.clone(),

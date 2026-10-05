@@ -950,9 +950,10 @@ fn test_extended_math_functions() {
         json!(0.0)
     );
     assert_eq!(eval_expr("SELECT log10(100) FROM demo", &empty), json!(2.0));
-    // log(x) is the natural logarithm (use log10 for base 10).
+    // In eKuiper, log(x) is base-10; ln(x) is natural log.
+    assert_eq!(eval_expr("SELECT log(100) FROM demo", &empty), json!(2.0));
     assert_eq!(
-        eval_expr("SELECT log(100) FROM demo", &empty),
+        eval_expr("SELECT ln(100) FROM demo", &empty),
         json!(4.605170185988092)
     );
     assert_eq!(eval_expr("SELECT sign(42) FROM demo", &empty), json!(1));
@@ -1015,14 +1016,14 @@ fn test_extended_string_functions() {
         json!("cba")
     );
 
-    // Defaults and edge cases.
+    // Defaults and edge cases (eKuiper pads N spaces).
     assert_eq!(
         eval_expr("SELECT lpad('hi', 4) FROM demo", &empty),
-        json!("  hi")
+        json!("    hi")
     );
     assert_eq!(
         eval_expr("SELECT rpad('hi', 2) FROM demo", &empty),
-        json!("hi")
+        json!("hi  ")
     );
 }
 
@@ -1330,4 +1331,84 @@ fn test_parse_create_stream_columns() {
     assert_eq!(stmt.fields.len(), 2);
     assert_eq!(stmt.fields[0].name, "id");
     assert_eq!(stmt.fields[1].data_type, "decimal(10,2)");
+}
+
+#[test]
+fn test_issue24_sql_window_features() {
+    use rekuiper_sql::{Evaluator, TimeUnit, WindowDef};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    // 1. FILTER (WHERE ...) on window
+    let mut p = Parser::new(
+        "SELECT count(*) AS c FROM s GROUP BY TUMBLINGWINDOW(ss, 10) FILTER (WHERE temp > 20)",
+    );
+    let stmt = p.parse_select().expect("should parse window filter");
+    assert_eq!(
+        stmt.window,
+        Some(WindowDef::TumblingTime {
+            unit: TimeUnit::Ss,
+            length: 10,
+        })
+    );
+    assert!(stmt.window_filter.is_some());
+
+    // 2. OVER (WHEN ...) on sliding window
+    let mut p = Parser::new(
+        "SELECT count(*) AS c FROM s GROUP BY SLIDINGWINDOW(ss, 5) OVER (WHEN temp > 30)",
+    );
+    let stmt = p
+        .parse_select()
+        .expect("should parse sliding window over when");
+    assert_eq!(
+        stmt.window,
+        Some(WindowDef::SlidingTime {
+            unit: TimeUnit::Ss,
+            length: 5,
+            delay: None,
+        })
+    );
+    assert!(stmt.window_trigger_condition.is_some());
+
+    // 3. FILTER + OVER
+    let mut p = Parser::new("SELECT * FROM demo GROUP BY SlidingWindow(ss, 1) FILTER (WHERE revenue > 100) OVER (WHEN revenue > 200)");
+    let stmt = p
+        .parse_select()
+        .expect("should parse window with filter and over");
+    assert!(stmt.window_filter.is_some());
+    assert!(stmt.window_trigger_condition.is_some());
+
+    // 4. STATEWINDOW with 2 conditions and OVER (PARTITION BY ...)
+    let mut p =
+        Parser::new("SELECT * FROM demo GROUP BY STATEWINDOW(a = 1, a = 5) OVER (PARTITION BY b)");
+    let stmt = p
+        .parse_select()
+        .expect("should parse statewindow with partition");
+    assert!(matches!(stmt.window, Some(WindowDef::State { .. })));
+    assert!(stmt.window_partition_by.is_some());
+
+    // 5. STATEWINDOW single condition
+    let mut p = Parser::new("SELECT * FROM demo GROUP BY STATEWINDOW(had_changed(a))");
+    let stmt = p
+        .parse_select()
+        .expect("should parse statewindow single condition");
+    assert!(matches!(
+        stmt.window,
+        Some(WindowDef::State {
+            end_condition: None,
+            ..
+        })
+    ));
+
+    // 6. Stateless single-row aggregate: SELECT count(*) AS c FROM s
+    let mut p =
+        Parser::new("SELECT count(*) AS c, sum(val) AS s, min(val) AS lo, max(val) AS hi FROM s");
+    let stmt = p.parse_select().expect("should parse select count");
+    let mut row = HashMap::new();
+    row.insert("val".to_string(), json!(42));
+    let out = Evaluator::eval_select(&stmt, &row).expect("should project row");
+    assert_eq!(out.get("c"), Some(&json!(1)));
+    assert_eq!(out.get("s"), Some(&json!(42)));
+    assert_eq!(out.get("lo"), Some(&json!(42)));
+    assert_eq!(out.get("hi"), Some(&json!(42)));
 }

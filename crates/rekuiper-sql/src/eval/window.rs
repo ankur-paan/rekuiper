@@ -67,13 +67,21 @@ impl Evaluator {
                         .as_ref()
                         .is_some_and(|e| Self::contains_aggregate(e))
             }
-            Expr::Over { call, partition_by } => {
+            Expr::Over {
+                call,
+                partition_by,
+                when,
+            } => {
                 Self::contains_aggregate(call)
                     || partition_by
                         .as_ref()
                         .is_some_and(|e| Self::contains_aggregate(e))
+                    || when.as_ref().is_some_and(|e| Self::contains_aggregate(e))
             }
-            Expr::Wildcard | Expr::Identifier(_) | Expr::Literal(_) => false,
+            Expr::Wildcard
+            | Expr::WildcardModified { .. }
+            | Expr::Identifier(_)
+            | Expr::Literal(_) => false,
         }
     }
 

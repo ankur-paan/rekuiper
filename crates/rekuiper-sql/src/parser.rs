@@ -250,7 +250,65 @@ impl<'a> Parser<'a> {
             self.skip_whitespace();
             if self.pos < self.input.len() && self.input[self.pos..].starts_with('*') {
                 self.pos += 1;
-                fields.push(Expr::Wildcard);
+                self.skip_whitespace();
+                let mut except = Vec::new();
+                let mut replace = Vec::new();
+                let mut is_modified = false;
+                loop {
+                    self.skip_whitespace();
+                    if self.peek_word_is("EXCEPT") {
+                        is_modified = true;
+                        self.match_keyword("EXCEPT");
+                        self.skip_whitespace();
+                        self.expect_char('(')?;
+                        loop {
+                            self.skip_whitespace();
+                            let col = self.parse_column_identifier()?;
+                            except.push(col);
+                            self.skip_whitespace();
+                            if self.pos < self.input.len()
+                                && self.input[self.pos..].starts_with(',')
+                            {
+                                self.pos += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        self.skip_whitespace();
+                        self.expect_char(')')?;
+                    } else if self.peek_word_is("REPLACE") {
+                        is_modified = true;
+                        self.match_keyword("REPLACE");
+                        self.skip_whitespace();
+                        self.expect_char('(')?;
+                        loop {
+                            self.skip_whitespace();
+                            let rep_expr = self.parse_expr()?;
+                            self.skip_whitespace();
+                            self.expect_keyword("AS")?;
+                            self.skip_whitespace();
+                            let col = self.parse_column_identifier()?;
+                            replace.push((rep_expr, col));
+                            self.skip_whitespace();
+                            if self.pos < self.input.len()
+                                && self.input[self.pos..].starts_with(',')
+                            {
+                                self.pos += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        self.skip_whitespace();
+                        self.expect_char(')')?;
+                    } else {
+                        break;
+                    }
+                }
+                if is_modified {
+                    fields.push(Expr::WildcardModified { except, replace });
+                } else {
+                    fields.push(Expr::Wildcard);
+                }
                 field_aliases.push(None);
             } else {
                 if self.peek_word_is("FROM") {
@@ -258,12 +316,15 @@ impl<'a> Parser<'a> {
                 }
                 let expr = self.parse_expr()?;
                 fields.push(expr);
-                // Optional alias: AS alias (stored in field_aliases).
+                // Optional alias: AS alias (stored in field_aliases) or bare backtick alias.
                 let mut alias: Option<String> = None;
                 self.skip_whitespace();
                 if self.peek_word_is("AS") {
                     self.match_keyword("AS");
-                    if let Some(name) = self.peek_word() {
+                    self.skip_whitespace();
+                    if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                        alias = Some(self.parse_backtick_identifier()?);
+                    } else if let Some(name) = self.peek_word() {
                         if !name.eq_ignore_ascii_case("FROM")
                             && !name.eq_ignore_ascii_case("WHERE")
                             && !name.eq_ignore_ascii_case("AND")
@@ -274,6 +335,8 @@ impl<'a> Parser<'a> {
                             alias = Some(name);
                         }
                     }
+                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                    alias = Some(self.parse_backtick_identifier()?);
                 }
                 field_aliases.push(alias);
             }
@@ -374,6 +437,9 @@ impl<'a> Parser<'a> {
 
         let mut group_by = Vec::new();
         let mut window: Option<WindowDef> = None;
+        let mut window_filter: Option<Expr> = None;
+        let mut window_trigger_condition: Option<Expr> = None;
+        let mut window_partition_by: Option<Expr> = None;
         // GROUP BY <items> — items may include window calls which go to `window`.
         if self.peek_word_is("GROUP") {
             self.expect_keyword("GROUP")?;
@@ -382,10 +448,50 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 // Allow trailing commas / empty? No — require an expression.
                 let item = self.parse_expr()?;
+                if let Expr::Over {
+                    partition_by, when, ..
+                } = &item
+                {
+                    if window_partition_by.is_none() {
+                        window_partition_by = partition_by.as_deref().cloned();
+                    }
+                    if window_trigger_condition.is_none() {
+                        window_trigger_condition = when.as_deref().cloned();
+                    }
+                }
                 // Recognize window calls case-insensitively; they go to `window`,
                 // remaining expressions go to `group_by`.
                 if let Some(w) = Self::try_parse_window_def(&item)? {
                     window = Some(w);
+                    loop {
+                        self.skip_whitespace();
+                        if self.peek_word_is("FILTER") {
+                            self.match_keyword("FILTER");
+                            self.expect_char('(')?;
+                            self.expect_keyword("WHERE")?;
+                            window_filter = Some(self.parse_expr()?);
+                            self.expect_char(')')?;
+                        } else if self.peek_word_is("OVER") {
+                            self.match_keyword("OVER");
+                            self.expect_char('(')?;
+                            loop {
+                                self.skip_whitespace();
+                                if self.peek_word_is("WHEN") {
+                                    self.match_keyword("WHEN");
+                                    window_trigger_condition = Some(self.parse_expr()?);
+                                } else if self.peek_word_is("PARTITION") {
+                                    self.match_keyword("PARTITION");
+                                    self.expect_keyword("BY")?;
+                                    window_partition_by = Some(self.parse_expr()?);
+                                } else {
+                                    break;
+                                }
+                            }
+                            self.expect_char(')')?;
+                        } else {
+                            break;
+                        }
+                    }
                 } else {
                     group_by.push(item);
                 }
@@ -468,6 +574,9 @@ impl<'a> Parser<'a> {
             where_clause,
             group_by,
             window,
+            window_filter,
+            window_trigger_condition,
+            window_partition_by,
             having,
             order_by,
             limit,
@@ -480,9 +589,28 @@ impl<'a> Parser<'a> {
     fn try_parse_window_def(expr: &Expr) -> Result<Option<WindowDef>> {
         let (name, args) = match expr {
             Expr::Call { name, args } => (name, args),
+            Expr::Over { call, .. } => match &**call {
+                Expr::Call { name, args } => (name, args),
+                _ => return Ok(None),
+            },
             _ => return Ok(None),
         };
         match name.to_ascii_lowercase().as_str() {
+            "statewindow" => {
+                if args.is_empty() || args.len() > 2 {
+                    bail!("STATEWINDOW expects 1 or 2 arguments, got {}", args.len());
+                }
+                let start_condition = args[0].clone();
+                let end_condition = if args.len() == 2 {
+                    Some(args[1].clone())
+                } else {
+                    None
+                };
+                Ok(Some(WindowDef::State {
+                    start_condition,
+                    end_condition,
+                }))
+            }
             "tumblingwindow" => {
                 if args.len() != 2 {
                     bail!(
@@ -794,7 +922,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr> {
-        let left = self.parse_additive()?;
+        let left = self.parse_bitor()?;
 
         self.skip_whitespace();
         // Check for NOT LIKE (infix): left NOT LIKE right
@@ -803,7 +931,7 @@ impl<'a> Parser<'a> {
             self.match_keyword("NOT");
             if self.peek_word_is("LIKE") {
                 self.match_keyword("LIKE");
-                let right = self.parse_additive()?;
+                let right = self.parse_bitor()?;
                 let like_expr = Expr::BinaryOp {
                     left: Box::new(left),
                     op: BinaryOperator::Like,
@@ -822,7 +950,7 @@ impl<'a> Parser<'a> {
 
         if self.peek_word_is("LIKE") {
             self.match_keyword("LIKE");
-            let right = self.parse_additive()?;
+            let right = self.parse_bitor()?;
             return Ok(Expr::BinaryOp {
                 left: Box::new(left),
                 op: BinaryOperator::Like,
@@ -855,12 +983,75 @@ impl<'a> Parser<'a> {
         };
 
         self.pos += len;
-        let right = self.parse_additive()?;
+        let right = self.parse_bitor()?;
         Ok(Expr::BinaryOp {
             left: Box::new(left),
             op,
             right: Box::new(right),
         })
+    }
+
+    fn parse_bitor(&mut self) -> Result<Expr> {
+        let mut left = self.parse_bitxor()?;
+        loop {
+            self.skip_whitespace();
+            if self.pos < self.input.len()
+                && self.input[self.pos..].starts_with('|')
+                && !self.input[self.pos..].starts_with("||")
+            {
+                self.pos += 1;
+                let right = self.parse_bitxor()?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::BitOr,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_bitxor(&mut self) -> Result<Expr> {
+        let mut left = self.parse_bitand()?;
+        loop {
+            self.skip_whitespace();
+            if self.pos < self.input.len() && self.input[self.pos..].starts_with('^') {
+                self.pos += 1;
+                let right = self.parse_bitand()?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::BitXor,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_bitand(&mut self) -> Result<Expr> {
+        let mut left = self.parse_additive()?;
+        loop {
+            self.skip_whitespace();
+            if self.pos < self.input.len()
+                && self.input[self.pos..].starts_with('&')
+                && !self.input[self.pos..].starts_with("&&")
+            {
+                self.pos += 1;
+                let right = self.parse_additive()?;
+                left = Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: BinaryOperator::BitAnd,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
     }
 
     fn parse_additive(&mut self) -> Result<Expr> {
@@ -987,6 +1178,37 @@ impl<'a> Parser<'a> {
         Ok(word)
     }
 
+    pub fn parse_backtick_identifier(&mut self) -> Result<String> {
+        self.skip_whitespace();
+        if !(self.pos < self.input.len() && self.input[self.pos..].starts_with('`')) {
+            bail!("Expected backtick identifier");
+        }
+        self.pos += 1;
+        let start = self.pos;
+        while self.pos < self.input.len() && !self.input[self.pos..].starts_with('`') {
+            self.pos += 1;
+        }
+        if self.pos >= self.input.len() {
+            bail!("Unclosed backtick identifier");
+        }
+        let ident = self.input[start..self.pos].to_string();
+        self.pos += 1;
+        Ok(ident)
+    }
+
+    pub fn parse_column_identifier(&mut self) -> Result<String> {
+        self.skip_whitespace();
+        if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+            self.parse_backtick_identifier()
+        } else {
+            let col = self
+                .peek_word()
+                .ok_or_else(|| anyhow::anyhow!("Expected column identifier"))?;
+            self.pos += col.len();
+            Ok(col)
+        }
+    }
+
     fn parse_primary(&mut self) -> Result<Expr> {
         self.skip_whitespace();
         if self.pos >= self.input.len() {
@@ -994,13 +1216,19 @@ impl<'a> Parser<'a> {
         }
 
         let rem = &self.input[self.pos..];
+        // Backtick identifier: `identifier`
+        if rem.starts_with('`') {
+            let ident = self.parse_backtick_identifier()?;
+            return self.parse_postfix(Expr::Identifier(ident));
+        }
+
         // Parentheses: (...)
         if rem.starts_with('(') {
             self.pos += 1;
             let expr = self.parse_expr()?;
             self.skip_whitespace();
             self.expect_char(')')?;
-            return Ok(expr);
+            return self.parse_postfix(expr);
         }
 
         // String literal
@@ -1012,7 +1240,7 @@ impl<'a> Parser<'a> {
                 .ok_or_else(|| anyhow::anyhow!("Unterminated string literal"))?;
             let s = &rest[..end];
             self.pos += quote.len_utf8() + end + quote.len_utf8();
-            return Ok(Expr::Literal(serde_json::Value::String(s.to_string())));
+            return self.parse_postfix(Expr::Literal(serde_json::Value::String(s.to_string())));
         }
 
         // Array literal: [e1, e2, ...] — desugared to array_create(...).
@@ -1037,7 +1265,7 @@ impl<'a> Parser<'a> {
             }
             self.skip_whitespace();
             self.expect_char(']')?;
-            return Ok(Expr::Call {
+            return self.parse_postfix(Expr::Call {
                 name: "array_create".to_string(),
                 args,
             });
@@ -1071,7 +1299,7 @@ impl<'a> Parser<'a> {
             }
             self.skip_whitespace();
             self.expect_char('}')?;
-            return Ok(Expr::Call {
+            return self.parse_postfix(Expr::Call {
                 name: "json_map".to_string(),
                 args,
             });
@@ -1079,7 +1307,8 @@ impl<'a> Parser<'a> {
 
         // Numeric literal: digit or '.' followed by digit
         if Self::is_number_start(rem) {
-            return self.parse_number();
+            let num = self.parse_number()?;
+            return self.parse_postfix(num);
         }
 
         let word = self
@@ -1090,13 +1319,14 @@ impl<'a> Parser<'a> {
         self.pos += word.len();
 
         if word.eq_ignore_ascii_case("true") {
-            Ok(Expr::Literal(serde_json::Value::Bool(true)))
+            self.parse_postfix(Expr::Literal(serde_json::Value::Bool(true)))
         } else if word.eq_ignore_ascii_case("false") {
-            Ok(Expr::Literal(serde_json::Value::Bool(false)))
+            self.parse_postfix(Expr::Literal(serde_json::Value::Bool(false)))
         } else if word.eq_ignore_ascii_case("null") {
-            Ok(Expr::Literal(serde_json::Value::Null))
+            self.parse_postfix(Expr::Literal(serde_json::Value::Null))
         } else if word.eq_ignore_ascii_case("CASE") {
-            self.parse_case()
+            let case_expr = self.parse_case()?;
+            self.parse_postfix(case_expr)
         } else {
             // Function call: name '(' args ')' — usable in SELECT and WHERE/expressions.
             // Allow optional whitespace between name and '('.
@@ -1140,74 +1370,115 @@ impl<'a> Parser<'a> {
                 self.skip_whitespace();
                 self.expect_char(')')?;
                 let call_expr = Expr::Call { name: word, args };
-                // Analytic OVER clause: func(...) OVER ([PARTITION BY expr]).
+                // Analytic OVER clause: func(...) OVER ([PARTITION BY expr] [WHEN cond]).
+                self.skip_whitespace();
                 if self.match_keyword("OVER") {
+                    self.skip_whitespace();
                     self.expect_char('(')?;
                     let mut partition_by = None;
-                    if self.match_keyword("PARTITION") {
-                        self.expect_keyword("BY")?;
-                        partition_by = Some(Box::new(self.parse_expr()?));
+                    let mut when = None;
+                    loop {
+                        self.skip_whitespace();
+                        if self.peek_word_is("PARTITION") {
+                            self.match_keyword("PARTITION");
+                            self.expect_keyword("BY")?;
+                            partition_by = Some(Box::new(self.parse_expr()?));
+                        } else if self.peek_word_is("WHEN") {
+                            self.match_keyword("WHEN");
+                            when = Some(Box::new(self.parse_expr()?));
+                        } else {
+                            break;
+                        }
                     }
+                    self.skip_whitespace();
                     self.expect_char(')')?;
-                    return Ok(Expr::Over {
+                    let over_expr = Expr::Over {
                         call: Box::new(call_expr),
                         partition_by,
-                    });
+                        when,
+                    };
+                    return self.parse_postfix(over_expr);
                 }
-                return Ok(call_expr);
+                return self.parse_postfix(call_expr);
             }
-            // Identifier with dot/arrow navigation: a.b.c, a->b, a->'b'.
-            // The arrow form mirrors eKuiper, where `a->b` is nested field
-            // access equivalent to `a.b`.
-            let mut expr = Expr::Identifier(word);
-            loop {
+            let expr = Expr::Identifier(word);
+            self.parse_postfix(expr)
+        }
+    }
+
+    fn parse_postfix(&mut self, mut expr: Expr) -> Result<Expr> {
+        loop {
+            self.skip_whitespace();
+            if self.pos < self.input.len() && self.input[self.pos..].starts_with('.') {
+                self.pos += 1;
                 self.skip_whitespace();
-                if self.pos < self.input.len() && self.input[self.pos..].starts_with('.') {
+                let field = if self.pos < self.input.len()
+                    && self.input[self.pos..].starts_with('*')
+                {
                     self.pos += 1;
-                    self.skip_whitespace();
-                    let field = self
+                    "*".to_string()
+                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                    self.parse_backtick_identifier()?
+                } else {
+                    let f = self
                         .peek_word()
                         .ok_or_else(|| anyhow::anyhow!("Expected field name after '.'"))?;
-                    self.skip_whitespace();
-                    self.pos += field.len();
-                    expr = Expr::FieldAccess {
-                        parent: Box::new(expr),
-                        field,
-                    };
-                } else if self.pos + 1 < self.input.len()
-                    && self.input[self.pos..].starts_with("->")
+                    self.pos += f.len();
+                    f
+                };
+                expr = Expr::FieldAccess {
+                    parent: Box::new(expr),
+                    field,
+                };
+            } else if self.pos + 1 < self.input.len() && self.input[self.pos..].starts_with("->") {
+                self.pos += 2;
+                self.skip_whitespace();
+                let field = if self.pos < self.input.len()
+                    && (self.input[self.pos..].starts_with('\'')
+                        || self.input[self.pos..].starts_with('"'))
                 {
-                    self.pos += 2;
-                    self.skip_whitespace();
-                    // Support either an unquoted field or a quoted field.
-                    let field = if self.pos < self.input.len()
-                        && (self.input[self.pos..].starts_with('\'')
-                            || self.input[self.pos..].starts_with('"'))
-                    {
-                        let quote = self.input[self.pos..].chars().next().unwrap();
-                        let rest = &self.input[self.pos + quote.len_utf8()..];
-                        let end = rest
-                            .find(quote)
-                            .ok_or_else(|| anyhow::anyhow!("Unterminated field name after '->'"))?;
-                        let field = rest[..end].to_string();
-                        self.pos += quote.len_utf8() + end + quote.len_utf8();
-                        field
-                    } else {
-                        let w = self
-                            .peek_word()
-                            .ok_or_else(|| anyhow::anyhow!("Expected field name after '->'"))?;
-                        self.pos += w.len();
-                        w
-                    };
-                    expr = Expr::FieldAccess {
-                        parent: Box::new(expr),
-                        field,
-                    };
-                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('[') {
-                    // Postfix index/slice: `a[0]`, `a[-1]`, `a[l:h]`,
-                    // `a[:h]`, `a[l:]`, `a[:]`. Bounds are expressions
-                    // (e.g. `children[x+1:y]`), mirroring eKuiper slicing.
+                    let quote = self.input[self.pos..].chars().next().unwrap();
+                    let rest = &self.input[self.pos + quote.len_utf8()..];
+                    let end = rest
+                        .find(quote)
+                        .ok_or_else(|| anyhow::anyhow!("Unterminated field name after '->'"))?;
+                    let f = rest[..end].to_string();
+                    self.pos += quote.len_utf8() + end + quote.len_utf8();
+                    f
+                } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                    self.parse_backtick_identifier()?
+                } else {
+                    let w = self
+                        .peek_word()
+                        .ok_or_else(|| anyhow::anyhow!("Expected field name after '->'"))?;
+                    self.pos += w.len();
+                    w
+                };
+                expr = Expr::FieldAccess {
+                    parent: Box::new(expr),
+                    field,
+                };
+            } else if self.pos < self.input.len() && self.input[self.pos..].starts_with('[') {
+                self.pos += 1;
+                self.skip_whitespace();
+                if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
                     self.pos += 1;
+                    self.skip_whitespace();
+                    let hi =
+                        if self.pos < self.input.len() && self.input[self.pos..].starts_with(']') {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
+                    self.skip_whitespace();
+                    self.expect_char(']')?;
+                    expr = Expr::Slice {
+                        base: Box::new(expr),
+                        lo: None,
+                        hi,
+                    };
+                } else {
+                    let first = self.parse_expr()?;
                     self.skip_whitespace();
                     if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
                         self.pos += 1;
@@ -1223,43 +1494,22 @@ impl<'a> Parser<'a> {
                         self.expect_char(']')?;
                         expr = Expr::Slice {
                             base: Box::new(expr),
-                            lo: None,
+                            lo: Some(Box::new(first)),
                             hi,
                         };
                     } else {
-                        let first = self.parse_expr()?;
-                        self.skip_whitespace();
-                        if self.pos < self.input.len() && self.input[self.pos..].starts_with(':') {
-                            self.pos += 1;
-                            self.skip_whitespace();
-                            let hi = if self.pos < self.input.len()
-                                && self.input[self.pos..].starts_with(']')
-                            {
-                                None
-                            } else {
-                                Some(Box::new(self.parse_expr()?))
-                            };
-                            self.skip_whitespace();
-                            self.expect_char(']')?;
-                            expr = Expr::Slice {
-                                base: Box::new(expr),
-                                lo: Some(Box::new(first)),
-                                hi,
-                            };
-                        } else {
-                            self.expect_char(']')?;
-                            expr = Expr::Index {
-                                base: Box::new(expr),
-                                index: Box::new(first),
-                            };
-                        }
+                        self.expect_char(']')?;
+                        expr = Expr::Index {
+                            base: Box::new(expr),
+                            index: Box::new(first),
+                        };
                     }
-                } else {
-                    break;
                 }
+            } else {
+                break;
             }
-            Ok(expr)
         }
+        Ok(expr)
     }
 
     /// Optional source alias after FROM/JOIN targets: `AS a` or bare `a`.
@@ -1268,12 +1518,18 @@ impl<'a> Parser<'a> {
         self.skip_whitespace();
         if self.match_keyword("AS") {
             self.skip_whitespace();
+            if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+                return Ok(Some(self.parse_backtick_identifier()?));
+            }
             let name = self
                 .peek_word()
                 .ok_or_else(|| anyhow::anyhow!("Expected alias after AS"))?;
             self.skip_whitespace();
             self.pos += name.len();
             return Ok(Some(name));
+        }
+        if self.pos < self.input.len() && self.input[self.pos..].starts_with('`') {
+            return Ok(Some(self.parse_backtick_identifier()?));
         }
         const RESERVED: &[&str] = &[
             "WHERE",

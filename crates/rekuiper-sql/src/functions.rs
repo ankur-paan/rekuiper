@@ -1106,6 +1106,14 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             "regexp_substring('abc123', '[0-9]+')"
         ),
         meta!(
+            "regexp_substr",
+            "crypto",
+            "First regex match (group 1 preferred).",
+            false,
+            "2",
+            "regexp_substr('abc123', '[0-9]+')"
+        ),
+        meta!(
             "split_value",
             "crypto",
             "0-based split segment at an index.",
@@ -1386,6 +1394,14 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
             true,
             "2",
             "percentile(temp, 0.9)"
+        ),
+        meta!(
+            "percentile_cont",
+            "aggregate",
+            "Continuous percentile by interpolation.",
+            true,
+            "2",
+            "percentile_cont(temp, 0.9)"
         ),
         meta!(
             "percentile_disc",
@@ -1723,7 +1739,7 @@ mod tests {
     #[test]
     fn catalog_covers_all_builtins_exactly_once() {
         let catalog = builtin_function_metadata();
-        assert_eq!(catalog.len(), 217, "catalog must list 217 functions");
+        assert_eq!(catalog.len(), 219, "catalog must list 219 functions");
         let mut seen = HashSet::new();
         for meta in catalog {
             assert!(

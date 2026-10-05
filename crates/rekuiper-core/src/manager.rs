@@ -149,14 +149,40 @@ impl TableManager {
         Ok(())
     }
 
-    /// Appends a lookup row to a table (creates the row list on demand,
-    /// even if the table definition itself was never registered).
+    /// Appends or updates a lookup row in a table.
+    /// When KEY / PRIMARY_KEY option is configured on the table, matches are replaced in-place.
+    /// When RETAIN_SIZE is configured, oldest rows beyond RETAIN_SIZE are pruned.
     pub fn insert_table_row(&self, table: &str, row: HashMap<String, Value>) {
-        self.rows
-            .write()
-            .entry(table.to_string())
-            .or_default()
-            .push(row);
+        let def = self.get_table(table);
+        let key_col = def.as_ref().and_then(|d| {
+            d.options
+                .iter()
+                .find(|(k, _)| {
+                    k.eq_ignore_ascii_case("KEY") || k.eq_ignore_ascii_case("PRIMARY_KEY")
+                })
+                .map(|(_, v)| v.clone())
+        });
+        let retain_size: Option<usize> = def.as_ref().and_then(|d| {
+            d.options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("RETAIN_SIZE"))
+                .and_then(|(_, v)| v.parse().ok())
+        });
+        let mut rows_map = self.rows.write();
+        let rows = rows_map.entry(table.to_string()).or_default();
+        if let Some(ref k) = key_col {
+            if let Some(target_val) = row.get(k) {
+                if let Some(pos) = rows.iter().position(|r| r.get(k) == Some(target_val)) {
+                    rows[pos] = row;
+                    return;
+                }
+            }
+        }
+        rows.push(row);
+        let max_size = retain_size.unwrap_or(if key_col.is_some() { usize::MAX } else { 100 });
+        while rows.len() > max_size {
+            rows.remove(0);
+        }
     }
 
     /// Returns all lookup rows stored for a table (empty when none).
@@ -399,6 +425,7 @@ pub struct RuleCounters {
     pub dropped: std::sync::atomic::AtomicU64,
     pub high_water: std::sync::atomic::AtomicU64,
     pub blocked_micros: std::sync::atomic::AtomicU64,
+    pub last_exception: parking_lot::RwLock<String>,
 }
 
 impl RuleCounters {
@@ -408,6 +435,11 @@ impl RuleCounters {
         guard.source_records_in_total = self.source_in.load(Relaxed);
         guard.sink_records_out_total = self.sink_out.load(Relaxed);
         guard.exceptions_total = self.exceptions.load(Relaxed);
+        let last_exc = self.last_exception.read().clone();
+        if !last_exc.is_empty() {
+            guard.last_exception = last_exc.clone();
+            guard.message = last_exc;
+        }
         guard.source_records_filtered_total = self.filtered.load(Relaxed);
         guard.sink_records_enqueued_total = self.enqueued.load(Relaxed);
         guard.sink_records_failed_total = self.sink_failed.load(Relaxed);
@@ -428,6 +460,11 @@ impl RuleCounters {
     pub fn inc_exceptions(&self, n: u64) {
         use std::sync::atomic::Ordering::Relaxed;
         self.exceptions.fetch_add(n, Relaxed);
+    }
+    pub fn record_exception(&self, err: &str) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.exceptions.fetch_add(1, Relaxed);
+        *self.last_exception.write() = err.to_string();
     }
     pub fn inc_filtered(&self, n: u64) {
         use std::sync::atomic::Ordering::Relaxed;
@@ -638,6 +675,14 @@ impl RuleManager {
 
     pub fn inc_exceptions(&self, id: &str, count: u64) {
         self.bump(id, |c| &c.exceptions, count);
+    }
+
+    pub fn record_exception(&self, id: &str, err: &str) {
+        let map = self.rules.read();
+        if let Some(rule) = map.get(id) {
+            let active = rule.read();
+            active.counters.record_exception(err);
+        }
     }
 
     pub fn inc_sink_failed(&self, id: &str, count: u64) {

@@ -41,6 +41,9 @@ pub struct BasicConfig {
     /// Ruletest SSE server port (`httpServerPort`; documented default 10081).
     #[serde(default = "default_http_server_port")]
     pub http_server_port: u16,
+    /// Whether rules and sinks can connect to private networks (default false for security).
+    #[serde(default)]
+    pub enable_private_net: bool,
 }
 
 fn default_ip() -> String {
@@ -90,6 +93,7 @@ impl Default for BasicConfig {
             prometheus_port: default_prometheus_port(),
             http_server_ip: default_http_server_ip(),
             http_server_port: default_http_server_port(),
+            enable_private_net: false,
         }
     }
 }
@@ -228,6 +232,11 @@ fn apply_basic_override(basic: &mut BasicConfig, key: &str, val: &str) {
                 basic.http_server_port = v;
             }
         }
+        "ENABLEPRIVATENET" => {
+            if let Some(v) = parse_env_bool(val) {
+                basic.enable_private_net = v;
+            }
+        }
         _ => {}
     }
 }
@@ -328,5 +337,25 @@ mod tests {
         apply_env_overrides_from_iter(&mut config2, vars_kuiper);
         assert_eq!(config2.basic.rest_port, 59720);
         assert_eq!(config2.basic.port, 59720);
+    }
+
+    #[test]
+    fn enable_private_net_env_override() {
+        let mut config = KuiperConfig::default();
+        assert!(!config.basic.enable_private_net);
+
+        let vars = vec![(
+            "KUIPER__BASIC__ENABLEPRIVATENET".to_string(),
+            "true".to_string(),
+        )];
+        apply_env_overrides_from_iter(&mut config, vars);
+        assert!(config.basic.enable_private_net);
+
+        let vars_rekuiper = vec![(
+            "REKUIPER__BASIC__ENABLE_PRIVATE_NET".to_string(),
+            "false".to_string(),
+        )];
+        apply_env_overrides_from_iter(&mut config, vars_rekuiper);
+        assert!(!config.basic.enable_private_net);
     }
 }
