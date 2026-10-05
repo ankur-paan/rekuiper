@@ -675,6 +675,14 @@ impl RuleManager {
         self.bump(id, |c| &c.exceptions, count);
     }
 
+    pub fn record_exception(&self, id: &str, err: &str) {
+        let map = self.rules.read();
+        if let Some(rule) = map.get(id) {
+            let active = rule.read();
+            active.counters.record_exception(err);
+        }
+    }
+
     pub fn inc_sink_failed(&self, id: &str, count: u64) {
         self.bump(id, |c| &c.sink_failed, count);
     }

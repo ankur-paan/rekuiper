@@ -1718,6 +1718,9 @@ async fn create_rule(
     if let Err(e) = validate_rule_options(&rule.options) {
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
+    if let Err(e) = validate_sink_actions(&rule.actions) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     // Graph rules carry no SQL: compile the DAG into SQL + actions first.
     if rule.sql.trim().is_empty() {
         if let Some(ref graph) = rule.graph {
@@ -1772,6 +1775,7 @@ async fn create_rule(
         &state.source_configs,
         &state.http_client,
         &state.trace_manager,
+        &state.config,
         rule_id.clone(),
         select_stmt.clone(),
         rule.actions.clone(),
@@ -2740,6 +2744,7 @@ pub async fn restore_running_rules(state: &AppState) {
             &state.source_configs,
             &state.http_client,
             &state.trace_manager,
+            &state.config,
             rule.id.clone(),
             select_stmt.clone(),
             rule.actions.clone(),
@@ -3344,7 +3349,8 @@ fn prepare_actions(
                     let url = opts
                         .get("url")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("http://localhost")
                         .to_string();
                     let method = opts
                         .get("method")
@@ -3753,6 +3759,7 @@ fn spawn_rule_task(
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     http_client: &reqwest::Client,
     trace_manager: &TraceManager,
+    config: &Arc<RwLock<KuiperConfig>>,
     rule_id: String,
     select_stmt: SelectStmt,
     actions: Vec<HashMap<String, Value>>,
@@ -3813,6 +3820,7 @@ fn spawn_rule_task(
     let sink_stream_bus = stream_bus.clone();
     let sink_http_client = http_client.clone();
     let sink_trace_mgr = trace_manager.clone();
+    let sink_config = config.clone();
     let sink_counters = rule_manager
         .rule_counters(&rule_id)
         .unwrap_or_else(|| Arc::new(RuleCounters::default()));
@@ -3886,11 +3894,13 @@ fn spawn_rule_task(
                         &output_record.data,
                         Some(&output_record.data),
                     );
+                    let enable_private_net = sink_config.read().basic.enable_private_net;
                     let ctx = SinkContext {
                         rule_id: &sink_rule_id,
                         rule_mgr: &sink_rule_mgr,
                         stream_bus: &sink_stream_bus,
                         http_client: &sink_http_client,
+                        enable_private_net,
                     };
                     match deliver_record(&mut runtimes, &output_record, &ctx, &mut files).await {
                         Delivery::Delivered => {
@@ -3942,11 +3952,13 @@ fn spawn_rule_task(
                         sink_counters.sink_out.fetch_add(pending_file_records, Relaxed);
                         pending_file_records = 0;
                     }
+                    let enable_private_net = sink_config.read().basic.enable_private_net;
                     let ctx = SinkContext {
                         rule_id: &sink_rule_id,
                         rule_mgr: &sink_rule_mgr,
                         stream_bus: &sink_stream_bus,
                         http_client: &sink_http_client,
+                        enable_private_net,
                     };
                     let live_recent = last_live.elapsed() < SINK_TICK * 2;
                     for rt in runtimes.iter_mut() {
@@ -4327,6 +4339,7 @@ struct SinkContext<'a> {
     rule_mgr: &'a RuleManager,
     stream_bus: &'a StreamBus,
     http_client: &'a reqwest::Client,
+    enable_private_net: bool,
 }
 
 /// Why an action did not deliver a record.
@@ -4345,6 +4358,78 @@ enum Delivery {
     Delivered,
     Cached,
     Failed,
+}
+
+/// Check whether an IP address belongs to private/internal networks:
+/// loopback, link-local, RFC 1918, carrier-grade NAT, or unspecified.
+pub fn is_private_or_internal_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 0.0.0.0/8 (current network / unspecified RFC 1122)
+            octets[0] == 0
+                // 127.0.0.0/8 (loopback RFC 1122)
+                || ipv4.is_loopback()
+                // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (private RFC 1918)
+                || ipv4.is_private()
+                // 169.254.0.0/16 (link-local RFC 3927)
+                || ipv4.is_link_local()
+                // 100.64.0.0/10 (carrier-grade NAT RFC 6598)
+                || (octets[0] == 100 && (octets[1] & 0b1100_0000) == 64)
+                // 192.0.0.0/24 (IETF protocol assignments RFC 6890)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+                // 192.0.2.0/24 (TEST-NET-1 RFC 5737)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                // 198.18.0.0/15 (benchmarking RFC 2544)
+                || (octets[0] == 198 && (octets[1] & 0b1111_1110) == 18)
+                // 198.51.100.0/24 (TEST-NET-2 RFC 5737)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                // 203.0.113.0/24 (TEST-NET-3 RFC 5737)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                // 255.255.255.255 (broadcast)
+                || ipv4.is_broadcast()
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            // ::1 (loopback)
+            ipv6.is_loopback()
+                // :: (unspecified)
+                || ipv6.is_unspecified()
+                // fe80::/10 (link-local unicast)
+                || (ipv6.segments()[0] & 0xffc0) == 0xfe80
+                // fc00::/7 (unique local address RFC 4193, includes fd00::/8)
+                || (ipv6.segments()[0] & 0xfe00) == 0xfc00
+                // IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+                || match ipv6.to_ipv4() {
+                    Some(ipv4) => is_private_or_internal_ip(std::net::IpAddr::V4(ipv4)),
+                    None => false,
+                }
+        }
+    }
+}
+
+fn http_op_name(method: &str) -> String {
+    let mut chars = method.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+    }
+}
+
+fn make_internal_net_error(
+    method: &str,
+    url: &str,
+    ip: std::net::IpAddr,
+    port: u16,
+) -> SendError {
+    let op = http_op_name(method);
+    let dial_target = match ip {
+        std::net::IpAddr::V4(v4) => format!("{}:{}", v4, port),
+        std::net::IpAddr::V6(v6) => format!("[{}]:{}", v6, port),
+    };
+    SendError::Permanent(format!(
+        "rest sink fails to send out the data:err={} \"{}\": dial tcp {}: ip {} is in internal network recoverAble=false method={} path=\"{}\"",
+        op, url, dial_target, ip, method, url
+    ))
 }
 
 /// Send one record through one action. File actions buffer into the rule's
@@ -4413,6 +4498,31 @@ async fn send_action(
             } else {
                 base_url.to_string()
             };
+
+            if !ctx.enable_private_net {
+                if let Ok(url_obj) = reqwest::Url::parse(&final_url) {
+                    let port = url_obj.port_or_known_default().unwrap_or(80);
+                    if let Some(host_str) = url_obj.host_str() {
+                        let cleaned = host_str.trim_start_matches('[').trim_end_matches(']');
+                        if let Ok(ip) = cleaned.parse::<std::net::IpAddr>() {
+                            if is_private_or_internal_ip(ip) {
+                                return Err(make_internal_net_error(method, &final_url, ip, port));
+                            }
+                        } else if let Ok(addrs) = tokio::net::lookup_host((cleaned, port)).await {
+                            for addr in addrs {
+                                if is_private_or_internal_ip(addr.ip()) {
+                                    return Err(make_internal_net_error(
+                                        method,
+                                        &final_url,
+                                        addr.ip(),
+                                        port,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             let req_method = match method.as_str() {
                 "GET" => reqwest::Method::GET,
@@ -4695,7 +4805,7 @@ fn report_send_error(rt: &mut ActionRuntime, ctx: &SinkContext<'_>, err: &SendEr
         SendError::Retry(m) | SendError::Permanent(m) => m,
         SendError::Dropped => return,
     };
-    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+    ctx.rule_mgr.record_exception(ctx.rule_id, msg);
     let now = std::time::Instant::now();
     if rt
         .last_warn
@@ -7341,6 +7451,30 @@ fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(),
     Ok(())
 }
 
+fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), String> {
+    for action in actions {
+        for (kind, opts) in action {
+            if kind.eq_ignore_ascii_case("rest") || kind.eq_ignore_ascii_case("http") {
+                if let Some(m) = opts.get("method").and_then(|v| v.as_str()) {
+                    let m_upper = m.to_uppercase();
+                    if !matches!(m_upper.as_str(), "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "PATCH") {
+                        return Err(format!("Not supported HTTP method {}.", m));
+                    }
+                }
+                if let Some(bt) = opts.get("bodyType").and_then(|v| v.as_str()) {
+                    if bt.eq_ignore_ascii_case("form") {
+                        let fmt = opts.get("format").and_then(|v| v.as_str()).unwrap_or("");
+                        if !fmt.eq_ignore_ascii_case("urlencoded") {
+                            return Err("format must be urlencoded if bodyType is form".to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_duplicate_fields(stmt: &SelectStmt) -> Option<Response> {
     let mut seen_fields = HashSet::new();
     for (idx, field) in stmt.fields.iter().enumerate() {
@@ -7809,6 +7943,7 @@ fn activate_rule(state: &AppState, rule_id: &str) {
                 &state.source_configs,
                 &state.http_client,
                 &state.trace_manager,
+                &state.config,
                 rule_id.to_string(),
                 select_stmt.clone(),
                 rule.actions.clone(),
@@ -7953,6 +8088,9 @@ async fn update_rule(
     if let Some(resp) = reject_invalid_rule(&state, &select_stmt, rule.options.as_ref()) {
         return resp;
     }
+    if let Err(e) = validate_sink_actions(&rule.actions) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
     let was_running = match state.rule_manager.update_rule(rule.clone()).await {
         Ok(running) => running,
         Err(e) => {
@@ -7970,6 +8108,7 @@ async fn update_rule(
             &state.source_configs,
             &state.http_client,
             &state.trace_manager,
+            &state.config,
             name.clone(),
             select_stmt.clone(),
             rule.actions.clone(),
@@ -8306,6 +8445,7 @@ async fn process_import_payload(state: &AppState, payload: &Value) -> ImportCoun
                 &state.source_configs,
                 &state.http_client,
                 &state.trace_manager,
+                &state.config,
                 def.id.clone(),
                 select_stmt.clone(),
                 def.actions.clone(),
