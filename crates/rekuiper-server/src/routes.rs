@@ -377,6 +377,14 @@ pub fn create_default_portables(
     Arc::new(RwLock::new(HashMap::new()))
 }
 
+#[derive(Debug, Clone)]
+pub struct HttpPushEndpoint {
+    pub stream_name: String,
+    pub path: String,
+    pub method: String,
+    pub format: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub start_time: Instant,
@@ -396,6 +404,7 @@ pub struct AppState {
     pub stream_source_cancels: Arc<RwLock<HashMap<String, Vec<tokio::sync::watch::Sender<bool>>>>>,
     pub rule_streams: Arc<RwLock<HashMap<String, HashSet<String>>>>,
     pub stream_attach_meta: Arc<RwLock<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+    pub http_push_endpoints: Arc<RwLock<HashMap<String, HttpPushEndpoint>>>,
     pub http_client: reqwest::Client,
     pub schema_manager: SchemaManager,
     pub plugin_manager: PluginManager,
@@ -491,6 +500,7 @@ impl AppState {
             stream_source_cancels: Arc::new(RwLock::new(HashMap::new())),
             rule_streams: Arc::new(RwLock::new(HashMap::new())),
             stream_attach_meta: Arc::new(RwLock::new(HashMap::new())),
+            http_push_endpoints: Arc::new(RwLock::new(HashMap::new())),
             schema_manager: SchemaManager::new(),
             plugin_manager: PluginManager::new(),
             trace_manager: TraceManager::new(),
@@ -1061,6 +1071,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metrics/dump", get(metrics_dump))
         .route("/metrics/dump/check", get(metrics_dump_check))
         .route("/metrics", get(prometheus_metrics_handler))
+        .fallback(create_router_fallback)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_guard,
@@ -2154,6 +2165,10 @@ fn cancel_stream_sources(state: &AppState, stream_name: &str) {
     }
     state.stream_active_rules.write().remove(stream_name);
     state.stream_attach_meta.write().remove(stream_name);
+    state
+        .http_push_endpoints
+        .write()
+        .retain(|_, ep| ep.stream_name != stream_name);
 }
 
 fn cancel_table_source(state: &AppState, table_name: &str) {
@@ -2376,6 +2391,63 @@ fn bootstrap_table_source(state: &AppState, table_name: &str) {
     }
 }
 
+fn resolve_httppush_source(
+    stream_manager: &StreamManager,
+    source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    stream_name: &str,
+) -> Option<HttpPushEndpoint> {
+    let def = stream_manager.get_stream(stream_name)?;
+    let is_push = def.options.get("TYPE").is_some_and(|t| {
+        t.eq_ignore_ascii_case("httppush") || t.eq_ignore_ascii_case("http_push")
+    });
+    if !is_push {
+        return None;
+    }
+
+    let raw_path = def
+        .options
+        .get("DATASOURCE")
+        .or_else(|| def.options.get("ENDPOINT"))
+        .or_else(|| def.options.get("PATH"))
+        .map(|s| s.trim())
+        .unwrap_or("");
+    let path = if raw_path.is_empty() {
+        format!("/{}", stream_name)
+    } else {
+        format!("/{}", raw_path.trim_start_matches('/'))
+    };
+
+    let mut method = "POST".to_string();
+    if let Some(m) = def.options.get("METHOD") {
+        if !m.trim().is_empty() {
+            method = m.trim().to_ascii_uppercase();
+        }
+    } else if let Some(key) = def.options.get("CONF_KEY").map(|k| k.trim()) {
+        if !key.is_empty() {
+            let lookup = format!("httppush/{}", key);
+            let guard = source_configs.read();
+            if let Some(val) = guard.get(&lookup).or_else(|| guard.get(key)) {
+                if let Some(m) = val.get("method").and_then(|v| v.as_str()) {
+                    method = m.trim().to_ascii_uppercase();
+                }
+            }
+        }
+    }
+
+    let format = def
+        .options
+        .get("FORMAT")
+        .map(|f| f.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "json".to_string());
+
+    Some(HttpPushEndpoint {
+        stream_name: stream_name.to_string(),
+        path,
+        method,
+        format,
+    })
+}
+
 fn register_rule_stream_source(
     state: &AppState,
     stream_name: &str,
@@ -2454,6 +2526,34 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
             .entry(rule_id.to_string())
             .or_default()
             .push(rule_cancel_tx);
+        return;
+    }
+
+    // HTTP Push source streams listen on the configured HTTP data server endpoint.
+    if let Some(endpoint) = resolve_httppush_source(
+        &state.stream_manager,
+        &state.source_configs,
+        stream_name,
+    ) {
+        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+        register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
+        let path = endpoint.path.clone();
+        state
+            .http_push_endpoints
+            .write()
+            .insert(path.clone(), endpoint);
+
+        let state_clone = state.clone();
+        let stream_name_clone = stream_name.to_string();
+        tokio::spawn(async move {
+            let _ = cancel_rx.changed().await;
+            let mut guard = state_clone.http_push_endpoints.write();
+            if let Some(ep) = guard.get(&path) {
+                if ep.stream_name == stream_name_clone {
+                    guard.remove(&path);
+                }
+            }
+        });
         return;
     }
 
@@ -3127,6 +3227,10 @@ fn cancel_rule_source(state: &AppState, rule_id: &str) {
                             let _ = tx.send(true);
                         }
                     }
+                    state
+                        .http_push_endpoints
+                        .write()
+                        .retain(|_, ep| ep.stream_name != stream);
                 }
             }
         }
@@ -11867,11 +11971,126 @@ pub async fn sse_ruletest(State(state): State<AppState>, Path(name): Path<String
         .into_response()
 }
 
-/// Dedicated ruletest SSE listener serving the documented
-/// `http://<httpServerIp>:<httpServerPort>/test/:id` endpoint.
+/// Ingest handler for HTTP Push sources (`TYPE="httppush"`).
+/// Directly accepts JSON object payloads or JSON arrays of objects pushed by HTTP clients
+/// to configured endpoints (e.g. `POST :10081/xp/push`).
+pub async fn http_data_push_handler(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+) -> Response {
+    let method = req.method().to_string();
+    let raw_path = req.uri().path().to_string();
+    let normalized_path = if raw_path.len() > 1 && raw_path.ends_with('/') {
+        raw_path.trim_end_matches('/').to_string()
+    } else {
+        raw_path.clone()
+    };
+
+    let endpoint = {
+        let guard = state.http_push_endpoints.read();
+        guard
+            .get(&normalized_path)
+            .or_else(|| guard.get(&raw_path))
+            .cloned()
+    };
+
+    let Some(endpoint) = endpoint else {
+        return (StatusCode::NOT_FOUND, "Endpoint not found\n").into_response();
+    };
+
+    if !method.eq_ignore_ascii_case(&endpoint.method) {
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            format!("Method {} not allowed, expect {}\n", method, endpoint.method),
+        )
+            .into_response();
+    }
+
+    let body_bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("Fail to read request body: {}\n", e),
+            )
+                .into_response();
+        }
+    };
+
+    let is_binary = endpoint.format.eq_ignore_ascii_case("binary");
+    let records: Vec<StreamRecord> = if is_binary {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&body_bytes);
+        let mut map = HashMap::new();
+        map.insert("self".to_string(), Value::String(b64));
+        vec![StreamRecord::new(map)]
+    } else {
+        match serde_json::from_slice::<Value>(&body_bytes) {
+            Ok(Value::Object(map)) => {
+                vec![StreamRecord::new(map.into_iter().collect())]
+            }
+            Ok(Value::Array(items)) => {
+                let mut recs = Vec::with_capacity(items.len());
+                for item in items {
+                    if let Value::Object(map) = item {
+                        recs.push(StreamRecord::new(map.into_iter().collect()));
+                    }
+                }
+                recs
+            }
+            Ok(primitive) => {
+                let mut map = HashMap::new();
+                map.insert("self".to_string(), primitive);
+                vec![StreamRecord::new(map)]
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Fail to decode data: {}\n", e),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    if records.is_empty() {
+        return (StatusCode::OK, "ok").into_response();
+    }
+
+    let sender = state.stream_bus.get_or_create(&endpoint.stream_name);
+    let _ = sender.send_batch(records).await;
+
+    (StatusCode::OK, "ok").into_response()
+}
+
+async fn create_router_fallback(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+) -> Response {
+    let raw_path = req.uri().path().to_string();
+    let normalized_path = if raw_path.len() > 1 && raw_path.ends_with('/') {
+        raw_path.trim_end_matches('/').to_string()
+    } else {
+        raw_path.clone()
+    };
+    let has_endpoint = {
+        let guard = state.http_push_endpoints.read();
+        guard.contains_key(&normalized_path) || guard.contains_key(&raw_path)
+    };
+    if has_endpoint {
+        http_data_push_handler(State(state), req).await
+    } else {
+        (StatusCode::NOT_FOUND, ()).into_response()
+    }
+}
+
+/// Dedicated HTTP data server listener serving the documented
+/// `http://<httpServerIp>:<httpServerPort>/test/:id` endpoint as well as
+/// registered HTTP push source endpoints (e.g. `DATASOURCE="/xp/push"`).
 pub fn test_sse_router(state: AppState) -> axum::Router {
     axum::Router::new()
         .route("/test/:name", get(sse_ruletest))
+        .fallback(http_data_push_handler)
         .with_state(state)
 }
 

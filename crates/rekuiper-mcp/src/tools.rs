@@ -89,7 +89,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "The complete rekuiper DDL statement specifying the stream name, optional typed field definitions, and datasource options in the WITH clause. Example: 'CREATE STREAM telemetry (temp float, humidity float, status string) WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"factory/line1/sensors\", CONF_KEY=\"broker_tls\")'"
+                        "description": "The complete rekuiper DDL statement specifying the stream name, optional typed field definitions, and datasource options in the WITH clause. Examples: 'CREATE STREAM telemetry (temp float, humidity float, status string) WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"factory/line1/sensors\", CONF_KEY=\"broker_tls\")' or 'CREATE STREAM httpDemo () WITH (TYPE=\"httppush\", DATASOURCE=\"/api/data\", FORMAT=\"json\")'"
                     }
                 },
                 "required": ["sql"]
@@ -111,19 +111,28 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "push_stream_data".to_string(),
-            description: "Directly ingests a mock or live JSON event payload into a stream via the rekuiper HTTP source endpoint (`/streams/:name/data`). Allows injecting events into streaming pipelines for real-time testing, pipeline qualification, or edge REST-to-stream bridging.".to_string(),
+            description: "Directly ingests a mock or live JSON event payload into a stream via the rekuiper HTTP source endpoint (`/streams/:name/data` or custom `TYPE=\"httppush\"` endpoint). Allows injecting events into streaming pipelines for real-time testing, pipeline qualification, or edge REST-to-stream bridging.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Target stream name configured with HTTP datasource or standard stream accepting push data."
+                        "description": "Target stream name configured with HTTP datasource or standard stream accepting push data (used when endpoint is not specified)."
+                    },
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Optional custom HTTP push endpoint path (e.g. '/api/data' or '/test_endpoint' as configured in `DATASOURCE` for `TYPE=\"httppush\"` streams). If omitted, defaults to '/streams/{name}/data'."
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["POST", "PUT"],
+                        "description": "HTTP method to use when pushing data (defaults to 'POST')."
                     },
                     "data": {
                         "description": "The event payload to ingest: can be a single JSON object representing a discrete event (e.g. {\"temperature\": 24.5, \"vibration\": 0.12}) or an array of event objects for batch ingestion."
                     }
                 },
-                "required": ["name", "data"]
+                "required": ["data"]
             }),
         },
 
@@ -910,12 +919,28 @@ pub async fn execute_tool(
         }
 
         "push_stream_data" => {
-            let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
-                return CallToolResult::err("Missing required parameter: 'name'");
+            let endpoint = args.get("endpoint").and_then(|v| v.as_str());
+            let name = args.get("name").and_then(|v| v.as_str());
+            let path = match (endpoint, name) {
+                (Some(ep), _) => ep.to_string(),
+                (None, Some(n)) => format!("/streams/{}/data", n),
+                (None, None) => {
+                    return CallToolResult::err(
+                        "Missing required parameter: provide either 'name' or 'endpoint'",
+                    );
+                }
+            };
+            let method = match args
+                .get("method")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_uppercase())
+                .as_deref()
+            {
+                Some("PUT") => reqwest::Method::PUT,
+                _ => reqwest::Method::POST,
             };
             let data = args.get("data").cloned().unwrap_or(json!({}));
-            let path = format!("/streams/{}/data", name);
-            forward_request(client, base_url, reqwest::Method::POST, &path, Some(data)).await
+            forward_request(client, base_url, method, &path, Some(data)).await
         }
 
         // --- 3. Table Management ---

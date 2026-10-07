@@ -71,7 +71,7 @@ fn default_prometheus_port() -> u16 {
     20499
 }
 fn default_http_server_ip() -> String {
-    "127.0.0.1".to_string()
+    "0.0.0.0".to_string()
 }
 fn default_http_server_port() -> u16 {
     10081
