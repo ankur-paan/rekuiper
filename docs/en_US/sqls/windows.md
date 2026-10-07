@@ -219,3 +219,23 @@ OVER(WHEN revenue > 200);
 ## Incremental Computation
 
 When aggregate functions support incremental updates, rekuiper evaluates windows incrementally to reduce memory consumption. Refer to [Incremental Computation](../guide/rules/incremental.md#incremental-computation) for details.
+
+## Window Output Filtering with HAVING and Change Detection
+
+Window queries support `HAVING` clauses to filter aggregated window outputs. When combined with stateful change-detection functions such as `had_changed(...)` or `changed_col(...)`, rekuiper preserves state history across window firings:
+
+```sql
+SELECT
+  latest(self) AS self,
+  latest(quality) AS quality,
+  latest(freshness) AS freshness
+FROM demo
+GROUP BY HoppingWindow(ss, 2, 1)
+HAVING had_changed(concat(latest(self), ":", latest(quality), ":", latest(freshness)))
+```
+
+Key behaviors:
+- On each window trigger, the aggregate expressions within `HAVING had_changed(...)` are evaluated against prior window emissions.
+- If consecutive window firings yield identical aggregate values, `had_changed` returns `false`, causing the window output to be suppressed.
+- When `GROUP BY <column>, <Window>` partitions data into multiple groups, change detection state is maintained independently per partition key.
+

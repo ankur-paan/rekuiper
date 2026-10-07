@@ -10,7 +10,7 @@
 //! (group columns plus `count/sum/avg/min/max`) without retaining rows: memory
 //! is O(groups) instead of O(rows in the window).
 
-use super::Evaluator;
+use super::{Evaluator, RuleState};
 use crate::ast::{Expr, SelectStmt, SortOrder};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -90,7 +90,7 @@ impl Evaluator {
     pub fn is_grouped_window(stmt: &SelectStmt) -> bool {
         !stmt.group_by.is_empty()
             || stmt.fields.iter().any(Self::contains_aggregate)
-            || stmt.having.as_ref().is_some_and(Self::contains_aggregate)
+            || stmt.having.is_some()
     }
 
     /// Input-row `WHERE` test (rows pass when there is no `WHERE`).
@@ -103,6 +103,15 @@ impl Evaluator {
 
     /// Evaluate one window trigger over its rows (applies `WHERE`).
     pub fn eval_window(stmt: &SelectStmt, rows: Vec<Row>) -> Vec<Row> {
+        Self::eval_window_stateful(stmt, rows, None)
+    }
+
+    /// Stateful variant of [`Self::eval_window`] with comparison state context.
+    pub fn eval_window_stateful(
+        stmt: &SelectStmt,
+        rows: Vec<Row>,
+        state: Option<&RuleState>,
+    ) -> Vec<Row> {
         let rows = if stmt.where_clause.is_some() {
             rows.into_iter()
                 .filter(|r| Self::passes_where(stmt, r))
@@ -110,11 +119,20 @@ impl Evaluator {
         } else {
             rows
         };
-        Self::eval_window_filtered(stmt, rows)
+        Self::eval_window_filtered_stateful(stmt, rows, state)
     }
 
     /// [`Self::eval_window`] for rows that already passed `WHERE`.
     pub fn eval_window_filtered(stmt: &SelectStmt, rows: Vec<Row>) -> Vec<Row> {
+        Self::eval_window_filtered_stateful(stmt, rows, None)
+    }
+
+    /// Stateful variant of [`Self::eval_window_filtered`] for rows that already passed `WHERE`.
+    pub fn eval_window_filtered_stateful(
+        stmt: &SelectStmt,
+        rows: Vec<Row>,
+        state: Option<&RuleState>,
+    ) -> Vec<Row> {
         if rows.is_empty() {
             return Vec::new();
         }
@@ -123,26 +141,33 @@ impl Evaluator {
                 where_clause: None,
                 ..stmt.clone()
             };
-            rows.iter()
-                .filter_map(|r| Self::eval_select(&projection, r))
-                .collect()
+            if let Some(s) = state {
+                rows.iter()
+                    .filter_map(|r| Self::eval_select_stateful(&projection, r, s))
+                    .collect()
+            } else {
+                rows.iter()
+                    .filter_map(|r| Self::eval_select(&projection, r))
+                    .collect()
+            }
         } else if stmt.group_by.is_empty() {
-            Self::eval_aggregate(stmt, &rows).into_iter().collect()
+            Self::eval_aggregate_stateful(stmt, &rows, state, "")
+                .into_iter()
+                .collect()
         } else {
-            Self::partition_groups(&stmt.group_by, rows)
+            Self::partition_keyed_groups(&stmt.group_by, rows)
                 .iter()
-                .filter_map(|group| Self::eval_aggregate(stmt, group))
+                .filter_map(|(pkey, group)| Self::eval_aggregate_stateful(stmt, group, state, pkey))
                 .collect()
         };
         Self::apply_order_limit(stmt, &mut out);
         out
     }
 
-    /// Split rows into `GROUP BY` partitions, groups in first-seen order and
-    /// rows in arrival order within each group.
-    fn partition_groups(group_by: &[Expr], rows: Vec<Row>) -> Vec<Vec<Row>> {
+    /// Split rows into `GROUP BY` partitions with their group keys.
+    fn partition_keyed_groups(group_by: &[Expr], rows: Vec<Row>) -> Vec<(String, Vec<Row>)> {
         let mut index: HashMap<String, usize> = HashMap::new();
-        let mut groups: Vec<Vec<Row>> = Vec::new();
+        let mut groups: Vec<(String, Vec<Row>)> = Vec::new();
         let mut key = String::new();
         for row in rows {
             key.clear();
@@ -150,15 +175,17 @@ impl Evaluator {
                 write_group_key(&mut key, &Self::group_value(expr, &row));
             }
             match index.get(key.as_str()) {
-                Some(&i) => groups[i].push(row),
+                Some(&i) => groups[i].1.push(row),
                 None => {
                     index.insert(key.clone(), groups.len());
-                    groups.push(vec![row]);
+                    groups.push((key.clone(), vec![row]));
                 }
             }
         }
         groups
     }
+
+
 
     /// Value of a grouping or accumulator expression, borrowing plain columns.
     fn group_value<'a>(expr: &Expr, row: &'a Row) -> Cow<'a, Value> {

@@ -128,11 +128,20 @@ impl Evaluator {
         stmt: &SelectStmt,
         records: &[HashMap<String, Value>],
     ) -> Option<HashMap<String, Value>> {
+        Self::eval_aggregate_stateful(stmt, records, None, "")
+    }
+
+    pub fn eval_aggregate_stateful(
+        stmt: &SelectStmt,
+        records: &[HashMap<String, Value>],
+        state: Option<&RuleState>,
+        partition_key: &str,
+    ) -> Option<HashMap<String, Value>> {
         if let Some((_, rhs)) = &stmt.set_op {
             // Each branch aggregates the same batch independently; the two
             // single-row outputs merge (right wins on conflict).
-            let left = Self::eval_aggregate(&Self::without_set_op(stmt), records);
-            let right = Self::eval_aggregate(rhs, records);
+            let left = Self::eval_aggregate_stateful(&Self::without_set_op(stmt), records, state, partition_key);
+            let right = Self::eval_aggregate_stateful(rhs, records, state, partition_key);
             return Self::merge_union_rows(left, right);
         }
         let first: Option<&HashMap<String, Value>> = records.first();
@@ -181,7 +190,7 @@ impl Evaluator {
                         }
                     }
                     for (rep_expr, col) in replace {
-                        let val = Self::eval_agg_expr(rep_expr, records, &output);
+                        let val = Self::eval_agg_expr_stateful(rep_expr, records, &output, state, partition_key);
                         output.insert(col.clone(), val);
                     }
                 }
@@ -250,7 +259,7 @@ impl Evaluator {
                 _ => {
                     // General expression: may contain nested aggregates
                     // (e.g. `avg(temp) + 1`), so evaluate aggregate-aware.
-                    let val = Self::eval_agg_expr(field, records, &output);
+                    let val = Self::eval_agg_expr_stateful(field, records, &output, state, partition_key);
                     let key = stmt
                         .field_aliases
                         .get(idx)
@@ -263,7 +272,7 @@ impl Evaluator {
         }
 
         if let Some(having) = &stmt.having {
-            let v = Self::eval_agg_expr(having, records, &output);
+            let v = Self::eval_agg_expr_stateful(having, records, &output, state, partition_key);
             match v {
                 Value::Bool(true) => {}
                 _ => return None,
@@ -329,15 +338,14 @@ impl Evaluator {
         }
     }
 
-    /// Evaluate an expression in aggregate (window) context.
-    ///
-    /// Aggregate calls (`count/sum/avg/min/max`) are resolved over `records`;
-    /// plain columns resolve from `output` (group keys / already computed
-    /// aggregates) falling back to the first record; everything else recurses.
-    fn eval_agg_expr(
+
+
+    fn eval_agg_expr_stateful(
         expr: &Expr,
         records: &[HashMap<String, Value>],
         output: &HashMap<String, Value>,
+        state: Option<&RuleState>,
+        partition_key: &str,
     ) -> Value {
         match expr {
             Expr::Wildcard | Expr::WildcardModified { .. } => Value::Null,
@@ -383,22 +391,74 @@ impl Evaluator {
                         return v;
                     }
                 }
+                let lowered = name.to_ascii_lowercase();
+                if let Some(s) = state {
+                    if lowered == "had_changed" || lowered == "changed_col" {
+                        let vals: Vec<Value> = args
+                            .iter()
+                            .map(|a| Self::eval_agg_expr_stateful(a, records, output, state, partition_key))
+                            .collect();
+                        let call_id = Self::column_name(expr, 0);
+                        return Self::eval_changed(&lowered, &vals, s, &call_id, partition_key);
+                    }
+                    if lowered == "changed_cols" && args.len() >= 2 {
+                        let vals: Vec<Value> = args
+                            .iter()
+                            .map(|a| Self::eval_agg_expr_stateful(a, records, output, state, partition_key))
+                            .collect();
+                        let prefix = match vals.first() {
+                            Some(Value::String(str_val)) => str_val.as_str(),
+                            _ => "",
+                        };
+                        let ignore_null = match vals.get(1) {
+                            Some(Value::Bool(b)) => *b,
+                            _ => false,
+                        };
+                        let mut result_map = serde_json::Map::new();
+                        for (arg_idx, expr_arg) in args.iter().skip(2).enumerate() {
+                            let col_name = Self::column_name(expr_arg, arg_idx);
+                            let val = &vals[arg_idx + 2];
+                            if ignore_null && val.is_null() {
+                                continue;
+                            }
+                            let call_id = Self::column_name(expr, 0);
+                            let state_key = format!(
+                                "changed_cols:{}:{}:{}",
+                                call_id,
+                                col_name,
+                                partition_key
+                            );
+                            let prev = s.state.read().get(&state_key).cloned();
+                            let changed = match (&prev, val) {
+                                (None, _) => true,
+                                (Some(p), c) if p.is_null() && c.is_null() => false,
+                                (Some(p), c) => !Self::values_equal(p, c),
+                            };
+                            if changed {
+                                s.state.write().insert(state_key, (*val).clone());
+                                result_map.insert(format!("{}{}", prefix, col_name), (*val).clone());
+                            }
+                        }
+                        if result_map.is_empty() {
+                            return Value::Null;
+                        }
+                        return Value::Object(result_map);
+                    }
+                }
                 let vals: Vec<Value> = args
                     .iter()
-                    .map(|a| Self::eval_agg_expr(a, records, output))
+                    .map(|a| Self::eval_agg_expr_stateful(a, records, output, state, partition_key))
                     .collect();
                 Self::eval_call(name, &vals)
             }
-            // Batch window evaluation has no per-partition running state;
-            // evaluate the inner call against the batch instead.
-            Expr::Over { call, .. } => Self::eval_agg_expr(call, records, output),
+            Expr::Over { call, .. } => Self::eval_agg_expr_stateful(call, records, output, state, partition_key),
             Expr::BinaryOp { left, op, right } => {
-                let l = Self::eval_agg_expr(left, records, output);
-                let r = Self::eval_agg_expr(right, records, output);
+                let l = Self::eval_agg_expr_stateful(left, records, output, state, partition_key);
+                let r = Self::eval_agg_expr_stateful(right, records, output, state, partition_key);
                 Self::eval_binary_op(&l, op, &r)
             }
             Expr::UnaryOp { op, expr } => {
-                let v = Self::eval_agg_expr(expr, records, output);
+                let v = Self::eval_agg_expr_stateful(expr, records, output, state, partition_key);
                 Self::eval_unary_op(op, &v)
             }
             Expr::Between {
@@ -407,9 +467,9 @@ impl Evaluator {
                 high,
                 negated,
             } => {
-                let v = Self::eval_agg_expr(expr, records, output);
-                let l = Self::eval_agg_expr(low, records, output);
-                let h = Self::eval_agg_expr(high, records, output);
+                let v = Self::eval_agg_expr_stateful(expr, records, output, state, partition_key);
+                let l = Self::eval_agg_expr_stateful(low, records, output, state, partition_key);
+                let h = Self::eval_agg_expr_stateful(high, records, output, state, partition_key);
                 Self::eval_between(&v, &l, &h, *negated)
             }
             Expr::InList {
@@ -417,10 +477,10 @@ impl Evaluator {
                 list,
                 negated,
             } => {
-                let v = Self::eval_agg_expr(expr, records, output);
+                let v = Self::eval_agg_expr_stateful(expr, records, output, state, partition_key);
                 let mut matched = false;
                 for item in list {
-                    let iv = Self::eval_agg_expr(item, records, output);
+                    let iv = Self::eval_agg_expr_stateful(item, records, output, state, partition_key);
                     if Self::values_equal(&v, &iv) {
                         matched = true;
                         break;
@@ -429,7 +489,7 @@ impl Evaluator {
                 Value::Bool(if *negated { !matched } else { matched })
             }
             Expr::IsNull { expr, negated } => {
-                let v = Self::eval_agg_expr(expr, records, output);
+                let v = Self::eval_agg_expr_stateful(expr, records, output, state, partition_key);
                 Value::Bool(if *negated { !v.is_null() } else { v.is_null() })
             }
             Expr::Case {
@@ -437,7 +497,7 @@ impl Evaluator {
                 when_clauses,
                 else_clause,
             } => Self::eval_case(operand, when_clauses, else_clause, |e| {
-                Self::eval_agg_expr(e, records, output)
+                Self::eval_agg_expr_stateful(e, records, output, state, partition_key)
             }),
         }
     }

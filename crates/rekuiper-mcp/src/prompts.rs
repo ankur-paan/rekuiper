@@ -168,6 +168,7 @@ pub fn get_prompt_messages(name: &str, args: Option<Value>) -> Result<Vec<Prompt
                          ```sql\n{}\n```\n\n\
                          Check for:\n\
                          - Window clause efficiency (Tumbling vs Hopping vs Sliding vs CountWindow)\n\
+                         - Appropriate use of HAVING and stateful change detection (had_changed, changed_col) to filter repeated identical aggregate windows\n\
                          - Projection overhead and column pruning\n\
                          - Missing filter predicates to drop irrelevant messages early\n\
                          - Type casting suitability and null safety\n\

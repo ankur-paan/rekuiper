@@ -5856,6 +5856,7 @@ async fn eval_window_join_batch(
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
     select_stmt: &SelectStmt,
     batch: &[TaggedRow],
+    rule_state: Option<&RuleState>,
 ) -> Vec<HashMap<String, Value>> {
     if batch.is_empty() {
         return Vec::new();
@@ -6007,7 +6008,7 @@ async fn eval_window_join_batch(
         }
     }
     // WHERE over the joined rows, then GROUP BY / HAVING / ORDER BY / LIMIT.
-    Evaluator::eval_window(select_stmt, combined_rows)
+    Evaluator::eval_window_stateful(select_stmt, combined_rows, rule_state)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6116,6 +6117,7 @@ async fn emit_window_batch(
     prefiltered: bool,
     window_bounds: Option<(i64, i64)>,
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+    rule_state: Option<&RuleState>,
 ) {
     if batch.is_empty() {
         return;
@@ -6131,12 +6133,12 @@ async fn emit_window_batch(
     let outputs = if select_stmt.joins.is_empty() {
         let rows: Vec<HashMap<String, Value>> = batch.into_iter().map(|r| r.data).collect();
         if prefiltered {
-            Evaluator::eval_window_filtered(select_stmt, rows)
+            Evaluator::eval_window_filtered_stateful(select_stmt, rows, rule_state)
         } else {
-            Evaluator::eval_window(select_stmt, rows)
+            Evaluator::eval_window_stateful(select_stmt, rows, rule_state)
         }
     } else {
-        eval_window_join_batch(table_manager, source_configs, select_stmt, &batch).await
+        eval_window_join_batch(table_manager, source_configs, select_stmt, &batch, rule_state).await
     };
     emit_window_outputs(counters, sink, outputs).await;
 }
@@ -6206,6 +6208,7 @@ impl WindowRows {
     }
 
     /// Closes the window and emits its output rows.
+    #[allow(clippy::too_many_arguments)]
     async fn emit(
         &mut self,
         counters: &RuleCounters,
@@ -6214,6 +6217,7 @@ impl WindowRows {
         select_stmt: &SelectStmt,
         window_bounds: Option<(i64, i64)>,
         sink: &tokio::sync::mpsc::Sender<StreamRecord>,
+        rule_state: Option<&RuleState>,
     ) {
         match self {
             WindowRows::Incremental(inc) => {
@@ -6232,6 +6236,7 @@ impl WindowRows {
                     true,
                     window_bounds,
                     sink,
+                    rule_state,
                 )
                 .await;
             }
@@ -6293,6 +6298,16 @@ async fn run_count_window_rule(
 ) {
     let count = size.max(1);
     let hop = interval.unwrap_or(count).max(1);
+    let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let mut buffer: Vec<TaggedRow> = Vec::new();
     let mut events_since_trigger: usize = 0;
     let from_source = select_stmt.from.clone();
@@ -6329,7 +6344,7 @@ async fn run_count_window_rule(
                             batch
                         };
                         let now_ms = chrono::Utc::now().timestamp_millis();
-                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
+                        emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink, Some(&rule_state)).await;
                     }
                 } else {
                     // Sparsely sampled count window with gap (hop > count)
@@ -6339,7 +6354,7 @@ async fn run_count_window_rule(
                     if events_since_trigger >= hop {
                         if !buffer.is_empty() {
                             let now_ms = chrono::Utc::now().timestamp_millis();
-                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
+                            emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink, Some(&rule_state)).await;
                         }
                         events_since_trigger = 0;
                         buffer.clear();
@@ -6375,7 +6390,7 @@ async fn run_count_window_rule(
                                     batch
                                 };
                                 let now_ms = chrono::Utc::now().timestamp_millis();
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink).await;
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, false, Some((now_ms, now_ms)), &sink, Some(&rule_state)).await;
                             }
                         } else if events_since_trigger >= hop {
                             if buffer.len() > count {
@@ -6383,7 +6398,7 @@ async fn run_count_window_rule(
                             }
                             if !buffer.is_empty() {
                                 let now_ms = chrono::Utc::now().timestamp_millis();
-                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink).await;
+                                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, std::mem::take(&mut buffer), false, Some((now_ms, now_ms)), &sink, Some(&rule_state)).await;
                             }
                             events_since_trigger = 0;
                             buffer.clear();
@@ -6431,6 +6446,16 @@ async fn run_tumbling_window_rule(
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let mut ticker = aligned_interval(duration);
     // Processing-time window contents (row-free when the projection allows).
     let mut window = WindowRows::new(&select_stmt);
@@ -6532,6 +6557,7 @@ async fn run_tumbling_window_rule(
                             true,
                             Some((t0, t_end)),
                             &sink,
+                            Some(&rule_state),
                         )
                         .await;
                     }
@@ -6592,7 +6618,7 @@ async fn run_tumbling_window_rule(
                 let now_ms = chrono::Utc::now().timestamp_millis();
                 let end_ms = now_ms - now_ms.rem_euclid(window_millis.max(1));
                 let start_ms = end_ms - window_millis;
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, end_ms)), &sink).await;
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, end_ms)), &sink, Some(&rule_state)).await;
             }
         }
     }
@@ -6617,6 +6643,16 @@ async fn run_session_window_rule(
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let mut max_check = aligned_interval(max_duration);
     let mut window = WindowRows::new(&select_stmt);
     let mut opened_at: Option<tokio::time::Instant> = None;
@@ -6708,6 +6744,7 @@ async fn run_session_window_rule(
                                     true,
                                     Some((s_start, s_end)),
                                     &sink,
+                                    Some(&rule_state),
                                 )
                                 .await;
                             } else {
@@ -6739,6 +6776,7 @@ async fn run_session_window_rule(
                                 true,
                                 Some((s_start, s_end)),
                                 &sink,
+                                Some(&rule_state),
                             )
                             .await;
                         }
@@ -6799,14 +6837,14 @@ async fn run_session_window_rule(
                 opened_at = None;
                 let now_ms = chrono::Utc::now().timestamp_millis();
                 let start_ms = opened_at_ms.take().unwrap_or(now_ms);
-                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
+                window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink, Some(&rule_state)).await;
             }
             _ = max_check.tick() => {
                 if !event_time.enabled && opened_at.is_some_and(|start| start.elapsed() >= max_duration) {
                     opened_at = None;
                     let now_ms = chrono::Utc::now().timestamp_millis();
                     let start_ms = opened_at_ms.take().unwrap_or(now_ms);
-                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink).await;
+                    window.emit(&counters, &table_manager, &source_configs, &select_stmt, Some((start_ms, now_ms)), &sink, Some(&rule_state)).await;
                 }
             }
         }
@@ -6825,6 +6863,7 @@ async fn run_session_window_rule(
             true,
             Some((s_start, s_end)),
             &sink,
+            Some(&rule_state),
         )
         .await;
     }
@@ -6846,6 +6885,16 @@ async fn run_hopping_window_rule(
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let length_ms = length.as_millis() as i64;
     let hop_ms = (hop.as_millis() as i64).max(1);
 
@@ -6943,6 +6992,7 @@ async fn run_hopping_window_rule(
                                 true,
                                 Some((cur_start, cur_end)),
                                 &sink,
+                                Some(&rule_state),
                             )
                             .await;
                         }
@@ -7009,7 +7059,7 @@ async fn run_hopping_window_rule(
                 let start_ms = end_ms.saturating_sub(length_ms);
                 let batch: Vec<TaggedRow> =
                     buffer.iter().map(|(_, row)| row.clone()).collect();
-                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, Some((start_ms, end_ms)), &sink).await;
+                emit_window_batch(&counters, &table_manager, &source_configs, &select_stmt, batch, true, Some((start_ms, end_ms)), &sink, Some(&rule_state)).await;
             }
         }
     }
@@ -7031,6 +7081,16 @@ async fn run_sliding_window_rule(
     table_manager: TableManager,
     source_configs: Arc<RwLock<HashMap<String, Value>>>,
 ) {
+    let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let mut buffer: Vec<(std::time::Instant, TaggedRow)> = Vec::new();
     // Event-time state: event-timestamped rows plus the watermark.
     let mut et_buffer: Vec<(i64, TaggedRow)> = Vec::new();
@@ -7122,6 +7182,7 @@ async fn run_sliding_window_rule(
                                 true,
                                 Some((start_ts, event_ts)),
                                 &sink,
+                                Some(&rule_state),
                             )
                             .await;
                         }
@@ -7146,6 +7207,7 @@ async fn run_sliding_window_rule(
                             true,
                             Some((start_ts, window_end_ts)),
                             &sink,
+                            Some(&rule_state),
                         )
                         .await;
                     }
@@ -7186,6 +7248,7 @@ async fn run_sliding_window_rule(
                         true,
                         Some((start_ms, now_ms)),
                         &sink,
+                        Some(&rule_state),
                     )
                     .await;
                 }
@@ -7260,6 +7323,15 @@ async fn run_state_window_rule(
     }
 
     let rule_state = RuleState::default();
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    rule_state
+        .state
+        .write()
+        .insert("__rule_id__".to_string(), Value::String(rule_id.clone()));
+    rule_state
+        .state
+        .write()
+        .insert("__rule_start__".to_string(), Value::from(start_time_ms));
     let mut partitions: HashMap<String, StateWindowState> = HashMap::new();
     let from_source = select_stmt.from.clone();
     let mut join_rx = spawn_join_forwarders(join_rxs);
@@ -7321,6 +7393,7 @@ async fn run_state_window_rule(
                                     true,
                                     Some((state.start_time, ts)),
                                     &sink,
+                                    Some(&rule_state),
                                 )
                                 .await;
                             }
@@ -7356,6 +7429,7 @@ async fn run_state_window_rule(
                                 true,
                                 Some((prev_start, ts)),
                                 &sink,
+                                Some(&rule_state),
                             )
                             .await;
                         } else {
@@ -12256,7 +12330,7 @@ mod tests {
         let tables = TableManager::new();
         let confs = test_source_configs(&[]);
         let batch = vec![tagged("r", &[("id", json!(1)), ("val", json!(9))])];
-        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch, None).await;
         assert_eq!(out.len(), 1);
         // Missing left side projects to Null; the preserved right side is intact.
         assert_eq!(out[0].get("id"), Some(&serde_json::Value::Null));
@@ -12271,7 +12345,7 @@ mod tests {
         let tables = TableManager::new();
         let confs = test_source_configs(&[]);
         let batch = vec![tagged("r", &[("id", json!(1))])];
-        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch, None).await;
         assert!(out.is_empty());
     }
 
@@ -12286,7 +12360,7 @@ mod tests {
             batch.push(tagged("l", &[("id", json!(i))]));
             batch.push(tagged("r", &[("id", json!(i))]));
         }
-        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch, None).await;
         assert_eq!(out.len(), MAX_JOIN_FANOUT);
     }
 
@@ -12321,7 +12395,7 @@ mod tests {
         );
         let confs = test_source_configs(&[]);
         let batch = vec![tagged("s", &[("id", json!(1))])];
-        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch).await;
+        let out = eval_window_join_batch(&tables, &confs, &stmt, &batch, None).await;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].get("v"), Some(&json!("a")));
     }

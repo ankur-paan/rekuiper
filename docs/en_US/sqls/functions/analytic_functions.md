@@ -213,6 +213,9 @@ Returns true if any argument changed since the previous execution. Multi-argumen
 
 To detect an `AND` condition where all expressions must change, combine individual function calls: `HAD_CHANGED(expr1) AND HAD_CHANGED(expr2)`.
 
+When used in a window `HAVING` clause (e.g. `GROUP BY HoppingWindow(...) HAVING had_changed(concat(latest(a), ":", latest(b)))`), change state is tracked across window evaluations, suppressing output when consecutive window aggregate outputs are identical.
+
+
 ### Change Detection Examples
 
 Create a stream named `demo` with the following input records:
