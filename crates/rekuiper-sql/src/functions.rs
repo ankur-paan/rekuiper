@@ -762,25 +762,25 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
         meta!(
             "now",
             "datetime",
-            "Current epoch milliseconds.",
+            "Current UTC timestamp with optional format or precision.",
             false,
-            "0",
+            "0-1",
             "now()"
         ),
         meta!(
             "current_timestamp",
             "datetime",
-            "Current timestamp.",
+            "Current timestamp with optional format or precision.",
             false,
-            "0",
+            "0-1",
             "current_timestamp()"
         ),
         meta!(
             "local_timestamp",
             "datetime",
-            "Current local timestamp.",
+            "Current local timestamp with optional format or precision.",
             false,
-            "0",
+            "0-1",
             "local_timestamp()"
         ),
         meta!(
@@ -1342,9 +1342,9 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
         meta!(
             "latest",
             "aggregate",
-            "Most recent column value.",
+            "Most recent column value with optional default.",
             true,
-            "1",
+            "1-2",
             "latest(temp)"
         ),
         meta!(
@@ -1559,9 +1559,9 @@ pub fn builtin_function_metadata() -> &'static [FunctionMeta] {
         meta!(
             "lag",
             "analytic",
-            "Value n rows behind with optional default.",
+            "Value n rows behind with optional default and ignoreNull.",
             false,
-            "1-3",
+            "1-4",
             "lag(temp, 1)"
         ),
         meta!(

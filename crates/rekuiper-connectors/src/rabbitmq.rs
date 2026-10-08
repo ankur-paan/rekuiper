@@ -293,13 +293,9 @@ impl RabbitMqSink {
         *lock = Some(channel.clone());
         Ok(channel)
     }
-}
 
-#[async_trait]
-impl Sink for RabbitMqSink {
-    async fn send(&self, record: &StreamRecord) -> Result<()> {
+    pub async fn send_raw(&self, payload: &[u8]) -> Result<()> {
         let channel = self.get_or_connect().await?;
-        let payload = serde_json::to_vec(&record.data)?;
 
         let routing_key = if self.config.routing_key.is_empty() && !self.config.queue.is_empty() {
             &self.config.queue
@@ -312,7 +308,7 @@ impl Sink for RabbitMqSink {
                 &self.config.exchange,
                 routing_key,
                 BasicPublishOptions::default(),
-                &payload,
+                payload,
                 BasicProperties::default(),
             )
             .await
@@ -321,6 +317,21 @@ impl Sink for RabbitMqSink {
             .context("Failed to confirm RabbitMQ publish")?;
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Sink for RabbitMqSink {
+    async fn send(&self, record: &StreamRecord) -> Result<()> {
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == crate::META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
+        let payload = serde_json::to_vec(&map)?;
+        self.send_raw(&payload).await
     }
 }
 

@@ -214,3 +214,59 @@ fn source_metadata_is_readable_but_never_projected() {
     assert_eq!(meta["t2"], json!("esphome/kitchen/sensor/temp/state"));
     assert_eq!(meta["mid"], json!(42));
 }
+
+#[test]
+fn window_having_had_changed_filters_identical_consecutive_results() {
+    let stmt = parse(
+        "SELECT latest(val) AS v FROM demo GROUP BY TUMBLINGWINDOW(ss, 1) HAVING had_changed(latest(val))",
+    );
+    let state = rekuiper_sql::RuleState::default();
+
+    // First window: val = 10 -> had_changed evaluates to true, emits row
+    let win1 = vec![row(json!({"val": 10}))];
+    let out1 = Evaluator::eval_window_stateful(&stmt, win1, Some(&state));
+    assert_eq!(out1.len(), 1);
+    assert_eq!(out1[0]["v"], json!(10));
+
+    // Second window: val = 10 -> had_changed evaluates to false because v is unchanged, filtered
+    let win2 = vec![row(json!({"val": 10}))];
+    let out2 = Evaluator::eval_window_stateful(&stmt, win2, Some(&state));
+    assert_eq!(out2.len(), 0);
+
+    // Third window: val = 20 -> had_changed evaluates to true because v changed to 20, emits row
+    let win3 = vec![row(json!({"val": 20}))];
+    let out3 = Evaluator::eval_window_stateful(&stmt, win3, Some(&state));
+    assert_eq!(out3.len(), 1);
+    assert_eq!(out3[0]["v"], json!(20));
+
+    // Fourth window: val = 20 -> filtered
+    let win4 = vec![row(json!({"val": 20}))];
+    let out4 = Evaluator::eval_window_stateful(&stmt, win4, Some(&state));
+    assert_eq!(out4.len(), 0);
+}
+
+#[test]
+fn window_having_had_changed_tracks_state_per_group() {
+    let stmt = parse(
+        "SELECT device, latest(val) AS v FROM demo GROUP BY device, TUMBLINGWINDOW(ss, 1) HAVING had_changed(latest(val))",
+    );
+    let state = rekuiper_sql::RuleState::default();
+
+    // Window 1: device "a" with 10, device "b" with 100 -> both emit
+    let win1 = vec![
+        row(json!({"device": "a", "val": 10})),
+        row(json!({"device": "b", "val": 100})),
+    ];
+    let out1 = Evaluator::eval_window_stateful(&stmt, win1, Some(&state));
+    assert_eq!(out1.len(), 2);
+
+    // Window 2: device "a" with 10 (unchanged), device "b" with 200 (changed) -> only "b" emits
+    let win2 = vec![
+        row(json!({"device": "a", "val": 10})),
+        row(json!({"device": "b", "val": 200})),
+    ];
+    let out2 = Evaluator::eval_window_stateful(&stmt, win2, Some(&state));
+    assert_eq!(out2.len(), 1);
+    assert_eq!(out2[0]["device"], json!("b"));
+    assert_eq!(out2[0]["v"], json!(200));
+}

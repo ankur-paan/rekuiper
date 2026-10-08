@@ -60,6 +60,12 @@ array_contains(array, value)
 
 Returns true if the array contains the specified element. Returns nil if `array` is nil.
 
+> [!NOTE]
+> **Compatibility & Safety Note: Heterogeneous Type Handling**
+> In legacy eKuiper, `array_contains` panicked via Go reflection when scanning arrays containing heterogeneous types (e.g. mixed strings and integers). `rekuiper` compares JSON values with dynamic type checking without panicking.
+> 
+> **Why we chose this difference**: IoT payloads often arrive with loosely-typed or mixed-type JSON arrays. Panic-free evaluation ensures that heterogeneous arrays do not terminate stream execution.
+
 ## ARRAY_CREATE
 
 ```text

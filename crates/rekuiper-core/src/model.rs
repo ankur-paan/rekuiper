@@ -60,6 +60,7 @@ pub struct TableDefinition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuleDefinition {
+    #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -445,5 +446,316 @@ impl Default for RuleStatus {
             sink_queue_high_water: 0,
             sink_blocked_micros_total: 0,
         }
+    }
+}
+
+/// Coerce a JSON value to a target stream data type.
+pub fn coerce_value_to_type(val: Value, target_type: &str) -> Value {
+    let ty = target_type.trim().to_ascii_lowercase();
+    match ty.as_str() {
+        "bigint" | "int" | "integer" | "smallint" | "tinyint" => match val {
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Value::from(i)
+                } else if let Some(u) = n.as_u64() {
+                    Value::from(u as i64)
+                } else if let Some(f) = n.as_f64() {
+                    Value::from(f as i64)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::String(s) => {
+                let s_trim = s.trim();
+                if let Ok(i) = s_trim.parse::<i64>() {
+                    Value::from(i)
+                } else if let Ok(f) = s_trim.parse::<f64>() {
+                    Value::from(f as i64)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::Bool(b) => Value::from(if b { 1 } else { 0 }),
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        "float" | "double" | "real" => match val {
+            Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    serde_json::Number::from_f64(f)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::String(s) => {
+                let s_trim = s.trim();
+                if let Ok(f) = s_trim.parse::<f64>() {
+                    serde_json::Number::from_f64(f)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::Bool(b) => {
+                let f = if b { 1.0 } else { 0.0 };
+                serde_json::Number::from_f64(f)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null)
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        "string" | "text" | "varchar" | "char" => match val {
+            Value::String(_) => val,
+            Value::Number(n) => Value::String(n.to_string()),
+            Value::Bool(b) => Value::String(b.to_string()),
+            Value::Null => Value::Null,
+            other => Value::String(other.to_string()),
+        },
+        "boolean" | "bool" => match val {
+            Value::Bool(_) => val,
+            Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+                "true" | "1" | "t" => Value::Bool(true),
+                "false" | "0" | "f" => Value::Bool(false),
+                _ => Value::Null,
+            },
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    if i == 1 {
+                        Value::Bool(true)
+                    } else if i == 0 {
+                        Value::Bool(false)
+                    } else {
+                        Value::Null
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        "datetime" | "timestamp" | "date" | "time" => match val {
+            Value::Number(n) => Value::Number(n),
+            Value::String(s) => {
+                let t = s.trim();
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
+                    Value::from(dt.timestamp_millis())
+                } else if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S")
+                {
+                    Value::from(dt.and_utc().timestamp_millis())
+                } else if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S")
+                {
+                    Value::from(dt.and_utc().timestamp_millis())
+                } else if let Ok(dt) =
+                    chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f")
+                {
+                    Value::from(dt.and_utc().timestamp_millis())
+                } else if let Ok(dt) =
+                    chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%.f")
+                {
+                    Value::from(dt.and_utc().timestamp_millis())
+                } else if let Ok(d) = chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d") {
+                    if let Some(dt) = d.and_hms_opt(0, 0, 0) {
+                        Value::from(dt.and_utc().timestamp_millis())
+                    } else {
+                        Value::Null
+                    }
+                } else if let Ok(n) = t.parse::<i64>() {
+                    Value::from(n)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        "bytea" | "binary" | "blob" => match val {
+            Value::String(_) => val,
+            Value::Array(_) => val,
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        _ if ty.starts_with("decimal") || ty.starts_with("numeric") => match val {
+            Value::Number(n) => Value::Number(n),
+            Value::String(s) => {
+                if let Ok(f) = s.trim().parse::<f64>() {
+                    serde_json::Number::from_f64(f)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        _ if ty.starts_with("array") => match val {
+            Value::Array(items) => {
+                let inner = if (ty.starts_with("array(") && ty.ends_with(')'))
+                    || (ty.starts_with("array[") && ty.ends_with(']'))
+                {
+                    Some(ty[6..ty.len() - 1].trim())
+                } else {
+                    None
+                };
+                if let Some(inner_ty) = inner.filter(|s| !s.is_empty()) {
+                    let coerced: Vec<Value> = items
+                        .into_iter()
+                        .map(|item| coerce_value_to_type(item, inner_ty))
+                        .collect();
+                    Value::Array(coerced)
+                } else {
+                    Value::Array(items)
+                }
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        _ if ty.ends_with("[]") => match val {
+            Value::Array(items) => {
+                let inner_ty = ty[..ty.len() - 2].trim();
+                let coerced: Vec<Value> = items
+                    .into_iter()
+                    .map(|item| coerce_value_to_type(item, inner_ty))
+                    .collect();
+                Value::Array(coerced)
+            }
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        _ if ty.starts_with("struct") => match val {
+            Value::Object(map) => Value::Object(map),
+            Value::Null => Value::Null,
+            _ => Value::Null,
+        },
+        _ => val,
+    }
+}
+
+/// Coerce an incoming record map according to declared stream fields.
+/// When `fields` is empty (schemaless stream), this returns immediately (zero-cost no-op).
+pub fn enforce_stream_schema(data: &mut HashMap<String, Value>, fields: &[StreamField]) {
+    if fields.is_empty() {
+        return;
+    }
+    for field in fields {
+        // Look up either exact match or case-insensitive match
+        let existing_key = if data.contains_key(&field.name) {
+            Some(field.name.clone())
+        } else {
+            data.keys()
+                .find(|k| k.eq_ignore_ascii_case(&field.name))
+                .cloned()
+        };
+
+        if let Some(key) = existing_key {
+            let val = data.remove(&key).unwrap_or(Value::Null);
+            let coerced = coerce_value_to_type(val, &field.field_type);
+            data.insert(field.name.clone(), coerced);
+        } else if (field.field_type.eq_ignore_ascii_case("bytea")
+            || field.field_type.eq_ignore_ascii_case("binary"))
+            && data.contains_key("self")
+        {
+            if let Some(val) = data.get("self").cloned() {
+                data.insert(field.name.clone(), val);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    #[test]
+    fn test_enforce_stream_schema_coercion() {
+        let fields = vec![
+            StreamField {
+                name: "id".to_string(),
+                field_type: "bigint".to_string(),
+            },
+            StreamField {
+                name: "temp".to_string(),
+                field_type: "float".to_string(),
+            },
+            StreamField {
+                name: "name".to_string(),
+                field_type: "string".to_string(),
+            },
+            StreamField {
+                name: "active".to_string(),
+                field_type: "boolean".to_string(),
+            },
+            StreamField {
+                name: "ts".to_string(),
+                field_type: "datetime".to_string(),
+            },
+            StreamField {
+                name: "arr".to_string(),
+                field_type: "array(int)".to_string(),
+            },
+        ];
+
+        let mut data = HashMap::new();
+        data.insert("id".to_string(), Value::String("101".to_string()));
+        data.insert("temp".to_string(), Value::String("25.5".to_string()));
+        data.insert("name".to_string(), Value::from(42));
+        data.insert("active".to_string(), Value::String("true".to_string()));
+        data.insert(
+            "ts".to_string(),
+            Value::String("2023-01-01T00:00:00Z".to_string()),
+        );
+        data.insert(
+            "arr".to_string(),
+            Value::Array(vec![
+                Value::String("1".to_string()),
+                Value::String("2".to_string()),
+            ]),
+        );
+
+        enforce_stream_schema(&mut data, &fields);
+
+        assert_eq!(data.get("id"), Some(&Value::from(101i64)));
+        assert_eq!(data.get("temp"), Some(&Value::from(25.5f64)));
+        assert_eq!(data.get("name"), Some(&Value::String("42".to_string())));
+        assert_eq!(data.get("active"), Some(&Value::Bool(true)));
+        assert_eq!(data.get("ts"), Some(&Value::from(1672531200000i64)));
+        assert_eq!(
+            data.get("arr"),
+            Some(&Value::Array(vec![Value::from(1i64), Value::from(2i64)]))
+        );
+    }
+
+    #[test]
+    fn test_enforce_stream_schema_mismatched_types() {
+        let fields = vec![
+            StreamField {
+                name: "id".to_string(),
+                field_type: "bigint".to_string(),
+            },
+            StreamField {
+                name: "temp".to_string(),
+                field_type: "float".to_string(),
+            },
+            StreamField {
+                name: "active".to_string(),
+                field_type: "boolean".to_string(),
+            },
+        ];
+
+        let mut data = HashMap::new();
+        data.insert("id".to_string(), Value::String("not_a_number".to_string()));
+        data.insert("temp".to_string(), Value::String("not_a_float".to_string()));
+        data.insert("active".to_string(), Value::String("invalid".to_string()));
+
+        enforce_stream_schema(&mut data, &fields);
+
+        assert_eq!(data.get("id"), Some(&Value::Null));
+        assert_eq!(data.get("temp"), Some(&Value::Null));
+        assert_eq!(data.get("active"), Some(&Value::Null));
     }
 }

@@ -73,6 +73,7 @@ async fn test_tools_list() {
     assert!(tool_names.contains(&"get_rule_status"));
     assert!(tool_names.contains(&"get_rule_topo"));
     assert!(tool_names.contains(&"reset_rule_state"));
+    assert!(tool_names.contains(&"explain_rule"));
 
     // Tracing
     assert!(tool_names.contains(&"start_rule_trace"));
@@ -419,4 +420,27 @@ async fn test_vector_similarity_and_array_and_secret_tools() {
     let sec_inv_text = res_sec_inv["content"][0]["text"].as_str().unwrap();
     assert!(sec_inv_text.contains("\"valid\": false"));
     assert!(sec_inv_text.contains("Unrecognized secret provider"));
+}
+
+#[tokio::test]
+async fn test_push_stream_data_tool_params() {
+    let handler = McpHandler::new("http://127.0.0.1:9081");
+
+    // Missing both name and endpoint
+    let req_missing = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(json!(50)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "push_stream_data",
+            "arguments": {
+                "data": { "temperature": 25.0 }
+            }
+        })),
+    };
+    let resp = handler.handle_request(req_missing).await.unwrap();
+    let res = resp.result.unwrap();
+    assert_eq!(res["isError"], true);
+    let text = res["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Missing required parameter: provide either 'name' or 'endpoint'"));
 }

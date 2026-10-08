@@ -14,9 +14,9 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
   - `explain_sql`: Deep AST query deconstruction into sources, projections, joins, where filters, group by keys, and time/count window clauses.
 
 - **Full-Fidelity Stream & Table DDL & Event Ingestion**:
-  - Complete lifecycle management for streaming datasources (`CREATE STREAM`, `DROP STREAM`, schema inspection).
+  - Complete lifecycle management for streaming datasources (`CREATE STREAM`, `DROP STREAM`, schema inspection, `httppush` source stream bindings).
   - Enrichment lookup tables (`CREATE TABLE`, backend drivers: File, SQLite, Redis, Memory).
-  - Direct HTTP event push injection (`push_stream_data`, `push_table_data`) for real-time pipeline testing and data ingestion.
+  - Direct HTTP event push injection (`push_stream_data`, `push_table_data`) for real-time pipeline testing and data ingestion across standard (`/streams/:name/data`) or custom `httppush` endpoints (`DATASOURCE`).
 
 - **End-to-End Rule & Topology Lifecycle**:
   - Full CRUD operations on streaming rules with advanced topological configurations (QoS, checkpointing, buffer length, restart strategies).
@@ -70,7 +70,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 
 ---
 
-## Tool Catalog (46 Tools)
+## Tool Catalog (47 Tools)
 
 ### 1. SQL Intelligence & Simulation
 | Tool | Description |
@@ -86,7 +86,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_stream` | Inspect DDL schema, connector type, and serialization format. |
 | `create_stream` | Register a new stream via streaming DDL statement. |
 | `delete_stream` | Drop an existing stream from the catalog. |
-| `push_stream_data` | Inject mock or real-time event payloads directly into a stream endpoint. |
+| `push_stream_data` | Inject mock or real-time event payloads directly into a stream endpoint (supports `/streams/:name/data` or custom `TYPE="httppush"` endpoints, POST/PUT methods, and batch JSON arrays). |
 
 ### 3. Lookup Tables Management
 | Tool | Description |
@@ -110,6 +110,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_rule_status` | Retrieve real-time throughput metrics, latency, and error states. |
 | `get_rule_topo` | Retrieve DAG topological execution graph of source, operator, and sink nodes. |
 | `reset_rule_state` | Clear checkpointed state offsets and state store data for clean restart. |
+| `explain_rule` | Retrieve structured JSON physical execution plan for a registered rule (`GET /rules/{name}/explain`). |
 
 ### 5. Distributed Tracing & Diagnostics
 | Tool | Description |
@@ -141,7 +142,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_configs` | Retrieve daemon runtime configuration and parameters. |
 | `update_configs` | Dynamically update server configuration parameters. |
 | `export_data` | Export JSON catalog backup of rules, streams, schemas, and configurations. |
-| `import_data` | Restore catalog configuration from a JSON backup. |
+| `import_data` | Import configurations from a JSON payload. Requires a non-empty payload. Supports state reset or `partial=true` merge mode. |
 
 ### 9. Health, Heartbeat & Telemetry
 | Tool | Description |

@@ -123,7 +123,14 @@ Use this endpoint to delete a registered schema:
 DELETE http://localhost:9081/schemas/protobuf/{name}
 ```
 
+> [!NOTE]
+> **Compatibility Note: 404 Not Found vs 400 Bad Request for Missing Schemas**
+> When describing (`GET /schemas/{type}/{name}`) or deleting (`DELETE /schemas/{type}/{name}`) a schema name that does not exist, legacy eKuiper returns `400 Bad Request`. `rekuiper` strictly returns `404 Not Found` per RFC 9110 HTTP semantics.
+> 
+> **Why we chose this difference**: Returning `400 Bad Request` indicates to HTTP clients that the request URI or request payload was invalid, obscuring whether the endpoint failed or the schema was absent. Emitting `404 Not Found` enables clients to accurately determine resource absence and handle automated schema sync or creation cleanly.
+
 ## Update a Schema
+
 
 Use this endpoint to update an existing schema definition:
 

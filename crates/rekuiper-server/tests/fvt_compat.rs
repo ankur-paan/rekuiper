@@ -898,14 +898,14 @@ async fn test_all_openapi_paths_responding() {
         assert_eq!(resp.status(), reqwest::StatusCode::CREATED, "POST {}", path);
     }
 
-    // NOTE: POST /ruletest is intentionally absent here: without a SQL
-    // body it is a 400 (covered by the dedicated validation test below).
+    // NOTE: POST /ruletest and POST /async/data/import are intentionally absent
+    // here: without a request body they fail fast with 400 (covered by dedicated
+    // validation tests below).
     for path in [
         "/ruletest/rule_openapi/start",
         "/rules/rule_openapi/trace/start",
         "/rules/rule_openapi/trace/stop",
         "/tracer",
-        "/async/data/import",
         "/async/task/task_1/cancel",
         "/batch/req",
         "/plugins/functions/echo_fn_plug/register",
@@ -920,6 +920,31 @@ async fn test_all_openapi_paths_responding() {
             .unwrap();
         assert_eq!(resp.status(), reqwest::StatusCode::OK, "POST {}", path);
     }
+
+    // Verify /async/data/import responds properly: fails fast with 400 on empty body,
+    // and returns 200 OK when given a valid payload.
+    let resp = client
+        .post(format!("{}/async/data/import", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "POST /async/data/import without body"
+    );
+
+    let resp = client
+        .post(format!("{}/async/data/import", base_url))
+        .json(&json!({"streams": []}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "POST /async/data/import with body"
+    );
 
     for path in [
         "/rules/rule_openapi/tags",

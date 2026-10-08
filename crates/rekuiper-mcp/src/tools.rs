@@ -89,7 +89,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "The complete rekuiper DDL statement specifying the stream name, optional typed field definitions, and datasource options in the WITH clause. Example: 'CREATE STREAM telemetry (temp float, humidity float, status string) WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"factory/line1/sensors\", CONF_KEY=\"broker_tls\")'"
+                        "description": "The complete rekuiper DDL statement specifying the stream name, optional typed field definitions, and datasource options in the WITH clause. Examples: 'CREATE STREAM telemetry (temp float, humidity float, status string) WITH (TYPE=\"mqtt\", FORMAT=\"json\", DATASOURCE=\"factory/line1/sensors\", CONF_KEY=\"broker_tls\")' or 'CREATE STREAM httpDemo () WITH (TYPE=\"httppush\", DATASOURCE=\"/api/data\", FORMAT=\"json\")'"
                     }
                 },
                 "required": ["sql"]
@@ -111,19 +111,28 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "push_stream_data".to_string(),
-            description: "Directly ingests a mock or live JSON event payload into a stream via the rekuiper HTTP source endpoint (`/streams/:name/data`). Allows injecting events into streaming pipelines for real-time testing, pipeline qualification, or edge REST-to-stream bridging.".to_string(),
+            description: "Directly ingests a mock or live JSON event payload into a stream via the rekuiper HTTP source endpoint (`/streams/:name/data` or custom `TYPE=\"httppush\"` endpoint). Allows injecting events into streaming pipelines for real-time testing, pipeline qualification, or edge REST-to-stream bridging.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Target stream name configured with HTTP datasource or standard stream accepting push data."
+                        "description": "Target stream name configured with HTTP datasource or standard stream accepting push data (used when endpoint is not specified)."
+                    },
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Optional custom HTTP push endpoint path (e.g. '/api/data' or '/test_endpoint' as configured in `DATASOURCE` for `TYPE=\"httppush\"` streams). If omitted, defaults to '/streams/{name}/data'."
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["POST", "PUT"],
+                        "description": "HTTP method to use when pushing data (defaults to 'POST')."
                     },
                     "data": {
                         "description": "The event payload to ingest: can be a single JSON object representing a discrete event (e.g. {\"temperature\": 24.5, \"vibration\": 0.12}) or an array of event objects for batch ingestion."
                     }
                 },
-                "required": ["name", "data"]
+                "required": ["data"]
             }),
         },
 
@@ -239,7 +248,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "actions": {
                         "type": "array",
-                        "description": "Array of output sink configurations defining where processed results are dispatched. Sinks support formatting templates, QoS levels, and retry policies. Example: [{\"mqtt\": {\"server\": \"tcp://127.0.0.1:1883\", \"topic\": \"factory/alerts\", \"sendSingle\": true, \"dataTemplate\": \"{\\\"alert\\\": \\\"overheat\\\", \\\"device\\\": \\\"{{.device_id}}\\\", \\\"avg_temp\\\": {{.avg_temp}}}\"}}]"
+                        "description": "Array of output sink configurations defining where processed results are dispatched. Common sink options include: 'sendSingle' (boolean, default false for REST/MQTT/WebSocket, true for File/Redis/Kafka), 'fields' (array of projected field names), 'excludeFields' (array of fields to omit), 'dataField' (string, extracts nested object), 'format' ('json', 'delimited', etc.), 'delimiter' (string), 'batchSize' (buffer record count), and 'lingerInterval' (buffer flush timeout ms). Example: [{\"mqtt\": {\"server\": \"tcp://127.0.0.1:1883\", \"topic\": \"factory/alerts\", \"sendSingle\": true, \"dataTemplate\": \"{\\\"alert\\\": \\\"overheat\\\", \\\"device\\\": \\\"{{.device_id}}\\\", \\\"avg_temp\\\": {{.avg_temp}}}\"}}]"
                     },
                     "options": {
                         "type": "object",
@@ -365,6 +374,20 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     "name": {
                         "type": "string",
                         "description": "Identifier of the rule whose state store to reset."
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+        ToolDefinition {
+            name: "explain_rule".to_string(),
+            description: "Retrieves the structured JSON physical execution plan of a registered rule from the running engine via GET /rules/{name}/explain.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Identifier of the rule whose execution plan to inspect."
                     }
                 },
                 "required": ["name"]
@@ -603,12 +626,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "import_data".to_string(),
-            description: "Restores or provisions rules, streams, lookup tables, and configurations from a JSON backup payload into the rekuiper engine.".to_string(),
+            description: "Imports rules, streams, tables, and configurations into the engine. The request payload must not be empty. By default, this tool clears old configurations before import. Set partial=true to merge configurations without clearing old resources.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "content": {
-                        "description": "JSON backup payload adhering to rekuiper export format."
+                        "description": "The JSON configuration payload to import. Must not be empty."
+                    },
+                    "partial": {
+                        "type": "boolean",
+                        "description": "Set to true to merge configurations without clearing old resources."
                     }
                 },
                 "required": ["content"]
@@ -910,12 +937,28 @@ pub async fn execute_tool(
         }
 
         "push_stream_data" => {
-            let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
-                return CallToolResult::err("Missing required parameter: 'name'");
+            let endpoint = args.get("endpoint").and_then(|v| v.as_str());
+            let name = args.get("name").and_then(|v| v.as_str());
+            let path = match (endpoint, name) {
+                (Some(ep), _) => ep.to_string(),
+                (None, Some(n)) => format!("/streams/{}/data", n),
+                (None, None) => {
+                    return CallToolResult::err(
+                        "Missing required parameter: provide either 'name' or 'endpoint'",
+                    );
+                }
+            };
+            let method = match args
+                .get("method")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_uppercase())
+                .as_deref()
+            {
+                Some("PUT") => reqwest::Method::PUT,
+                _ => reqwest::Method::POST,
             };
             let data = args.get("data").cloned().unwrap_or(json!({}));
-            let path = format!("/streams/{}/data", name);
-            forward_request(client, base_url, reqwest::Method::POST, &path, Some(data)).await
+            forward_request(client, base_url, method, &path, Some(data)).await
         }
 
         // --- 3. Table Management ---
@@ -1079,6 +1122,13 @@ pub async fn execute_tool(
             let path = format!("/rules/{}/reset_state", name);
             forward_request(client, base_url, reqwest::Method::PUT, &path, None).await
         }
+        "explain_rule" => {
+            let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+                return CallToolResult::err("Missing required parameter: 'name'");
+            };
+            let path = format!("/rules/{}/explain", name);
+            forward_request(client, base_url, reqwest::Method::GET, &path, None).await
+        }
 
         // --- 5. Tracing & Observability ---
         "start_rule_trace" => {
@@ -1227,11 +1277,25 @@ pub async fn execute_tool(
 
         "import_data" => {
             let content = args.get("content").cloned().unwrap_or(json!({}));
+            let is_partial = args
+                .get("partial")
+                .and_then(|v| {
+                    if v.as_bool() == Some(true)
+                        || v.as_str() == Some("1")
+                        || v.as_str() == Some("true")
+                    {
+                        Some("?partial=1")
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("");
+            let path = format!("/data/import{}", is_partial);
             forward_request(
                 client,
                 base_url,
                 reqwest::Method::POST,
-                "/data/import",
+                &path,
                 Some(content),
             )
             .await

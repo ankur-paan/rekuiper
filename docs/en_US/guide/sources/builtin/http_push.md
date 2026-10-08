@@ -79,3 +79,57 @@ bin/kuiper create stream demo '() WITH (FORMAT = "json", DATASOURCE = "/api/data
 ```
 
 For CLI command syntax, refer to [Streams Management with CLI](../../../api/cli/streams.md).
+
+## Data Ingestion & Payload Formats
+
+The HTTP Push source accepts both discrete single records and batch arrays in JSON format:
+
+### Single Record (Object)
+
+```bash
+curl -X POST http://localhost:10081/api/data \
+  -H "Content-Type: application/json" \
+  -d '{"device": "sensor_01", "temperature": 26.4, "status": "active"}'
+```
+
+Response:
+```text
+HTTP/1.1 200 OK
+Content-Type: text/plain
+
+ok
+```
+
+### Batch Records (Array)
+
+Multiple records sent as a JSON array are ingested into the stream pipeline sequentially:
+
+```bash
+curl -X POST http://localhost:10081/api/data \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"device": "sensor_01", "temperature": 26.4},
+    {"device": "sensor_02", "temperature": 27.1}
+  ]'
+```
+
+Response:
+```text
+HTTP/1.1 200 OK
+Content-Type: text/plain
+
+ok
+```
+
+## HTTP Response Codes & Error Handling
+
+- **`200 OK`**: The payload was successfully validated and dispatched to active rule subscriber pipelines. The response body is `ok`.
+- **`404 Not Found`**: Returned when the requested endpoint has no active rules consuming from it, or if the rule is stopped.
+- **`405 Method Not Allowed`**: Returned if the HTTP request method does not match the configured method (e.g. sending `POST` to an endpoint configured with `method: "PUT"`).
+- **`400 Bad Request`**: Returned if the request body is malformed or invalid JSON.
+
+## Port Access & Lifecycle
+
+- **Dedicated Data Port (`10081`)**: The high-throughput HTTP data server runs on port 10081 by default (`0.0.0.0:10081`).
+- **REST Port Availability (`9081`)**: In addition to port 10081, registered `httppush` endpoints are accessible on the main REST management port (default 9081), simplifying deployments where only a single ingress port is forwarded.
+- **Dynamic Rule Binding**: Endpoints are active only while rules subscribing to the stream are running. When all subscribing rules stop, the endpoint is cleaned up. Restarting the rules re-establishes listener routes automatically.
