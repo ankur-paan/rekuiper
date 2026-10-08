@@ -3264,16 +3264,35 @@ struct CommonSinkOpts {
     fields: Option<Vec<String>>,
     exclude_fields: Option<Vec<String>>,
     data_field: Option<String>,
+    format: Option<String>,
+    batch_size: usize,
+    linger_interval: u64,
 }
 
-fn parse_common_opts(opts: &Value, rule_send_nil_field: bool) -> CommonSinkOpts {
+fn parse_common_opts(opts: &Value, rule_send_nil_field: bool, default_send_single: bool) -> CommonSinkOpts {
     let send_single = opts
         .get("sendSingle")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .and_then(|v| {
+            if let Some(b) = v.as_bool() {
+                Some(b)
+            } else if let Some(s) = v.as_str() {
+                s.parse::<bool>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(default_send_single);
     let send_nil_field = opts
         .get("sendNilField")
-        .and_then(|v| v.as_bool())
+        .and_then(|v| {
+            if let Some(b) = v.as_bool() {
+                Some(b)
+            } else if let Some(s) = v.as_str() {
+                s.parse::<bool>().ok()
+            } else {
+                None
+            }
+        })
         .unwrap_or(rule_send_nil_field);
     let fields = opts.get("fields").and_then(|v| v.as_array()).map(|arr| {
         arr.iter()
@@ -3291,13 +3310,45 @@ fn parse_common_opts(opts: &Value, rule_send_nil_field: bool) -> CommonSinkOpts 
     let data_field = opts
         .get("dataField")
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let format = opts
+        .get("format")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_lowercase());
+    let batch_size = opts
+        .get("batchSize")
+        .and_then(|v| {
+            if let Some(n) = v.as_u64() {
+                Some(n as usize)
+            } else if let Some(s) = v.as_str() {
+                s.parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let linger_interval = opts
+        .get("lingerInterval")
+        .and_then(|v| {
+            if let Some(n) = v.as_u64() {
+                Some(n)
+            } else if let Some(s) = v.as_str() {
+                s.parse::<u64>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
     CommonSinkOpts {
         send_single,
         send_nil_field,
         fields,
         exclude_fields,
         data_field,
+        format,
+        batch_size,
+        linger_interval,
     }
 }
 
@@ -3338,7 +3389,30 @@ fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) 
     }
     if let Some(ref df) = opts.data_field {
         if let Some(val) = data.get(df) {
-            return clean_sink_value(val, opts.send_nil_field);
+            if let Value::Object(obj) = val {
+                let mut map = std::collections::BTreeMap::new();
+                if let Some(ref fields) = opts.fields {
+                    for f in fields {
+                        let v = obj.get(f).unwrap_or(&Value::Null);
+                        map.insert(f.clone(), clean_sink_value(v, opts.send_nil_field));
+                    }
+                } else {
+                    for (k, v) in obj {
+                        if let Some(ref ex) = opts.exclude_fields {
+                            if ex.contains(k) {
+                                continue;
+                            }
+                        }
+                        if v.is_null() && !opts.send_nil_field {
+                            continue;
+                        }
+                        map.insert(k.clone(), clean_sink_value(v, opts.send_nil_field));
+                    }
+                }
+                return serde_json::to_value(map).unwrap_or_else(|_| val.clone());
+            } else {
+                return clean_sink_value(val, opts.send_nil_field);
+            }
         }
         return Value::Null;
     }
@@ -3346,8 +3420,10 @@ fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) 
     if let Some(ref fields) = opts.fields {
         for f in fields {
             let val = data.get(f).unwrap_or(&Value::Null);
-            if val.is_null() && !opts.send_nil_field {
-                continue;
+            if let Some(ref ex) = opts.exclude_fields {
+                if ex.contains(f) {
+                    continue;
+                }
             }
             map.insert(f.clone(), clean_sink_value(val, opts.send_nil_field));
         }
@@ -3370,6 +3446,41 @@ fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) 
     serde_json::to_value(map).unwrap_or(Value::Null)
 }
 
+fn format_record_for_sink_val(val: &Value, opts: &CommonSinkOpts) -> Value {
+    match val {
+        Value::Object(map) => {
+            let hm: HashMap<String, Value> =
+                map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            format_record_for_sink(&hm, opts)
+        }
+        other => other.clone(),
+    }
+}
+
+fn format_record_delimited(val: &Value, delimiter: &str, fields: Option<&[String]>) -> String {
+    match val {
+        Value::Object(map) => {
+            let keys: Vec<String> = if let Some(f) = fields {
+                f.to_vec()
+            } else {
+                let mut k: Vec<String> = map.keys().cloned().collect();
+                k.sort();
+                k
+            };
+            keys.iter()
+                .map(|k| csv_cell(map.get(k), delimiter))
+                .collect::<Vec<_>>()
+                .join(delimiter)
+        }
+        Value::Array(arr) => arr
+            .iter()
+            .map(|item| format_record_delimited(item, delimiter, fields))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => csv_cell(Some(other), delimiter),
+    }
+}
+
 fn to_sink_payload(val: Value, send_single: bool) -> Value {
     if send_single {
         val
@@ -3377,6 +3488,8 @@ fn to_sink_payload(val: Value, send_single: bool) -> Value {
         Value::Array(vec![val])
     }
 }
+
+const BATCH_ROWS_KEY: &str = "__batch_rows__";
 
 /// One sink action parsed once at rule start (never per record).
 #[derive(Debug, Clone)]
@@ -3446,6 +3559,21 @@ enum PreparedAction {
     },
 }
 
+impl PreparedAction {
+    fn common_opts(&self) -> Option<&CommonSinkOpts> {
+        match self {
+            PreparedAction::File { opts, .. } => Some(opts),
+            PreparedAction::Rest { opts, .. } => Some(opts),
+            PreparedAction::Mqtt { opts, .. } => Some(opts),
+            PreparedAction::WebSocket { opts, .. } => Some(opts),
+            PreparedAction::Redis { opts, .. } => Some(opts),
+            PreparedAction::Kafka { opts, .. } => Some(opts),
+            PreparedAction::RabbitMq { opts, .. } => Some(opts),
+            _ => None,
+        }
+    }
+}
+
 fn prepare_actions(
     actions: &[HashMap<String, Value>],
     rule_id: &str,
@@ -3485,7 +3613,7 @@ fn prepare_actions(
                                 .extension()
                                 .and_then(|ext| ext.to_str())
                                 .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
-                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field, true);
                         out.push(PreparedAction::File {
                             path: sink.path.clone(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3540,7 +3668,7 @@ fn prepare_actions(
                         .and_then(|v| v.as_str())
                         .unwrap_or(",")
                         .to_string();
-                    let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                    let common_opts = parse_common_opts(opts, rule_send_nil_field, false);
                     out.push(PreparedAction::Rest {
                         url,
                         method,
@@ -3563,7 +3691,7 @@ fn prepare_actions(
                             .and_then(|v| v.as_str())
                             .unwrap_or(",")
                             .to_string();
-                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field, false);
                         out.push(PreparedAction::Mqtt {
                             config: Box::new(config),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3578,7 +3706,7 @@ fn prepare_actions(
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
                     Ok(ws_cfg) => {
-                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field, false);
                         out.push(PreparedAction::WebSocket {
                             url: ws_cfg.target_url(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3592,7 +3720,7 @@ fn prepare_actions(
                 "redis" | "redispub" | "redisPub" => {
                     match serde_json::from_value::<RedisSinkConfig>(opts.clone()) {
                         Ok(config) => {
-                            let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                            let common_opts = parse_common_opts(opts, rule_send_nil_field, true);
                             out.push(PreparedAction::Redis {
                                 config: Box::new(config),
                                 opts: common_opts,
@@ -3605,7 +3733,7 @@ fn prepare_actions(
                 }
                 "kafka" => match serde_json::from_value::<KafkaConfig>(opts.clone()) {
                     Ok(config) => {
-                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field, true);
                         out.push(PreparedAction::Kafka {
                             config: Box::new(config),
                             opts: common_opts,
@@ -3640,7 +3768,7 @@ fn prepare_actions(
                 "rabbitmq" | "amqp" => {
                     match serde_json::from_value::<RabbitMqConfig>(opts.clone()) {
                         Ok(config) => {
-                            let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                            let common_opts = parse_common_opts(opts, rule_send_nil_field, true);
                             out.push(PreparedAction::RabbitMq {
                                 config: Box::new(config),
                                 template: action_template(opts).map(|s| s.to_string()),
@@ -3839,15 +3967,6 @@ impl FileBatchWriter {
         Ok(())
     }
 
-    fn push_json(&mut self, data: &HashMap<String, Value>, opts: &CommonSinkOpts) {
-        let formatted = format_record_for_sink(data, opts);
-        if let Ok(mut line) = serde_json::to_string(&formatted) {
-            line.push('\n');
-            self.buf.extend_from_slice(line.as_bytes());
-            self.pending += 1;
-        }
-    }
-
     fn push_text(&mut self, text: &str) {
         self.buf.extend_from_slice(text.as_bytes());
         if !text.ends_with('\n') {
@@ -4034,6 +4153,24 @@ fn spawn_rule_task(
             tokio::select! {
                 rec = sink_rx.recv() => {
                     let Some(output_record) = rec else {
+                        // Flush remaining batch_buffer for sinks with batching
+                        for rt in runtimes.iter_mut() {
+                            if !rt.batch_buffer.is_empty() {
+                                let batch = std::mem::take(&mut rt.batch_buffer);
+                                let mut batch_data = HashMap::new();
+                                batch_data.insert(BATCH_ROWS_KEY.to_string(), Value::Array(batch));
+                                let batch_record = StreamRecord::new(batch_data);
+                                let enable_private_net = sink_config.read().basic.enable_private_net;
+                                let ctx = SinkContext {
+                                    rule_id: &sink_rule_id,
+                                    rule_mgr: &sink_rule_mgr,
+                                    stream_bus: &sink_stream_bus,
+                                    http_client: &sink_http_client,
+                                    enable_private_net,
+                                };
+                                let _ = send_action(rt, &batch_record, None, &ctx, &mut files).await;
+                            }
+                        }
                         // Rule end/cancel/update/delete/shutdown: drain, flush
                         // every file destination, persist caches, then exit.
                         // Errors propagate to exceptions before exit.
@@ -4082,17 +4219,22 @@ fn spawn_rule_task(
                         http_client: &sink_http_client,
                         enable_private_net,
                     };
+                    let num_records = if let Some(Value::Array(a)) = output_record.data.get(BATCH_ROWS_KEY) {
+                        a.len() as u64
+                    } else {
+                        1
+                    };
                     match deliver_record(&mut runtimes, &output_record, &ctx, &mut files).await {
                         Delivery::Delivered => {
                             if file_actions {
-                                pending_file_records += 1;
+                                pending_file_records += num_records;
                             } else {
-                                sink_counters.sink_out.fetch_add(1, Relaxed);
+                                sink_counters.sink_out.fetch_add(num_records, Relaxed);
                             }
                         }
                         // Counted as delivered when the resend succeeds.
                         Delivery::Cached => {}
-                        Delivery::Failed => sink_rule_mgr.inc_sink_failed(&sink_rule_id, 1),
+                        Delivery::Failed => sink_rule_mgr.inc_sink_failed(&sink_rule_id, num_records),
                     }
                     let need_flush = files.values().any(|w| w.should_flush());
                     if need_flush {
@@ -4140,6 +4282,23 @@ fn spawn_rule_task(
                         http_client: &sink_http_client,
                         enable_private_net,
                     };
+                    let now = tokio::time::Instant::now();
+                    for rt in runtimes.iter_mut() {
+                        let linger_interval = rt.action.common_opts().map(|o| o.linger_interval).unwrap_or(0);
+                        if linger_interval > 0 && !rt.batch_buffer.is_empty() {
+                            let elapsed = now.duration_since(rt.last_batch_time).as_millis() as u64;
+                            if elapsed >= linger_interval {
+                                let batch = std::mem::take(&mut rt.batch_buffer);
+                                rt.last_batch_time = now;
+                                let mut batch_data = HashMap::new();
+                                batch_data.insert(BATCH_ROWS_KEY.to_string(), Value::Array(batch));
+                                let batch_record = StreamRecord::new(batch_data);
+                                if let Err(err) = send_action(rt, &batch_record, None, &ctx, &mut files).await {
+                                    report_send_error(rt, &ctx, &err, false);
+                                }
+                            }
+                        }
+                    }
                     let live_recent = last_live.elapsed() < SINK_TICK * 2;
                     for rt in runtimes.iter_mut() {
                         let resent = resend_cached(rt, live_recent, &ctx, &mut files).await;
@@ -4503,6 +4662,8 @@ struct ActionRuntime {
     retry_at: tokio::time::Instant,
     last_warn: Option<std::time::Instant>,
     reported_dropped: u64,
+    batch_buffer: Vec<Value>,
+    last_batch_time: tokio::time::Instant,
 }
 
 impl ActionRuntime {
@@ -4516,6 +4677,8 @@ impl ActionRuntime {
             retry_at: tokio::time::Instant::now(),
             last_warn: None,
             reported_dropped: 0,
+            batch_buffer: Vec::new(),
+            last_batch_time: tokio::time::Instant::now(),
         }
     }
 }
@@ -4614,6 +4777,63 @@ fn make_internal_net_error(method: &str, url: &str, ip: std::net::IpAddr, port: 
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn execute_rest_request(
+    http_client: &reqwest::Client,
+    method: &str,
+    final_url: &str,
+    headers: &HashMap<String, String>,
+    content_type: Option<&str>,
+    body_str: Option<&str>,
+    map: &HashMap<String, Value>,
+    enable_private_net: bool,
+) -> Result<(), SendError> {
+    if !enable_private_net {
+        if let Ok(url_obj) = reqwest::Url::parse(final_url) {
+            let port = url_obj.port_or_known_default().unwrap_or(80);
+            if let Some(host_str) = url_obj.host_str() {
+                let cleaned = host_str.trim_start_matches('[').trim_end_matches(']');
+                if let Ok(ip) = cleaned.parse::<std::net::IpAddr>() {
+                    if is_private_or_internal_ip(ip) {
+                        return Err(make_internal_net_error(method, final_url, ip, port));
+                    }
+                } else if let Ok(addrs) = tokio::net::lookup_host((cleaned, port)).await {
+                    for addr in addrs {
+                        if is_private_or_internal_ip(addr.ip()) {
+                            return Err(make_internal_net_error(method, final_url, addr.ip(), port));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let req_method = match method {
+        "GET" => reqwest::Method::GET,
+        "PUT" => reqwest::Method::PUT,
+        "DELETE" => reqwest::Method::DELETE,
+        "HEAD" => reqwest::Method::HEAD,
+        "PATCH" => reqwest::Method::PATCH,
+        _ => reqwest::Method::POST,
+    };
+    let mut req_builder = http_client.request(req_method, final_url);
+    for (hk, hv) in headers {
+        let final_hv = if hv.contains("{{") {
+            apply_data_template(hv, &record_template_map(map))
+        } else {
+            hv.clone()
+        };
+        req_builder = req_builder.header(hk.as_str(), final_hv);
+    }
+    if let Some(ct) = content_type {
+        req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, ct);
+    }
+    if let Some(body) = body_str {
+        req_builder = req_builder.body(body.to_string());
+    }
+    let res = req_builder.send().await;
+    res.map(|_| ()).map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
+}
+
 /// Send one record through one action. File actions buffer into the rule's
 /// `FileBatchWriter`s (bounded, flushed by size/time/shutdown); `memory`
 /// feedback uses non-blocking all-or-nothing publish and counts drops
@@ -4648,7 +4868,35 @@ async fn send_action(
                 let writer = files
                     .entry(path.clone())
                     .or_insert_with(|| FileBatchWriter::new(path.clone()));
-                if *delimited {
+                if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                    if *delimited {
+                        let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                        writer.push_text(&text);
+                    } else if opts.send_single {
+                        for row in arr {
+                            if let Some(tpl) = template {
+                                if let Value::Object(m) = row {
+                                    let map: serde_json::Map<String, Value> = m.clone();
+                                    writer.push_text(&apply_data_template(tpl, &map));
+                                }
+                            } else {
+                                let formatted = format_record_for_sink_val(row, opts);
+                                if let Ok(mut line) = serde_json::to_string(&formatted) {
+                                    line.push('\n');
+                                    writer.buf.extend_from_slice(line.as_bytes());
+                                    writer.pending += 1;
+                                }
+                            }
+                        }
+                    } else {
+                        let formatted: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                        if let Ok(mut line) = serde_json::to_string(&Value::Array(formatted)) {
+                            line.push('\n');
+                            writer.buf.extend_from_slice(line.as_bytes());
+                            writer.pending += 1;
+                        }
+                    }
+                } else if *delimited {
                     writer.push_delimited(&output.data, delimiter, *has_header, opts);
                 } else if let Some(tpl) = template {
                     writer.push_text(&apply_data_template(
@@ -4656,7 +4904,13 @@ async fn send_action(
                         &record_template_map(&output.data),
                     ));
                 } else {
-                    writer.push_json(&output.data, opts);
+                    let formatted = format_record_for_sink(&output.data, opts);
+                    let payload = to_sink_payload(formatted, opts.send_single);
+                    if let Ok(mut line) = serde_json::to_string(&payload) {
+                        line.push('\n');
+                        writer.buf.extend_from_slice(line.as_bytes());
+                        writer.pending += 1;
+                    }
                 }
             }
             Ok(())
@@ -4670,122 +4924,145 @@ async fn send_action(
             opts,
             format,
             delimiter,
-        } => {
-            let base_url = destination.unwrap_or(url);
+        } => {            let base_url = destination.unwrap_or(url);
             if base_url.is_empty() {
                 return Err(SendError::Permanent("rest action missing url".to_string()));
             }
-            let final_url = if base_url.contains("{{") {
-                apply_data_template(base_url, &record_template_map(&output.data))
-            } else {
-                base_url.to_string()
-            };
+            let is_delimited = format.as_deref() == Some("delimited")
+                || opts.format.as_deref() == Some("delimited");
 
-            if !ctx.enable_private_net {
-                if let Ok(url_obj) = reqwest::Url::parse(&final_url) {
-                    let port = url_obj.port_or_known_default().unwrap_or(80);
-                    if let Some(host_str) = url_obj.host_str() {
-                        let cleaned = host_str.trim_start_matches('[').trim_end_matches(']');
-                        if let Ok(ip) = cleaned.parse::<std::net::IpAddr>() {
-                            if is_private_or_internal_ip(ip) {
-                                return Err(make_internal_net_error(method, &final_url, ip, port));
-                            }
-                        } else if let Ok(addrs) = tokio::net::lookup_host((cleaned, port)).await {
-                            for addr in addrs {
-                                if is_private_or_internal_ip(addr.ip()) {
-                                    return Err(make_internal_net_error(
-                                        method,
-                                        &final_url,
-                                        addr.ip(),
-                                        port,
-                                    ));
-                                }
-                            }
-                        }
-                    }
+            let resolve_url = |data_map: &HashMap<String, Value>| {
+                if base_url.contains("{{") {
+                    apply_data_template(base_url, &record_template_map(data_map))
+                } else {
+                    base_url.to_string()
                 }
-            }
-
-            let req_method = match method.as_str() {
-                "GET" => reqwest::Method::GET,
-                "PUT" => reqwest::Method::PUT,
-                "DELETE" => reqwest::Method::DELETE,
-                "HEAD" => reqwest::Method::HEAD,
-                "PATCH" => reqwest::Method::PATCH,
-                _ => reqwest::Method::POST,
             };
 
-            let mut req_builder = ctx.http_client.request(req_method.clone(), &final_url);
-
-            for (hk, hv) in headers {
-                let final_hv = if hv.contains("{{") {
-                    apply_data_template(hv, &record_template_map(&output.data))
-                } else {
-                    hv.clone()
-                };
-                req_builder = req_builder.header(hk.as_str(), final_hv);
+            if method.eq_ignore_ascii_case("GET") || body_type == "none" {
+                let final_url = resolve_url(&output.data);
+                return execute_rest_request(
+                    ctx.http_client,
+                    method,
+                    &final_url,
+                    headers,
+                    None,
+                    None,
+                    &output.data,
+                    ctx.enable_private_net,
+                )
+                .await;
             }
 
-            if req_method == reqwest::Method::GET || body_type == "none" {
-                // No body, no content-type
-            } else if body_type == "text" {
-                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
-                let body_str = match template {
-                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
-                    None => {
-                        let formatted = format_record_for_sink(&output.data, opts);
-                        to_sink_payload(formatted, opts.send_single).to_string()
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if is_delimited {
+                    let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                    let final_url = resolve_url(&output.data);
+                    return execute_rest_request(
+                        ctx.http_client,
+                        method,
+                        &final_url,
+                        headers,
+                        Some("text/plain"),
+                        Some(&text),
+                        &output.data,
+                        ctx.enable_private_net,
+                    )
+                    .await;
+                }
+                if opts.send_single {
+                    for row in arr {
+                        let row_map: HashMap<String, Value> = match row {
+                            Value::Object(m) => m.clone().into_iter().collect(),
+                            _ => HashMap::new(),
+                        };
+                        let final_url = resolve_url(&row_map);
+                        let body_str = if let Some(tpl) = template {
+                            apply_data_template(tpl, &record_template_map(&row_map))
+                        } else {
+                            let formatted = format_record_for_sink_val(row, opts);
+                            serde_json::to_string(&formatted)
+                                .map_err(|e| SendError::Permanent(format!("json encode: {}", e)))?
+                        };
+                        let ct = if body_type == "text" { "text/plain" } else if body_type == "html" { "text/html" } else { "application/json" };
+                        execute_rest_request(
+                            ctx.http_client,
+                            method,
+                            &final_url,
+                            headers,
+                            Some(ct),
+                            Some(&body_str),
+                            &row_map,
+                            ctx.enable_private_net,
+                        )
+                        .await?;
                     }
-                };
-                req_builder = req_builder.body(body_str);
-            } else if body_type == "html" {
-                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/html");
-                let body_str = match template {
-                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
-                    None => {
-                        let formatted = format_record_for_sink(&output.data, opts);
-                        to_sink_payload(formatted, opts.send_single).to_string()
-                    }
-                };
-                req_builder = req_builder.body(body_str);
-            } else if format.as_deref() == Some("delimited") {
-                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "text/plain");
-                let keys = if let Some(ref f) = opts.fields {
-                    f.clone()
+                    Ok(())
                 } else {
-                    let mut k: Vec<String> = output
-                        .data
-                        .keys()
-                        .filter(|k| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
-                        .cloned()
-                        .collect();
-                    k.sort();
-                    k
-                };
-                let row = keys
-                    .iter()
-                    .map(|k| csv_cell(output.data.get(k), delimiter))
-                    .collect::<Vec<_>>()
-                    .join(delimiter);
-                req_builder = req_builder.body(row);
+                    let final_url = resolve_url(&output.data);
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let body_str = serde_json::to_string(&Value::Array(formatted_arr))
+                        .map_err(|e| SendError::Permanent(format!("json encode: {}", e)))?;
+                    let ct = if body_type == "text" { "text/plain" } else if body_type == "html" { "text/html" } else { "application/json" };
+                    execute_rest_request(
+                        ctx.http_client,
+                        method,
+                        &final_url,
+                        headers,
+                        Some(ct),
+                        Some(&body_str),
+                        &output.data,
+                        ctx.enable_private_net,
+                    )
+                    .await
+                }
             } else {
-                req_builder = req_builder.header(reqwest::header::CONTENT_TYPE, "application/json");
-                let body_str = match template {
-                    Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
-                    None => {
-                        let formatted = format_record_for_sink(&output.data, opts);
-                        serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
-                            .map_err(|e| {
-                                SendError::Permanent(format!("json encode error: {}", e))
-                            })?
-                    }
+                let final_url = resolve_url(&output.data);
+                let (ct, body_str) = if is_delimited {
+                    let formatted = format_record_for_sink(&output.data, opts);
+                    let row = format_record_delimited(&formatted, delimiter, opts.fields.as_deref());
+                    ("text/plain", row)
+                } else if body_type == "text" {
+                    let s = match template {
+                        Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                        None => {
+                            let formatted = format_record_for_sink(&output.data, opts);
+                            to_sink_payload(formatted, opts.send_single).to_string()
+                        }
+                    };
+                    ("text/plain", s)
+                } else if body_type == "html" {
+                    let s = match template {
+                        Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                        None => {
+                            let formatted = format_record_for_sink(&output.data, opts);
+                            to_sink_payload(formatted, opts.send_single).to_string()
+                        }
+                    };
+                    ("text/html", s)
+                } else {
+                    let s = match template {
+                        Some(tpl) => apply_data_template(tpl, &record_template_map(&output.data)),
+                        None => {
+                            let formatted = format_record_for_sink(&output.data, opts);
+                            serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
+                                .map_err(|e| SendError::Permanent(format!("json encode error: {}", e)))?
+                        }
+                    };
+                    ("application/json", s)
                 };
-                req_builder = req_builder.body(body_str);
+                execute_rest_request(
+                    ctx.http_client,
+                    method,
+                    &final_url,
+                    headers,
+                    Some(ct),
+                    Some(&body_str),
+                    &output.data,
+                    ctx.enable_private_net,
+                )
+                .await
             }
-
-            let res = req_builder.send().await;
-            res.map(|_| ())
-                .map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
         }
         PreparedAction::Mqtt {
             config,
@@ -4803,55 +5080,82 @@ async fn send_action(
             let Some(sink) = rt.mqtt.as_ref() else {
                 return Err(SendError::Permanent("mqtt sink unavailable".to_string()));
             };
-            let payload = match template {
-                Some(tpl) => {
-                    apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
-                }
-                None => {
-                    if let Some(Value::String(raw_err)) = output.data.get("__raw_error__") {
-                        raw_err.as_bytes().to_vec()
-                    } else if format.as_deref() == Some("delimited") {
-                        let keys = if let Some(ref f) = opts.fields {
-                            f.clone()
+            let is_delimited = format.as_deref() == Some("delimited")
+                || opts.format.as_deref() == Some("delimited");
+
+            let resolve_topic = |data_map: &HashMap<String, Value>| -> String {
+                match destination {
+                    Some(d) => d.to_string(),
+                    None => {
+                        if config.topic.contains("{{") {
+                            apply_data_template(&config.topic, &record_template_map(data_map))
                         } else {
-                            let mut k: Vec<String> = output
-                                .data
-                                .keys()
-                                .filter(|k| {
-                                    *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__")
-                                })
-                                .cloned()
-                                .collect();
-                            k.sort();
-                            k
+                            config.topic.clone()
+                        }
+                    }
+                }
+            };
+
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if is_delimited {
+                    let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                    let topic = resolve_topic(&output.data);
+                    sink.send_raw_to(&topic, text.into_bytes())
+                        .await
+                        .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))?;
+                } else if opts.send_single {
+                    for row in arr {
+                        let row_map: HashMap<String, Value> = match row {
+                            Value::Object(m) => m.clone().into_iter().collect(),
+                            _ => HashMap::new(),
                         };
-                        let row = keys
-                            .iter()
-                            .map(|k| csv_cell(output.data.get(k), delimiter))
-                            .collect::<Vec<_>>()
-                            .join(delimiter);
-                        row.into_bytes()
-                    } else {
-                        let formatted = format_record_for_sink(&output.data, opts);
-                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
-                            |e| SendError::Permanent(format!("mqtt payload encode: {}", e)),
-                        )?
+                        let topic = resolve_topic(&row_map);
+                        let payload = if let Some(tpl) = template {
+                            apply_data_template(tpl, &record_template_map(&row_map)).into_bytes()
+                        } else {
+                            let formatted = format_record_for_sink_val(row, opts);
+                            serde_json::to_vec(&formatted)
+                                .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?
+                        };
+                        sink.send_raw_to(&topic, payload)
+                            .await
+                            .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))?;
                     }
+                } else {
+                    let topic = resolve_topic(&output.data);
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let payload = serde_json::to_vec(&Value::Array(formatted_arr))
+                        .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?;
+                    sink.send_raw_to(&topic, payload)
+                        .await
+                        .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))?;
                 }
-            };
-            let topic = match destination {
-                Some(d) => d.to_string(),
-                None => {
-                    if config.topic.contains("{{") {
-                        apply_data_template(&config.topic, &record_template_map(&output.data))
-                    } else {
-                        config.topic.clone()
+                Ok(())
+            } else {
+                let payload = match template {
+                    Some(tpl) => {
+                        apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
                     }
-                }
-            };
-            sink.send_raw_to(&topic, payload)
-                .await
-                .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
+                    None => {
+                        if let Some(Value::String(raw_err)) = output.data.get("__raw_error__") {
+                            raw_err.as_bytes().to_vec()
+                        } else if is_delimited {
+                            let formatted = format_record_for_sink(&output.data, opts);
+                            let row = format_record_delimited(&formatted, delimiter, opts.fields.as_deref());
+                            row.into_bytes()
+                        } else {
+                            let formatted = format_record_for_sink(&output.data, opts);
+                            serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
+                                |e| SendError::Permanent(format!("mqtt payload encode: {}", e)),
+                            )?
+                        }
+                    }
+                };
+                let topic = resolve_topic(&output.data);
+                sink.send_raw_to(&topic, payload)
+                    .await
+                    .map_err(|e| SendError::Retry(format!("mqtt action failed: {}", e)))
+            }
         }
         PreparedAction::WebSocket {
             url,
@@ -4859,45 +5163,111 @@ async fn send_action(
             opts,
         } => {
             let sink = WebSocketSink { url: url.clone() };
-            let res = match template {
-                Some(tpl) => {
-                    sink.send_text(&apply_data_template(
-                        tpl,
-                        &record_template_map(&output.data),
-                    ))
-                    .await
-                }
-                None => {
-                    let formatted = format_record_for_sink(&output.data, opts);
-                    let text = serde_json::to_string(&formatted).map_err(|e| {
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if opts.send_single {
+                    for row in arr {
+                        let formatted = format_record_for_sink_val(row, opts);
+                        let text = serde_json::to_string(&formatted).map_err(|e| {
+                            SendError::Permanent(format!("websocket payload encode: {}", e))
+                        })?;
+                        sink.send_text(&text)
+                            .await
+                            .map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))?;
+                    }
+                } else {
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let text = serde_json::to_string(&Value::Array(formatted_arr)).map_err(|e| {
                         SendError::Permanent(format!("websocket payload encode: {}", e))
                     })?;
-                    sink.send_text(&text).await
+                    sink.send_text(&text)
+                        .await
+                        .map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))?;
                 }
-            };
-            res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
+                Ok(())
+            } else {
+                let res = match template {
+                    Some(tpl) => {
+                        sink.send_text(&apply_data_template(
+                            tpl,
+                            &record_template_map(&output.data),
+                        ))
+                        .await
+                    }
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        let payload = to_sink_payload(formatted, opts.send_single);
+                        let text = serde_json::to_string(&payload).map_err(|e| {
+                            SendError::Permanent(format!("websocket payload encode: {}", e))
+                        })?;
+                        sink.send_text(&text).await
+                    }
+                };
+                res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
+            }
         }
         PreparedAction::Redis { config, opts } => {
             let sink = RedisSink {
                 config: (**config).clone(),
             };
-            let formatted = format_record_for_sink(&output.data, opts);
-            let payload = serde_json::to_string(&formatted)
-                .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
-            sink.send_raw(&payload, output)
-                .await
-                .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if opts.send_single {
+                    for row in arr {
+                        let formatted = format_record_for_sink_val(row, opts);
+                        let payload = serde_json::to_string(&formatted)
+                            .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+                        sink.send_raw(&payload, output)
+                            .await
+                            .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))?;
+                    }
+                    Ok(())
+                } else {
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let payload = serde_json::to_string(&Value::Array(formatted_arr))
+                        .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+                    sink.send_raw(&payload, output)
+                        .await
+                        .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
+                }
+            } else {
+                let formatted = format_record_for_sink(&output.data, opts);
+                let payload = serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
+                    .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+                sink.send_raw(&payload, output)
+                    .await
+                    .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
+            }
         }
         PreparedAction::Kafka { config, opts } => {
             let sink = KafkaSink {
                 config: (**config).clone(),
             };
-            let formatted = format_record_for_sink(&output.data, opts);
-            let payload = serde_json::to_vec(&formatted)
-                .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
-            sink.send_raw(payload, output)
-                .await
-                .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if opts.send_single {
+                    for row in arr {
+                        let formatted = format_record_for_sink_val(row, opts);
+                        let payload = serde_json::to_vec(&formatted)
+                            .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+                        sink.send_raw(payload, output)
+                            .await
+                            .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))?;
+                    }
+                    Ok(())
+                } else {
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let payload = serde_json::to_vec(&Value::Array(formatted_arr))
+                        .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+                    sink.send_raw(payload, output)
+                        .await
+                        .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
+                }
+            } else {
+                let formatted = format_record_for_sink(&output.data, opts);
+                let payload = serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
+                    .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+                sink.send_raw(payload, output)
+                    .await
+                    .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
+            }
         }
         PreparedAction::Sql { config } => {
             if rt.sql.is_none() {
@@ -4919,34 +5289,57 @@ async fn send_action(
             } else {
                 topic.clone()
             };
-            let mut clean_data = HashMap::new();
-            for (k, v) in &output.data {
-                if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
-                    continue;
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                for row in arr {
+                    let row_obj = match row {
+                        Value::Object(m) => m.clone().into_iter().collect::<HashMap<String, Value>>(),
+                        _ => continue,
+                    };
+                    let mut clean_data = HashMap::new();
+                    for (k, v) in &row_obj {
+                        if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                            continue;
+                        }
+                        if v.is_null() && !send_nil_field {
+                            continue;
+                        }
+                        clean_data.insert(k.clone(), clean_sink_value(v, *send_nil_field));
+                    }
+                    let mut clean_rec = output.clone();
+                    clean_rec.data = clean_data;
+                    let _ = ctx.stream_bus.try_publish(&final_topic, clean_rec);
                 }
-                if v.is_null() && !send_nil_field {
-                    continue;
+                Ok(())
+            } else {
+                let mut clean_data = HashMap::new();
+                for (k, v) in &output.data {
+                    if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+                        continue;
+                    }
+                    if v.is_null() && !send_nil_field {
+                        continue;
+                    }
+                    clean_data.insert(k.clone(), clean_sink_value(v, *send_nil_field));
                 }
-                clean_data.insert(k.clone(), clean_sink_value(v, *send_nil_field));
-            }
-            let mut clean_rec = output.clone();
-            clean_rec.data = clean_data;
-            match ctx.stream_bus.try_publish(&final_topic, clean_rec) {
-                Ok(_) => Ok(()),
-                // Produced data with nobody listening: not an error.
-                Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
-                Err(rekuiper_core::PublishError::Full) => {
-                    tracing::warn!(
-                        "[RULE {}] memory feedback queue full, dropping record",
-                        ctx.rule_id
-                    );
-                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                    ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
-                    Err(SendError::Dropped)
-                }
-                Err(rekuiper_core::PublishError::Closed) => {
-                    ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
-                    Err(SendError::Dropped)
+                let mut clean_rec = output.clone();
+                clean_rec.data = clean_data;
+                match ctx.stream_bus.try_publish(&final_topic, clean_rec) {
+                    Ok(_) => Ok(()),
+                    // Produced data with nobody listening: not an error.
+                    Err(rekuiper_core::PublishError::NoSubscribers) => Ok(()),
+                    Err(rekuiper_core::PublishError::Full) => {
+                        tracing::warn!(
+                            "[RULE {}] memory feedback queue full, dropping record",
+                            ctx.rule_id
+                        );
+                        ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                        ctx.rule_mgr.inc_exceptions(ctx.rule_id, 1);
+                        Err(SendError::Dropped)
+                    }
+                    Err(rekuiper_core::PublishError::Closed) => {
+                        ctx.rule_mgr.inc_dropped(ctx.rule_id, 1);
+                        Err(SendError::Dropped)
+                    }
                 }
             }
         }
@@ -4959,19 +5352,51 @@ async fn send_action(
                 rt.rabbitmq = Some(RabbitMqSink::new((**config).clone()));
             }
             let sink = rt.rabbitmq.as_ref().unwrap();
-            let payload = match template {
-                Some(tpl) => {
-                    apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
+            if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                if opts.send_single {
+                    for row in arr {
+                        let payload = match template {
+                            Some(tpl) => {
+                                let row_map: serde_json::Map<String, Value> = match row {
+                                    Value::Object(m) => m.clone(),
+                                    _ => serde_json::Map::new(),
+                                };
+                                apply_data_template(tpl, &row_map).into_bytes()
+                            }
+                            None => {
+                                let formatted = format_record_for_sink_val(row, opts);
+                                serde_json::to_vec(&formatted)
+                                    .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
+                            }
+                        };
+                        sink.send_raw(&payload)
+                            .await
+                            .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))?;
+                    }
+                    Ok(())
+                } else {
+                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let payload = serde_json::to_vec(&Value::Array(formatted_arr))
+                        .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?;
+                    sink.send_raw(&payload)
+                        .await
+                        .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
                 }
-                None => {
-                    let formatted = format_record_for_sink(&output.data, opts);
-                    serde_json::to_vec(&formatted)
-                        .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
-                }
-            };
-            sink.send_raw(&payload)
-                .await
-                .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
+            } else {
+                let payload = match template {
+                    Some(tpl) => {
+                        apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
+                    }
+                    None => {
+                        let formatted = format_record_for_sink(&output.data, opts);
+                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
+                            .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
+                    }
+                };
+                sink.send_raw(&payload)
+                    .await
+                    .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
+            }
         }
         PreparedAction::EdgeX {
             device_name,
@@ -5064,6 +5489,43 @@ async fn deliver_record(
                 continue;
             }
         }
+
+        // Sink batching (batchSize / lingerInterval)
+        let batch_opts = rt.action.common_opts().cloned();
+        if let Some(opts) = batch_opts {
+            if opts.batch_size > 0 || opts.linger_interval > 0 {
+                let rows: Vec<Value> = if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                    arr.iter().map(|item| format_record_for_sink_val(item, &opts)).collect()
+                } else {
+                    vec![format_record_for_sink(&output.data, &opts)]
+                };
+                rt.batch_buffer.extend(rows);
+                if opts.batch_size > 0 && rt.batch_buffer.len() >= opts.batch_size {
+                    while rt.batch_buffer.len() >= opts.batch_size {
+                        let batch: Vec<Value> = rt.batch_buffer.drain(..opts.batch_size).collect();
+                        rt.last_batch_time = tokio::time::Instant::now();
+                        let mut batch_data = HashMap::new();
+                        batch_data.insert(BATCH_ROWS_KEY.to_string(), Value::Array(batch));
+                        let batch_record = StreamRecord::new(batch_data);
+                        if let Err(err) = send_action(rt, &batch_record, None, ctx, files).await {
+                            let cacheable = matches!(err, SendError::Retry(_)) && rt.cache.is_some();
+                            if let (true, Some(cache)) = (cacheable, rt.cache.as_mut()) {
+                                cache.push(batch_record);
+                            }
+                            report_send_error(rt, ctx, &err, cacheable);
+                            if cacheable {
+                                sync_cache_drops(rt, ctx);
+                                delivery = delivery.max(Delivery::Cached);
+                            } else {
+                                delivery = Delivery::Failed;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
         if let Err(err) = send_action(rt, output, None, ctx, files).await {
             let cacheable = matches!(err, SendError::Retry(_)) && rt.cache.is_some();
             if let (true, Some(cache)) = (cacheable, rt.cache.as_mut()) {
@@ -6189,10 +6651,24 @@ async fn emit_window_outputs(
     sink: &tokio::sync::mpsc::Sender<StreamRecord>,
     outputs: Vec<HashMap<String, Value>>,
 ) {
-    for output in outputs {
-        if !enqueue_sink_record(counters, sink, StreamRecord::new(output)).await {
-            break;
-        }
+    if outputs.is_empty() {
+        return;
+    }
+    if outputs.len() == 1 {
+        let _ = enqueue_sink_record(
+            counters,
+            sink,
+            StreamRecord::new(outputs.into_iter().next().unwrap()),
+        )
+        .await;
+    } else {
+        let mut map = HashMap::new();
+        let arr: Vec<Value> = outputs
+            .into_iter()
+            .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+            .collect();
+        map.insert(BATCH_ROWS_KEY.to_string(), Value::Array(arr));
+        let _ = enqueue_sink_record(counters, sink, StreamRecord::new(map)).await;
     }
 }
 
@@ -7753,8 +8229,33 @@ fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(),
 }
 
 fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), String> {
+    const SUPPORTED_FORMATS: &[&str] = &[
+        "json", "binary", "delimited", "protobuf", "custom", "urlencoded",
+    ];
     for action in actions {
         for (kind, opts) in action {
+            if let Some(fmt) = opts.get("format").and_then(|v| v.as_str()) {
+                if !SUPPORTED_FORMATS.iter().any(|&f| f.eq_ignore_ascii_case(fmt)) {
+                    return Err(format!("format type {} not supported", fmt));
+                }
+            }
+            if kind.eq_ignore_ascii_case("mqtt") {
+                let topic = opts.get("topic").and_then(|v| v.as_str()).unwrap_or("");
+                if topic.is_empty() {
+                    return Err("mqtt sink is missing property topic".to_string());
+                }
+                let has_conn_selector = opts
+                    .get("connectionSelector")
+                    .or_else(|| opts.get("resourceId"))
+                    .or_else(|| opts.get("confKey"))
+                    .or_else(|| opts.get("CONF_KEY"))
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty());
+                let server = opts.get("server").and_then(|v| v.as_str()).unwrap_or("");
+                if server.is_empty() && !has_conn_selector {
+                    return Err("missing server property".to_string());
+                }
+            }
             if kind.eq_ignore_ascii_case("rest") || kind.eq_ignore_ascii_case("http") {
                 if let Some(m) = opts.get("method").and_then(|v| v.as_str()) {
                     let m_upper = m.to_uppercase();
@@ -7904,6 +8405,9 @@ async fn validate_rule(
     Json(rule): Json<RuleDefinition>,
 ) -> Response {
     if let Err(e) = validate_rule_options(&rule.options) {
+        return (StatusCode::BAD_REQUEST, e).into_response();
+    }
+    if let Err(e) = validate_sink_actions(&rule.actions) {
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
     if rule.actions.is_empty() && rule.graph.is_none() {

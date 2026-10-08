@@ -66,10 +66,11 @@ Each sink action supports these common configuration properties:
 | `omitIfEmpty` | bool: `false` | When set to `true`, discards empty `SELECT` query results instead of sending them to the sink. |
 | `sendSingle` | bool: `false` | When `false`, the sink sends results as a JSON array (`{"result":"[{\"count\":30},{\"count\":20}]"}`). When `true`, the sink sends records individually (`{"count":30}`, then `{"count":20}`). |
 | `dataTemplate` | string: `""` | [Go template](https://golang.org/pkg/text/template) string that transforms output payloads. Refer to [Data Templates](./data_template.md). |
-| `format` | string: `"json"` | Serialization format: `"json"` or `"protobuf"`. Protocol Buffers requires `schemaId`. |
+| `format` | string: `"json"` | Serialization format: `"json"`, `"delimited"`, `"binary"`, `"protobuf"`, `"custom"`, or `"urlencoded"`. |
 | `schemaId` | string: `""` | Schema identifier for encoding results. |
 | `delimiter` | string: `","` | Delimiter character when using delimited formats. Default is a comma. |
 | `fields` | []string: `nil` | Array of field names selected for output. If set, only specified fields are sent. |
+| `excludeFields` | []string: `nil` | Array of field names excluded from output. If set, specified fields are omitted from sent records. |
 | `dataField` | string: `""` | Top-level property key extracted from template output before field filtering. |
 | `enableCache` | bool: Global default | Enables disk and memory caching during network failures. |
 | `memoryCacheThreshold` | int: Global default | Maximum number of messages cached in memory for immediate replay after failure recovery. |
