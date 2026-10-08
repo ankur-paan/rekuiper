@@ -137,7 +137,11 @@ async fn test_rest_sink_send_single_false_default() {
 
     // sendSingle: false must emit a JSON array: [{"dev":"d0","id":0,"temp":20.5}]
     let parsed: Value = serde_json::from_str(&recs[0]).expect("JSON array expected");
-    assert!(parsed.is_array(), "Default REST sink payload must be a JSON array, got: {}", recs[0]);
+    assert!(
+        parsed.is_array(),
+        "Default REST sink payload must be a JSON array, got: {}",
+        recs[0]
+    );
     let arr = parsed.as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["dev"], "d0");
@@ -192,7 +196,11 @@ async fn test_rest_sink_send_single_true() {
 
     // sendSingle: true must emit a bare JSON object: {"dev":"d0","id":0,"temp":20.5}
     let parsed: Value = serde_json::from_str(&recs[0]).expect("JSON object expected");
-    assert!(parsed.is_object(), "sendSingle=true must emit a JSON object, got: {}", recs[0]);
+    assert!(
+        parsed.is_object(),
+        "sendSingle=true must emit a JSON object, got: {}",
+        recs[0]
+    );
     assert_eq!(parsed["dev"], "d0");
     assert_eq!(parsed["id"], 0);
     assert_eq!(parsed["temp"], 20.5);
@@ -247,9 +255,19 @@ async fn test_rest_sink_fields_and_missing_null() {
 
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
     assert_eq!(parsed["id"], 0);
-    assert_eq!(parsed["nosuch"], Value::Null, "Missing field specified in fields must output explicit null");
-    assert!(!parsed.as_object().unwrap().contains_key("dev"), "Unlisted field 'dev' must not be present");
-    assert!(!parsed.as_object().unwrap().contains_key("temp"), "Unlisted field 'temp' must not be present");
+    assert_eq!(
+        parsed["nosuch"],
+        Value::Null,
+        "Missing field specified in fields must output explicit null"
+    );
+    assert!(
+        !parsed.as_object().unwrap().contains_key("dev"),
+        "Unlisted field 'dev' must not be present"
+    );
+    assert!(
+        !parsed.as_object().unwrap().contains_key("temp"),
+        "Unlisted field 'temp' must not be present"
+    );
 }
 
 #[tokio::test]
@@ -301,7 +319,10 @@ async fn test_rest_sink_exclude_fields() {
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
     assert_eq!(parsed["dev"], "d0");
     assert_eq!(parsed["id"], 0);
-    assert!(!parsed.as_object().unwrap().contains_key("temp"), "excludeFields: ['temp'] must omit temp");
+    assert!(
+        !parsed.as_object().unwrap().contains_key("temp"),
+        "excludeFields: ['temp'] must omit temp"
+    );
 }
 
 #[tokio::test]
@@ -358,7 +379,10 @@ async fn test_rest_sink_data_field() {
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
     assert_eq!(parsed["device"], "edge1");
     assert_eq!(parsed["val"], 42);
-    assert!(!parsed.as_object().unwrap().contains_key("outer"), "dataField extraction must discard other fields");
+    assert!(
+        !parsed.as_object().unwrap().contains_key("outer"),
+        "dataField extraction must discard other fields"
+    );
 }
 
 #[tokio::test]
@@ -410,7 +434,11 @@ async fn test_rest_sink_delimited_format() {
     assert_eq!(recs[0], "d0|0|20.5");
 
     let cts = content_types.lock().await.clone();
-    assert!(cts[0].contains("text/plain"), "Delimited format must send Content-Type: text/plain, got: {}", cts[0]);
+    assert!(
+        cts[0].contains("text/plain"),
+        "Delimited format must send Content-Type: text/plain, got: {}",
+        cts[0]
+    );
 }
 
 #[tokio::test]
@@ -458,7 +486,11 @@ async fn test_rest_sink_batch_size_send_single_false() {
         .unwrap();
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    assert_eq!(payloads.lock().await.len(), 0, "batchSize=2 must buffer record 1 without sending");
+    assert_eq!(
+        payloads.lock().await.len(),
+        0,
+        "batchSize=2 must buffer record 1 without sending"
+    );
 
     // Send record 2: triggers batch flush
     client
@@ -469,7 +501,11 @@ async fn test_rest_sink_batch_size_send_single_false() {
         .unwrap();
 
     let recs = wait_for_payloads(&payloads, 1, 2000).await;
-    assert_eq!(recs.len(), 1, "Must flush exactly 1 request containing the 2-element batch");
+    assert_eq!(
+        recs.len(),
+        1,
+        "Must flush exactly 1 request containing the 2-element batch"
+    );
 
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
     assert!(parsed.is_array());
@@ -535,7 +571,11 @@ async fn test_rest_sink_batch_size_send_single_true() {
         .unwrap();
 
     let recs = wait_for_payloads(&payloads, 2, 2000).await;
-    assert_eq!(recs.len(), 2, "batchSize=2 with sendSingle=true must flush 2 separate requests");
+    assert_eq!(
+        recs.len(),
+        2,
+        "batchSize=2 with sendSingle=true must flush 2 separate requests"
+    );
 
     let p1: Value = serde_json::from_str(&recs[0]).unwrap();
     let p2: Value = serde_json::from_str(&recs[1]).unwrap();
@@ -590,11 +630,19 @@ async fn test_rest_sink_linger_interval() {
 
     // Within 50ms, should not have flushed
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert_eq!(payloads.lock().await.len(), 0, "Record must not flush before linger interval");
+    assert_eq!(
+        payloads.lock().await.len(),
+        0,
+        "Record must not flush before linger interval"
+    );
 
     // Wait for linger interval (150ms) + margin
     let recs = wait_for_payloads(&payloads, 1, 1500).await;
-    assert_eq!(recs.len(), 1, "Record must be flushed when linger interval expires");
+    assert_eq!(
+        recs.len(),
+        1,
+        "Record must be flushed when linger interval expires"
+    );
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
     assert_eq!(parsed["id"], 99);
 }
@@ -653,7 +701,10 @@ async fn test_window_emits_batch_rows_to_rest_sink() {
     assert_eq!(recs.len(), 1, "Window trigger must emit to REST sink");
 
     let parsed: Value = serde_json::from_str(&recs[0]).unwrap();
-    assert!(parsed.is_array(), "Window trigger should emit array batch by default to REST sink");
+    assert!(
+        parsed.is_array(),
+        "Window trigger should emit array batch by default to REST sink"
+    );
     let arr = parsed.as_array().unwrap();
     assert_eq!(arr.len(), 2);
 }
@@ -691,7 +742,11 @@ async fn test_sink_validation() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("format type invalid_xyz not supported"), "Got: {}", body);
+    assert!(
+        body.contains("format type invalid_xyz not supported"),
+        "Got: {}",
+        body
+    );
 
     // 2. MQTT missing topic
     let resp = client
@@ -710,7 +765,11 @@ async fn test_sink_validation() {
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("mqtt sink is missing property topic"), "Got: {}", body);
+    assert!(
+        body.contains("mqtt sink is missing property topic"),
+        "Got: {}",
+        body
+    );
 
     // 3. MQTT missing server
     let resp = client

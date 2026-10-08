@@ -2397,9 +2397,10 @@ fn resolve_httppush_source(
     stream_name: &str,
 ) -> Option<HttpPushEndpoint> {
     let def = stream_manager.get_stream(stream_name)?;
-    let is_push = def.options.get("TYPE").is_some_and(|t| {
-        t.eq_ignore_ascii_case("httppush") || t.eq_ignore_ascii_case("http_push")
-    });
+    let is_push = def
+        .options
+        .get("TYPE")
+        .is_some_and(|t| t.eq_ignore_ascii_case("httppush") || t.eq_ignore_ascii_case("http_push"));
     if !is_push {
         return None;
     }
@@ -2530,11 +2531,9 @@ fn bootstrap_stream_sources(state: &AppState, rule_id: &str, stream_name: &str, 
     }
 
     // HTTP Push source streams listen on the configured HTTP data server endpoint.
-    if let Some(endpoint) = resolve_httppush_source(
-        &state.stream_manager,
-        &state.source_configs,
-        stream_name,
-    ) {
+    if let Some(endpoint) =
+        resolve_httppush_source(&state.stream_manager, &state.source_configs, stream_name)
+    {
         let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
         register_rule_stream_source(state, stream_name, rule_id, cancel_tx);
         let path = endpoint.path.clone();
@@ -3269,7 +3268,11 @@ struct CommonSinkOpts {
     linger_interval: u64,
 }
 
-fn parse_common_opts(opts: &Value, rule_send_nil_field: bool, default_send_single: bool) -> CommonSinkOpts {
+fn parse_common_opts(
+    opts: &Value,
+    rule_send_nil_field: bool,
+    default_send_single: bool,
+) -> CommonSinkOpts {
     let send_single = opts
         .get("sendSingle")
         .and_then(|v| {
@@ -4800,7 +4803,12 @@ async fn execute_rest_request(
                 } else if let Ok(addrs) = tokio::net::lookup_host((cleaned, port)).await {
                     for addr in addrs {
                         if is_private_or_internal_ip(addr.ip()) {
-                            return Err(make_internal_net_error(method, final_url, addr.ip(), port));
+                            return Err(make_internal_net_error(
+                                method,
+                                final_url,
+                                addr.ip(),
+                                port,
+                            ));
                         }
                     }
                 }
@@ -4831,7 +4839,8 @@ async fn execute_rest_request(
         req_builder = req_builder.body(body.to_string());
     }
     let res = req_builder.send().await;
-    res.map(|_| ()).map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
+    res.map(|_| ())
+        .map_err(|e| SendError::Retry(format!("rest action failed: {}", e)))
 }
 
 /// Send one record through one action. File actions buffer into the rule's
@@ -4870,7 +4879,11 @@ async fn send_action(
                     .or_insert_with(|| FileBatchWriter::new(path.clone()));
                 if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
                     if *delimited {
-                        let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                        let text = format_record_delimited(
+                            &Value::Array(arr.clone()),
+                            delimiter,
+                            opts.fields.as_deref(),
+                        );
                         writer.push_text(&text);
                     } else if opts.send_single {
                         for row in arr {
@@ -4889,7 +4902,10 @@ async fn send_action(
                             }
                         }
                     } else {
-                        let formatted: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                        let formatted: Vec<Value> = arr
+                            .iter()
+                            .map(|r| format_record_for_sink_val(r, opts))
+                            .collect();
                         if let Ok(mut line) = serde_json::to_string(&Value::Array(formatted)) {
                             line.push('\n');
                             writer.buf.extend_from_slice(line.as_bytes());
@@ -4924,7 +4940,8 @@ async fn send_action(
             opts,
             format,
             delimiter,
-        } => {            let base_url = destination.unwrap_or(url);
+        } => {
+            let base_url = destination.unwrap_or(url);
             if base_url.is_empty() {
                 return Err(SendError::Permanent("rest action missing url".to_string()));
             }
@@ -4956,7 +4973,11 @@ async fn send_action(
 
             if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
                 if is_delimited {
-                    let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                    let text = format_record_delimited(
+                        &Value::Array(arr.clone()),
+                        delimiter,
+                        opts.fields.as_deref(),
+                    );
                     let final_url = resolve_url(&output.data);
                     return execute_rest_request(
                         ctx.http_client,
@@ -4984,7 +5005,13 @@ async fn send_action(
                             serde_json::to_string(&formatted)
                                 .map_err(|e| SendError::Permanent(format!("json encode: {}", e)))?
                         };
-                        let ct = if body_type == "text" { "text/plain" } else if body_type == "html" { "text/html" } else { "application/json" };
+                        let ct = if body_type == "text" {
+                            "text/plain"
+                        } else if body_type == "html" {
+                            "text/html"
+                        } else {
+                            "application/json"
+                        };
                         execute_rest_request(
                             ctx.http_client,
                             method,
@@ -5000,10 +5027,19 @@ async fn send_action(
                     Ok(())
                 } else {
                     let final_url = resolve_url(&output.data);
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
                     let body_str = serde_json::to_string(&Value::Array(formatted_arr))
                         .map_err(|e| SendError::Permanent(format!("json encode: {}", e)))?;
-                    let ct = if body_type == "text" { "text/plain" } else if body_type == "html" { "text/html" } else { "application/json" };
+                    let ct = if body_type == "text" {
+                        "text/plain"
+                    } else if body_type == "html" {
+                        "text/html"
+                    } else {
+                        "application/json"
+                    };
                     execute_rest_request(
                         ctx.http_client,
                         method,
@@ -5020,7 +5056,8 @@ async fn send_action(
                 let final_url = resolve_url(&output.data);
                 let (ct, body_str) = if is_delimited {
                     let formatted = format_record_for_sink(&output.data, opts);
-                    let row = format_record_delimited(&formatted, delimiter, opts.fields.as_deref());
+                    let row =
+                        format_record_delimited(&formatted, delimiter, opts.fields.as_deref());
                     ("text/plain", row)
                 } else if body_type == "text" {
                     let s = match template {
@@ -5046,7 +5083,9 @@ async fn send_action(
                         None => {
                             let formatted = format_record_for_sink(&output.data, opts);
                             serde_json::to_string(&to_sink_payload(formatted, opts.send_single))
-                                .map_err(|e| SendError::Permanent(format!("json encode error: {}", e)))?
+                                .map_err(|e| {
+                                    SendError::Permanent(format!("json encode error: {}", e))
+                                })?
                         }
                     };
                     ("application/json", s)
@@ -5098,7 +5137,11 @@ async fn send_action(
 
             if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
                 if is_delimited {
-                    let text = format_record_delimited(&Value::Array(arr.clone()), delimiter, opts.fields.as_deref());
+                    let text = format_record_delimited(
+                        &Value::Array(arr.clone()),
+                        delimiter,
+                        opts.fields.as_deref(),
+                    );
                     let topic = resolve_topic(&output.data);
                     sink.send_raw_to(&topic, text.into_bytes())
                         .await
@@ -5114,8 +5157,9 @@ async fn send_action(
                             apply_data_template(tpl, &record_template_map(&row_map)).into_bytes()
                         } else {
                             let formatted = format_record_for_sink_val(row, opts);
-                            serde_json::to_vec(&formatted)
-                                .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?
+                            serde_json::to_vec(&formatted).map_err(|e| {
+                                SendError::Permanent(format!("mqtt payload encode: {}", e))
+                            })?
                         };
                         sink.send_raw_to(&topic, payload)
                             .await
@@ -5123,7 +5167,10 @@ async fn send_action(
                     }
                 } else {
                     let topic = resolve_topic(&output.data);
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
                     let payload = serde_json::to_vec(&Value::Array(formatted_arr))
                         .map_err(|e| SendError::Permanent(format!("mqtt payload encode: {}", e)))?;
                     sink.send_raw_to(&topic, payload)
@@ -5141,13 +5188,18 @@ async fn send_action(
                             raw_err.as_bytes().to_vec()
                         } else if is_delimited {
                             let formatted = format_record_for_sink(&output.data, opts);
-                            let row = format_record_delimited(&formatted, delimiter, opts.fields.as_deref());
+                            let row = format_record_delimited(
+                                &formatted,
+                                delimiter,
+                                opts.fields.as_deref(),
+                            );
                             row.into_bytes()
                         } else {
                             let formatted = format_record_for_sink(&output.data, opts);
-                            serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
-                                |e| SendError::Permanent(format!("mqtt payload encode: {}", e)),
-                            )?
+                            serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
+                                .map_err(|e| {
+                                    SendError::Permanent(format!("mqtt payload encode: {}", e))
+                                })?
                         }
                     }
                 };
@@ -5170,15 +5222,19 @@ async fn send_action(
                         let text = serde_json::to_string(&formatted).map_err(|e| {
                             SendError::Permanent(format!("websocket payload encode: {}", e))
                         })?;
-                        sink.send_text(&text)
-                            .await
-                            .map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))?;
+                        sink.send_text(&text).await.map_err(|e| {
+                            SendError::Retry(format!("websocket action failed: {}", e))
+                        })?;
                     }
                 } else {
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
-                    let text = serde_json::to_string(&Value::Array(formatted_arr)).map_err(|e| {
-                        SendError::Permanent(format!("websocket payload encode: {}", e))
-                    })?;
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
+                    let text =
+                        serde_json::to_string(&Value::Array(formatted_arr)).map_err(|e| {
+                            SendError::Permanent(format!("websocket payload encode: {}", e))
+                        })?;
                     sink.send_text(&text)
                         .await
                         .map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))?;
@@ -5213,17 +5269,23 @@ async fn send_action(
                 if opts.send_single {
                     for row in arr {
                         let formatted = format_record_for_sink_val(row, opts);
-                        let payload = serde_json::to_string(&formatted)
-                            .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+                        let payload = serde_json::to_string(&formatted).map_err(|e| {
+                            SendError::Permanent(format!("redis payload encode: {}", e))
+                        })?;
                         sink.send_raw(&payload, output)
                             .await
                             .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))?;
                     }
                     Ok(())
                 } else {
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
-                    let payload = serde_json::to_string(&Value::Array(formatted_arr))
-                        .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
+                    let payload =
+                        serde_json::to_string(&Value::Array(formatted_arr)).map_err(|e| {
+                            SendError::Permanent(format!("redis payload encode: {}", e))
+                        })?;
                     sink.send_raw(&payload, output)
                         .await
                         .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
@@ -5245,17 +5307,23 @@ async fn send_action(
                 if opts.send_single {
                     for row in arr {
                         let formatted = format_record_for_sink_val(row, opts);
-                        let payload = serde_json::to_vec(&formatted)
-                            .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+                        let payload = serde_json::to_vec(&formatted).map_err(|e| {
+                            SendError::Permanent(format!("kafka payload encode: {}", e))
+                        })?;
                         sink.send_raw(payload, output)
                             .await
                             .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))?;
                     }
                     Ok(())
                 } else {
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
-                    let payload = serde_json::to_vec(&Value::Array(formatted_arr))
-                        .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
+                    let payload =
+                        serde_json::to_vec(&Value::Array(formatted_arr)).map_err(|e| {
+                            SendError::Permanent(format!("kafka payload encode: {}", e))
+                        })?;
                     sink.send_raw(payload, output)
                         .await
                         .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
@@ -5292,7 +5360,9 @@ async fn send_action(
             if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
                 for row in arr {
                     let row_obj = match row {
-                        Value::Object(m) => m.clone().into_iter().collect::<HashMap<String, Value>>(),
+                        Value::Object(m) => {
+                            m.clone().into_iter().collect::<HashMap<String, Value>>()
+                        }
                         _ => continue,
                     };
                     let mut clean_data = HashMap::new();
@@ -5365,19 +5435,25 @@ async fn send_action(
                             }
                             None => {
                                 let formatted = format_record_for_sink_val(row, opts);
-                                serde_json::to_vec(&formatted)
-                                    .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
+                                serde_json::to_vec(&formatted).map_err(|e| {
+                                    SendError::Permanent(format!("rabbitmq payload encode: {}", e))
+                                })?
                             }
                         };
-                        sink.send_raw(&payload)
-                            .await
-                            .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))?;
+                        sink.send_raw(&payload).await.map_err(|e| {
+                            SendError::Retry(format!("rabbitmq action failed: {}", e))
+                        })?;
                     }
                     Ok(())
                 } else {
-                    let formatted_arr: Vec<Value> = arr.iter().map(|r| format_record_for_sink_val(r, opts)).collect();
-                    let payload = serde_json::to_vec(&Value::Array(formatted_arr))
-                        .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?;
+                    let formatted_arr: Vec<Value> = arr
+                        .iter()
+                        .map(|r| format_record_for_sink_val(r, opts))
+                        .collect();
+                    let payload =
+                        serde_json::to_vec(&Value::Array(formatted_arr)).map_err(|e| {
+                            SendError::Permanent(format!("rabbitmq payload encode: {}", e))
+                        })?;
                     sink.send_raw(&payload)
                         .await
                         .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
@@ -5389,8 +5465,9 @@ async fn send_action(
                     }
                     None => {
                         let formatted = format_record_for_sink(&output.data, opts);
-                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single))
-                            .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
+                        serde_json::to_vec(&to_sink_payload(formatted, opts.send_single)).map_err(
+                            |e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)),
+                        )?
                     }
                 };
                 sink.send_raw(&payload)
@@ -5494,11 +5571,14 @@ async fn deliver_record(
         let batch_opts = rt.action.common_opts().cloned();
         if let Some(opts) = batch_opts {
             if opts.batch_size > 0 || opts.linger_interval > 0 {
-                let rows: Vec<Value> = if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
-                    arr.iter().map(|item| format_record_for_sink_val(item, &opts)).collect()
-                } else {
-                    vec![format_record_for_sink(&output.data, &opts)]
-                };
+                let rows: Vec<Value> =
+                    if let Some(Value::Array(arr)) = output.data.get(BATCH_ROWS_KEY) {
+                        arr.iter()
+                            .map(|item| format_record_for_sink_val(item, &opts))
+                            .collect()
+                    } else {
+                        vec![format_record_for_sink(&output.data, &opts)]
+                    };
                 rt.batch_buffer.extend(rows);
                 if opts.batch_size > 0 && rt.batch_buffer.len() >= opts.batch_size {
                     while rt.batch_buffer.len() >= opts.batch_size {
@@ -5508,7 +5588,8 @@ async fn deliver_record(
                         batch_data.insert(BATCH_ROWS_KEY.to_string(), Value::Array(batch));
                         let batch_record = StreamRecord::new(batch_data);
                         if let Err(err) = send_action(rt, &batch_record, None, ctx, files).await {
-                            let cacheable = matches!(err, SendError::Retry(_)) && rt.cache.is_some();
+                            let cacheable =
+                                matches!(err, SendError::Retry(_)) && rt.cache.is_some();
                             if let (true, Some(cache)) = (cacheable, rt.cache.as_mut()) {
                                 cache.push(batch_record);
                             }
@@ -6640,7 +6721,14 @@ async fn emit_window_batch(
             Evaluator::eval_window_stateful(select_stmt, rows, rule_state)
         }
     } else {
-        eval_window_join_batch(table_manager, source_configs, select_stmt, &batch, rule_state).await
+        eval_window_join_batch(
+            table_manager,
+            source_configs,
+            select_stmt,
+            &batch,
+            rule_state,
+        )
+        .await
     };
     emit_window_outputs(counters, sink, outputs).await;
 }
@@ -8230,12 +8318,20 @@ fn validate_rule_options(options: &Option<HashMap<String, Value>>) -> Result<(),
 
 fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), String> {
     const SUPPORTED_FORMATS: &[&str] = &[
-        "json", "binary", "delimited", "protobuf", "custom", "urlencoded",
+        "json",
+        "binary",
+        "delimited",
+        "protobuf",
+        "custom",
+        "urlencoded",
     ];
     for action in actions {
         for (kind, opts) in action {
             if let Some(fmt) = opts.get("format").and_then(|v| v.as_str()) {
-                if !SUPPORTED_FORMATS.iter().any(|&f| f.eq_ignore_ascii_case(fmt)) {
+                if !SUPPORTED_FORMATS
+                    .iter()
+                    .any(|&f| f.eq_ignore_ascii_case(fmt))
+                {
                     return Err(format!("format type {} not supported", fmt));
                 }
             }
@@ -12626,7 +12722,10 @@ pub async fn http_data_push_handler(
     if !method.eq_ignore_ascii_case(&endpoint.method) {
         return (
             StatusCode::METHOD_NOT_ALLOWED,
-            format!("Method {} not allowed, expect {}\n", method, endpoint.method),
+            format!(
+                "Method {} not allowed, expect {}\n",
+                method, endpoint.method
+            ),
         )
             .into_response();
     }

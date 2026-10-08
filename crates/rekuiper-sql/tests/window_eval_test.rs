@@ -270,4 +270,3 @@ fn window_having_had_changed_tracks_state_per_group() {
     assert_eq!(out2[0]["device"], json!("b"));
     assert_eq!(out2[0]["v"], json!(200));
 }
-

@@ -185,8 +185,6 @@ impl Evaluator {
         groups
     }
 
-
-
     /// Value of a grouping or accumulator expression, borrowing plain columns.
     fn group_value<'a>(expr: &Expr, row: &'a Row) -> Cow<'a, Value> {
         match expr {
@@ -425,10 +423,7 @@ impl IncrementalWindow {
                     name: field_names[idx].clone(),
                     expr: field.clone(),
                 },
-                Expr::FieldAccess {
-                    parent,
-                    field: _,
-                } => {
+                Expr::FieldAccess { parent, field: _ } => {
                     if Evaluator::contains_aggregate(parent) {
                         return None;
                     }

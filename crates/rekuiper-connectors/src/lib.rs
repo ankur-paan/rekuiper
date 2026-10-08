@@ -101,11 +101,7 @@ impl Sink for HttpSink {
             }
             map.insert(k.clone(), v.clone());
         }
-        self.client
-            .post(&self.url)
-            .json(&map)
-            .send()
-            .await?;
+        self.client.post(&self.url).json(&map).send().await?;
         Ok(())
     }
 }

@@ -443,4 +443,3 @@ async fn test_push_stream_data_tool_params() {
     let text = res["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("Missing required parameter: provide either 'name' or 'endpoint'"));
 }
-

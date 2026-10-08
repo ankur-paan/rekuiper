@@ -64,8 +64,14 @@ async fn test_count_window_having_had_changed() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Window 1: val = 10, 10 -> aggregate latest(val) is 10. First window evaluation: had_changed is true.
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()));
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()));
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()),
+    );
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()),
+    );
 
     let rec1 = tokio::time::timeout(Duration::from_secs(2), sink_rx.recv())
         .await
@@ -75,16 +81,31 @@ async fn test_count_window_having_had_changed() {
 
     // Window 2: val = 10, 10 -> aggregate latest(val) is 10 (unchanged from Window 1).
     // had_changed should return false, so HAVING filters this window output.
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()));
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()));
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()),
+    );
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(10))].into_iter().collect()),
+    );
 
     let res_empty = tokio::time::timeout(Duration::from_millis(200), sink_rx.recv()).await;
-    assert!(res_empty.is_err(), "repeated identical window result should be filtered by had_changed in HAVING");
+    assert!(
+        res_empty.is_err(),
+        "repeated identical window result should be filtered by had_changed in HAVING"
+    );
 
     // Window 3: val = 20, 20 -> aggregate latest(val) is 20 (changed from 10).
     // had_changed should return true, so Window 3 emits.
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(20))].into_iter().collect()));
-    let _ = state.stream_bus.publish("s", StreamRecord::new([("val".to_string(), json!(20))].into_iter().collect()));
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(20))].into_iter().collect()),
+    );
+    let _ = state.stream_bus.publish(
+        "s",
+        StreamRecord::new([("val".to_string(), json!(20))].into_iter().collect()),
+    );
 
     let rec3 = tokio::time::timeout(Duration::from_secs(2), sink_rx.recv())
         .await
@@ -163,7 +184,8 @@ async fn test_hopping_window_having_had_changed_issue34_repro() {
     }
 
     let mut outputs = Vec::new();
-    while let Ok(Some(rec)) = tokio::time::timeout(Duration::from_millis(500), sink_rx.recv()).await {
+    while let Ok(Some(rec)) = tokio::time::timeout(Duration::from_millis(500), sink_rx.recv()).await
+    {
         outputs.push(rec);
     }
 
@@ -171,8 +193,19 @@ async fn test_hopping_window_having_had_changed_issue34_repro() {
     // Every consecutive output must have a different concat result.
     assert!(!outputs.is_empty(), "expected outputs");
     for i in 1..outputs.len() {
-        let prev = format!("{}:{}:{}", outputs[i - 1].data["self"], outputs[i - 1].data["quality"], outputs[i - 1].data["freshness"]);
-        let curr = format!("{}:{}:{}", outputs[i].data["self"], outputs[i].data["quality"], outputs[i].data["freshness"]);
-        assert_ne!(prev, curr, "Adjacent window outputs must have changed due to HAVING had_changed");
+        let prev = format!(
+            "{}:{}:{}",
+            outputs[i - 1].data["self"],
+            outputs[i - 1].data["quality"],
+            outputs[i - 1].data["freshness"]
+        );
+        let curr = format!(
+            "{}:{}:{}",
+            outputs[i].data["self"], outputs[i].data["quality"], outputs[i].data["freshness"]
+        );
+        assert_ne!(
+            prev, curr,
+            "Adjacent window outputs must have changed due to HAVING had_changed"
+        );
     }
 }
