@@ -3266,7 +3266,7 @@ struct CommonSinkOpts {
     data_field: Option<String>,
 }
 
-fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
+fn parse_common_opts(opts: &Value, rule_send_nil_field: bool) -> CommonSinkOpts {
     let send_single = opts
         .get("sendSingle")
         .and_then(|v| v.as_bool())
@@ -3274,7 +3274,7 @@ fn parse_common_opts(opts: &Value) -> CommonSinkOpts {
     let send_nil_field = opts
         .get("sendNilField")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(rule_send_nil_field);
     let fields = opts.get("fields").and_then(|v| v.as_array()).map(|arr| {
         arr.iter()
             .filter_map(|x| x.as_str().map(|s| s.to_string()))
@@ -3346,7 +3346,10 @@ fn format_record_for_sink(data: &HashMap<String, Value>, opts: &CommonSinkOpts) 
     if let Some(ref fields) = opts.fields {
         for f in fields {
             let val = data.get(f).unwrap_or(&Value::Null);
-            map.insert(f.clone(), clean_sink_value(val, true));
+            if val.is_null() && !opts.send_nil_field {
+                continue;
+            }
+            map.insert(f.clone(), clean_sink_value(val, opts.send_nil_field));
         }
     } else {
         for (k, v) in data {
@@ -3413,9 +3416,11 @@ enum PreparedAction {
     },
     Redis {
         config: Box<RedisSinkConfig>,
+        opts: CommonSinkOpts,
     },
     Kafka {
         config: Box<KafkaConfig>,
+        opts: CommonSinkOpts,
     },
     Sql {
         config: Box<SqlConnectorConfig>,
@@ -3427,6 +3432,7 @@ enum PreparedAction {
     RabbitMq {
         config: Box<RabbitMqConfig>,
         template: Option<String>,
+        opts: CommonSinkOpts,
     },
     EdgeX {
         device_name: String,
@@ -3444,7 +3450,12 @@ fn prepare_actions(
     actions: &[HashMap<String, Value>],
     rule_id: &str,
     source_configs: &Arc<RwLock<HashMap<String, Value>>>,
+    rule_options: Option<&HashMap<String, Value>>,
 ) -> Vec<PreparedAction> {
+    let rule_send_nil_field = rule_options
+        .and_then(|o| o.get("sendNilField"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let mut out = Vec::new();
     for action in actions {
         for (kind, opts) in action {
@@ -3474,7 +3485,7 @@ fn prepare_actions(
                                 .extension()
                                 .and_then(|ext| ext.to_str())
                                 .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"));
-                        let common_opts = parse_common_opts(opts);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
                         out.push(PreparedAction::File {
                             path: sink.path.clone(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3529,7 +3540,7 @@ fn prepare_actions(
                         .and_then(|v| v.as_str())
                         .unwrap_or(",")
                         .to_string();
-                    let common_opts = parse_common_opts(opts);
+                    let common_opts = parse_common_opts(opts, rule_send_nil_field);
                     out.push(PreparedAction::Rest {
                         url,
                         method,
@@ -3552,7 +3563,7 @@ fn prepare_actions(
                             .and_then(|v| v.as_str())
                             .unwrap_or(",")
                             .to_string();
-                        let common_opts = parse_common_opts(opts);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
                         out.push(PreparedAction::Mqtt {
                             config: Box::new(config),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3567,7 +3578,7 @@ fn prepare_actions(
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
                     Ok(ws_cfg) => {
-                        let common_opts = parse_common_opts(opts);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
                         out.push(PreparedAction::WebSocket {
                             url: ws_cfg.target_url(),
                             template: action_template(opts).map(|s| s.to_string()),
@@ -3580,18 +3591,26 @@ fn prepare_actions(
                 },
                 "redis" | "redispub" | "redisPub" => {
                     match serde_json::from_value::<RedisSinkConfig>(opts.clone()) {
-                        Ok(config) => out.push(PreparedAction::Redis {
-                            config: Box::new(config),
-                        }),
+                        Ok(config) => {
+                            let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                            out.push(PreparedAction::Redis {
+                                config: Box::new(config),
+                                opts: common_opts,
+                            });
+                        }
                         Err(_) => out.push(PreparedAction::Unknown {
                             kind: "redis".to_string(),
                         }),
                     }
                 }
                 "kafka" => match serde_json::from_value::<KafkaConfig>(opts.clone()) {
-                    Ok(config) => out.push(PreparedAction::Kafka {
-                        config: Box::new(config),
-                    }),
+                    Ok(config) => {
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                        out.push(PreparedAction::Kafka {
+                            config: Box::new(config),
+                            opts: common_opts,
+                        });
+                    }
                     Err(_) => out.push(PreparedAction::Unknown {
                         kind: "kafka".to_string(),
                     }),
@@ -3608,7 +3627,7 @@ fn prepare_actions(
                     let send_nil_field = opts
                         .get("sendNilField")
                         .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                        .unwrap_or(rule_send_nil_field);
                     out.push(PreparedAction::Memory {
                         topic: opts
                             .get("topic")
@@ -3620,10 +3639,14 @@ fn prepare_actions(
                 }
                 "rabbitmq" | "amqp" => {
                     match serde_json::from_value::<RabbitMqConfig>(opts.clone()) {
-                        Ok(config) => out.push(PreparedAction::RabbitMq {
-                            config: Box::new(config),
-                            template: action_template(opts).map(|s| s.to_string()),
-                        }),
+                        Ok(config) => {
+                            let common_opts = parse_common_opts(opts, rule_send_nil_field);
+                            out.push(PreparedAction::RabbitMq {
+                                config: Box::new(config),
+                                template: action_template(opts).map(|s| s.to_string()),
+                                opts: common_opts,
+                            });
+                        }
                         Err(_) => out.push(PreparedAction::Unknown {
                             kind: "rabbitmq".to_string(),
                         }),
@@ -3970,7 +3993,7 @@ fn spawn_rule_task(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let (sink_tx, mut sink_rx) = tokio::sync::mpsc::channel::<StreamRecord>(buffer_len);
-    let prepared = prepare_actions(&actions, &rule_id, source_configs);
+    let prepared = prepare_actions(&actions, &rule_id, source_configs, rule_options.as_ref());
     let cache_configs = action_cache_configs(&actions);
     let sink_rule_id = rule_id.clone();
     let sink_rule_mgr = rule_manager.clone();
@@ -4437,7 +4460,10 @@ fn action_template(opts: &Value) -> Option<&str> {
 }
 
 fn record_template_map(data: &HashMap<String, Value>) -> serde_json::Map<String, Value> {
-    data.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    data.iter()
+        .filter(|(k, _)| *k != rekuiper_sql::eval::META_KEY && !k.starts_with("__"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 /// Where persisted sink caches live (relative to the working directory, like
@@ -4851,19 +4877,25 @@ async fn send_action(
             };
             res.map_err(|e| SendError::Retry(format!("websocket action failed: {}", e)))
         }
-        PreparedAction::Redis { config } => {
+        PreparedAction::Redis { config, opts } => {
             let sink = RedisSink {
                 config: (**config).clone(),
             };
-            sink.send(output)
+            let formatted = format_record_for_sink(&output.data, opts);
+            let payload = serde_json::to_string(&formatted)
+                .map_err(|e| SendError::Permanent(format!("redis payload encode: {}", e)))?;
+            sink.send_raw(&payload, output)
                 .await
                 .map_err(|e| SendError::Retry(format!("redis action failed: {}", e)))
         }
-        PreparedAction::Kafka { config } => {
+        PreparedAction::Kafka { config, opts } => {
             let sink = KafkaSink {
                 config: (**config).clone(),
             };
-            sink.send(output)
+            let formatted = format_record_for_sink(&output.data, opts);
+            let payload = serde_json::to_vec(&formatted)
+                .map_err(|e| SendError::Permanent(format!("kafka payload encode: {}", e)))?;
+            sink.send_raw(payload, output)
                 .await
                 .map_err(|e| SendError::Retry(format!("kafka action failed: {}", e)))
         }
@@ -4918,18 +4950,26 @@ async fn send_action(
                 }
             }
         }
-        PreparedAction::RabbitMq { config, template } => {
+        PreparedAction::RabbitMq {
+            config,
+            template,
+            opts,
+        } => {
             if rt.rabbitmq.is_none() {
                 rt.rabbitmq = Some(RabbitMqSink::new((**config).clone()));
             }
             let sink = rt.rabbitmq.as_ref().unwrap();
-            let mut rec = output.clone();
-            if let Some(tpl) = template {
-                let rendered = apply_data_template(tpl, &record_template_map(&output.data));
-                rec.data
-                    .insert("result".to_string(), Value::String(rendered));
-            }
-            sink.send(&rec)
+            let payload = match template {
+                Some(tpl) => {
+                    apply_data_template(tpl, &record_template_map(&output.data)).into_bytes()
+                }
+                None => {
+                    let formatted = format_record_for_sink(&output.data, opts);
+                    serde_json::to_vec(&formatted)
+                        .map_err(|e| SendError::Permanent(format!("rabbitmq payload encode: {}", e)))?
+                }
+            };
+            sink.send_raw(&payload)
                 .await
                 .map_err(|e| SendError::Retry(format!("rabbitmq action failed: {}", e)))
         }
@@ -7741,15 +7781,12 @@ fn validate_sink_actions(actions: &[HashMap<String, Value>]) -> Result<(), Strin
 
 fn check_duplicate_fields(stmt: &SelectStmt) -> Option<Response> {
     let mut seen_fields = HashSet::new();
+    let names = Evaluator::select_field_names(stmt);
     for (idx, field) in stmt.fields.iter().enumerate() {
         if matches!(field, Expr::Wildcard | Expr::WildcardModified { .. }) {
             continue;
         }
-        let name = stmt
-            .field_aliases
-            .get(idx)
-            .and_then(|a| a.clone())
-            .unwrap_or_else(|| Evaluator::column_name(field, idx));
+        let name = &names[idx];
         if !seen_fields.insert(name.clone()) {
             return Some(
                 (
@@ -11945,7 +11982,17 @@ async fn start_ruletest(State(state): State<AppState>, Path(name): Path<String>)
 /// Buffer one replayed row into the bounded session ring (evicting the
 /// oldest past the cap) and wake SSE subscribers via broadcast.
 fn emit_ruletest_line(session: &RuletestSession, row: &HashMap<String, Value>) {
-    let line = serde_json::to_string(row).unwrap_or_default();
+    let mut map = std::collections::BTreeMap::new();
+    for (k, v) in row {
+        if k == rekuiper_sql::eval::META_KEY || k.starts_with("__") {
+            continue;
+        }
+        if v.is_null() {
+            continue;
+        }
+        map.insert(k.clone(), clean_sink_value(v, false));
+    }
+    let line = serde_json::to_string(&map).unwrap_or_default();
     {
         let mut replay = session.replay.write();
         let seq = replay.next_seq;
@@ -12650,7 +12697,7 @@ mod tests {
             }),
         );
         let actions = vec![action_map];
-        let prepared = prepare_actions(&actions, "rule100", &confs);
+        let prepared = prepare_actions(&actions, "rule100", &confs, None);
         assert_eq!(prepared.len(), 1);
         match &prepared[0] {
             PreparedAction::EdgeX {

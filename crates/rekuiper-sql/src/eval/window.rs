@@ -418,22 +418,22 @@ impl IncrementalWindow {
             return None;
         }
         let mut plans = Vec::with_capacity(stmt.fields.len());
+        let field_names = Evaluator::select_field_names(stmt);
         for (idx, field) in stmt.fields.iter().enumerate() {
-            let alias = stmt.field_aliases.get(idx).and_then(|a| a.clone());
             let plan = match field {
-                Expr::Identifier(name) => Plan::First {
-                    name: alias.unwrap_or_else(|| name.clone()),
+                Expr::Identifier(_) => Plan::First {
+                    name: field_names[idx].clone(),
                     expr: field.clone(),
                 },
                 Expr::FieldAccess {
                     parent,
-                    field: leaf,
+                    field: _,
                 } => {
                     if Evaluator::contains_aggregate(parent) {
                         return None;
                     }
                     Plan::First {
-                        name: alias.unwrap_or_else(|| leaf.clone()),
+                        name: field_names[idx].clone(),
                         expr: field.clone(),
                     }
                 }
@@ -453,7 +453,7 @@ impl IncrementalWindow {
                         _ => return None,
                     };
                     Plan::Agg {
-                        name: alias.unwrap_or_else(|| Evaluator::column_name(field, idx)),
+                        name: field_names[idx].clone(),
                         kind,
                         arg: (!wildcard).then(|| args[0].clone()),
                     }

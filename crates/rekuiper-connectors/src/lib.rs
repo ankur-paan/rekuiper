@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 
+pub const META_KEY: &str = "__meta__";
+
 pub mod codec;
 pub use codec::*;
 pub mod parquet_io;
@@ -92,9 +94,16 @@ impl HttpSink {
 #[async_trait]
 impl Sink for HttpSink {
     async fn send(&self, record: &StreamRecord) -> Result<()> {
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
         self.client
             .post(&self.url)
-            .json(&record.data)
+            .json(&map)
             .send()
             .await?;
         Ok(())
@@ -205,7 +214,14 @@ impl Sink for FileSink {
         } else if self.is_delimited() {
             self.send_delimited(record).await
         } else {
-            let mut line = serde_json::to_string(&record.data)?;
+            let mut map = std::collections::BTreeMap::new();
+            for (k, v) in &record.data {
+                if k == META_KEY || k.starts_with("__") {
+                    continue;
+                }
+                map.insert(k.clone(), v.clone());
+            }
+            let mut line = serde_json::to_string(&map)?;
             line.push('\n');
             append_text(&self.path, line.as_bytes()).await
         }
@@ -230,7 +246,12 @@ impl FileSink {
 
     async fn send_delimited(&self, record: &StreamRecord) -> Result<()> {
         let delim = self.delimiter_str();
-        let mut keys: Vec<String> = record.data.keys().cloned().collect();
+        let mut keys: Vec<String> = record
+            .data
+            .keys()
+            .filter(|k| *k != META_KEY && !k.starts_with("__"))
+            .cloned()
+            .collect();
         keys.sort();
         let mut out = String::new();
         if self.has_header && is_missing_or_empty(&self.path).await {
@@ -979,7 +1000,14 @@ impl MqttSink {
 #[async_trait]
 impl Sink for MqttSink {
     async fn send(&self, record: &StreamRecord) -> Result<()> {
-        let payload = serde_json::to_vec(&record.data)?;
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
+        let payload = serde_json::to_vec(&map)?;
         self.send_raw(payload).await
     }
 }
@@ -1603,7 +1631,14 @@ pub struct WebSocketSink {
 
 impl WebSocketSink {
     pub async fn send(&self, record: &StreamRecord) -> Result<()> {
-        let json_str = serde_json::to_string(&record.data)?;
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
+        let json_str = serde_json::to_string(&map)?;
         self.send_text(&json_str).await
     }
 
@@ -1681,13 +1716,12 @@ impl RedisSink {
         Ok(conn)
     }
 
-    pub async fn send(&self, record: &StreamRecord) -> Result<()> {
-        let json_str = serde_json::to_string(&record.data)?;
+    pub async fn send_raw(&self, payload: &str, record: &StreamRecord) -> Result<()> {
         let mut conn = self.connection().await?;
         if let Some(topic) = self.config.topic.as_deref() {
             redis::cmd("PUBLISH")
                 .arg(topic)
-                .arg(&json_str)
+                .arg(payload)
                 .query_async::<()>(&mut conn)
                 .await?;
             return Ok(());
@@ -1703,10 +1737,22 @@ impl RedisSink {
             .ok_or_else(|| anyhow::anyhow!("Redis sink needs a key: set `field` or `key`"))?;
         redis::cmd("SET")
             .arg(&key)
-            .arg(&json_str)
+            .arg(payload)
             .query_async::<()>(&mut conn)
             .await?;
         Ok(())
+    }
+
+    pub async fn send(&self, record: &StreamRecord) -> Result<()> {
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
+        let json_str = serde_json::to_string(&map)?;
+        self.send_raw(&json_str, record).await
     }
 }
 
@@ -1904,12 +1950,12 @@ pub struct KafkaSink {
 }
 
 impl KafkaSink {
-    pub async fn send(&self, record: &StreamRecord) -> Result<()> {
-        // Bound the whole produce path: rskafka retries control-plane calls
-        // internally, so without this an unreachable broker would wedge the
-        // caller instead of surfacing a countable error.
-        match tokio::time::timeout(std::time::Duration::from_secs(10), self.send_inner(record))
-            .await
+    pub async fn send_raw(&self, payload: Vec<u8>, record: &StreamRecord) -> Result<()> {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.send_raw_inner(payload, record),
+        )
+        .await
         {
             Ok(res) => res,
             Err(_) => anyhow::bail!(
@@ -1919,7 +1965,7 @@ impl KafkaSink {
         }
     }
 
-    async fn send_inner(&self, record: &StreamRecord) -> Result<()> {
+    async fn send_raw_inner(&self, payload: Vec<u8>, record: &StreamRecord) -> Result<()> {
         use rskafka::client::{
             partition::{Compression, UnknownTopicHandling},
             ClientBuilder,
@@ -1937,7 +1983,6 @@ impl KafkaSink {
         let partition_client = client
             .partition_client(topic, self.config.partition, UnknownTopicHandling::Error)
             .await?;
-        let json_bytes = serde_json::to_vec(&record.data)?;
         let key_bytes = self
             .config
             .key
@@ -1946,7 +1991,7 @@ impl KafkaSink {
             .map(value_to_key_bytes);
         let kafka_record = Record {
             key: key_bytes,
-            value: Some(json_bytes),
+            value: Some(payload),
             headers: std::collections::BTreeMap::new(),
             timestamp: chrono::Utc::now(),
         };
@@ -1954,6 +1999,18 @@ impl KafkaSink {
             .produce(vec![kafka_record], Compression::NoCompression)
             .await?;
         Ok(())
+    }
+
+    pub async fn send(&self, record: &StreamRecord) -> Result<()> {
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in &record.data {
+            if k == META_KEY || k.starts_with("__") {
+                continue;
+            }
+            map.insert(k.clone(), v.clone());
+        }
+        let json_bytes = serde_json::to_vec(&map)?;
+        self.send_raw(json_bytes, record).await
     }
 }
 
@@ -2853,7 +2910,14 @@ pub struct SqlSink {
 impl SqlSink {
     pub async fn insert_record(&self, record: &StreamRecord) -> Result<()> {
         let fields = if self.config.fields.is_empty() {
-            record.data.keys().cloned().collect::<Vec<_>>()
+            let mut cols: Vec<String> = record
+                .data
+                .keys()
+                .filter(|k| *k != META_KEY && !k.starts_with("__"))
+                .cloned()
+                .collect();
+            cols.sort();
+            cols
         } else {
             self.config.fields.clone()
         };

@@ -1241,6 +1241,7 @@ impl EdgeXCodec {
                 origin: now_nanos,
             });
         }
+        readings.sort_by(|a, b| a.resource_name.cmp(&b.resource_name));
 
         let event = EdgeXEvent {
             api_version: "v3".to_string(),

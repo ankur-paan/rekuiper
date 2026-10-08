@@ -146,24 +146,7 @@ impl Evaluator {
         }
         let first: Option<&HashMap<String, Value>> = records.first();
         let mut output = HashMap::new();
-
-        // Retain grouped column values so `SELECT id, count(*) ... GROUP BY id`
-        // keeps `id` in the output.
-        for (idx, g) in stmt.group_by.iter().enumerate() {
-            let key = match g {
-                Expr::Identifier(name) => name.clone(),
-                Expr::FieldAccess {
-                    parent: _,
-                    field: leaf,
-                } => leaf.clone(),
-                _ => Self::column_name(g, idx),
-            };
-            let val = match first {
-                Some(rec) => Self::eval_val(g, rec),
-                None => Value::Null,
-            };
-            output.insert(key, val);
-        }
+        let field_names = Self::select_field_names(stmt);
 
         for (idx, field) in stmt.fields.iter().enumerate() {
             match field {
@@ -195,12 +178,7 @@ impl Evaluator {
                     }
                 }
                 Expr::Identifier(name) => {
-                    let key = stmt
-                        .field_aliases
-                        .get(idx)
-                        .and_then(|a| a.clone())
-                        .unwrap_or_else(|| name.clone());
-                    // Prefer already-retained group value; otherwise first record.
+                    let key = field_names[idx].clone();
                     output.entry(key).or_insert_with(|| {
                         first
                             .and_then(|rec| rec.get(name).cloned())
@@ -235,13 +213,9 @@ impl Evaluator {
                 }
                 Expr::FieldAccess {
                     parent: _,
-                    field: leaf,
+                    field: _leaf,
                 } => {
-                    let key = stmt
-                        .field_aliases
-                        .get(idx)
-                        .and_then(|a| a.clone())
-                        .unwrap_or_else(|| leaf.clone());
+                    let key = field_names[idx].clone();
                     output.entry(key).or_insert_with(|| match first {
                         Some(rec) => Self::eval_val(field, rec),
                         None => Value::Null,
@@ -249,22 +223,14 @@ impl Evaluator {
                 }
                 Expr::Call { name, args } if Self::is_aggregate_call(name) => {
                     let val = Self::eval_aggregate_call(name, args, records);
-                    let key = stmt
-                        .field_aliases
-                        .get(idx)
-                        .and_then(|a| a.clone())
-                        .unwrap_or_else(|| Self::column_name(field, idx));
+                    let key = field_names[idx].clone();
                     output.insert(key, val);
                 }
                 _ => {
                     // General expression: may contain nested aggregates
                     // (e.g. `avg(temp) + 1`), so evaluate aggregate-aware.
                     let val = Self::eval_agg_expr_stateful(field, records, &output, state, partition_key);
-                    let key = stmt
-                        .field_aliases
-                        .get(idx)
-                        .and_then(|a| a.clone())
-                        .unwrap_or_else(|| Self::column_name(field, idx));
+                    let key = field_names[idx].clone();
                     // Don't overwrite group keys / wildcard copies with same key.
                     output.entry(key).or_insert(val);
                 }
@@ -367,7 +333,7 @@ impl Evaluator {
                     return v.clone();
                 }
                 // Also try the full dotted path key.
-                let full = Self::column_name(expr, 0);
+                let full = expr.to_ekuiper_string();
                 if let Some(v) = output.get(&full) {
                     return v.clone();
                 }
@@ -398,7 +364,7 @@ impl Evaluator {
                             .iter()
                             .map(|a| Self::eval_agg_expr_stateful(a, records, output, state, partition_key))
                             .collect();
-                        let call_id = Self::column_name(expr, 0);
+                        let call_id = expr.to_ekuiper_string();
                         return Self::eval_changed(&lowered, &vals, s, &call_id, partition_key);
                     }
                     if lowered == "changed_cols" && args.len() >= 2 {
@@ -421,7 +387,7 @@ impl Evaluator {
                             if ignore_null && val.is_null() {
                                 continue;
                             }
-                            let call_id = Self::column_name(expr, 0);
+                            let call_id = expr.to_ekuiper_string();
                             let state_key = format!(
                                 "changed_cols:{}:{}:{}",
                                 call_id,
@@ -734,6 +700,7 @@ impl Evaluator {
             return Ok(Self::merge_union_rows(left, right));
         }
         let mut output = HashMap::new();
+        let field_names = Self::select_field_names(stmt);
         for (idx, field) in stmt.fields.iter().enumerate() {
             let alias = stmt.field_aliases.get(idx).and_then(|a| a.clone());
             let expr_str = field.to_ekuiper_string_qualified(&stmt.from);
@@ -769,7 +736,7 @@ impl Evaluator {
                     }
                 }
                 Expr::Identifier(name) => {
-                    let key = alias.unwrap_or_else(|| name.clone());
+                    let key = field_names[idx].clone();
                     if let Some(val) = record.get(name) {
                         output.insert(key, val.clone());
                     } else if name == "window_start" || name == "window_end" {
@@ -826,7 +793,7 @@ impl Evaluator {
                                 a, expr_str, err
                             )
                         })?;
-                    output.insert(alias.unwrap_or_else(|| leaf.clone()), val);
+                    output.insert(field_names[idx].clone(), val);
                 }
                 Expr::Call { name, args } if name.eq_ignore_ascii_case("extract") => {
                     if let Some(arg) = args.first() {
@@ -913,7 +880,7 @@ impl Evaluator {
                                 )
                             }
                         })?;
-                    let name = alias.unwrap_or_else(|| Self::column_name(field, idx));
+                    let name = field_names[idx].clone();
                     output.insert(name, val);
                 }
             }
@@ -979,11 +946,8 @@ impl Evaluator {
         let Value::Array(items) = items else {
             return vec![base];
         };
-        let placeholder = stmt
-            .field_aliases
-            .get(idx)
-            .and_then(|a| a.clone())
-            .unwrap_or_else(|| Self::column_name(&stmt.fields[idx], idx));
+        let field_names = Self::select_field_names(stmt);
+        let placeholder = field_names[idx].clone();
         let mut rows = Vec::with_capacity(items.len());
         for item in items {
             let mut row = base.clone();
@@ -1181,7 +1145,7 @@ impl Evaluator {
                 .iter()
                 .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
                 .collect::<Result<_, _>>()?;
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             return Ok(Self::eval_acc_call(
                 &lowered,
                 &vals,
@@ -1196,7 +1160,7 @@ impl Evaluator {
                 .iter()
                 .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
                 .collect::<Result<_, _>>()?;
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             return Ok(Self::eval_lag(
                 &vals,
                 state,
@@ -1210,7 +1174,7 @@ impl Evaluator {
                 .iter()
                 .map(|a| Self::eval_stateful_expr_fallible(a, record, state))
                 .collect::<Result<_, _>>()?;
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             return Ok(Self::eval_changed(
                 &lowered,
                 &vals,
@@ -1239,7 +1203,7 @@ impl Evaluator {
                 if ignore_null && val.is_null() {
                     continue;
                 }
-                let call_id = Self::column_name(expr, 0);
+                let call_id = expr.to_ekuiper_string();
                 let state_key = format!(
                     "changed_cols:{}:{}:{}",
                     call_id,
@@ -1266,7 +1230,7 @@ impl Evaluator {
             if !args.is_empty() {
                 return Ok(Value::Null);
             }
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             let state_key = format!("row_number:{}:{}", call_id, partition_key.unwrap_or(""));
             let mut guard = state.state.write();
             let current = guard.get(&state_key).and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1278,7 +1242,7 @@ impl Evaluator {
             return Ok(Value::from(next));
         }
         if lowered == "last_hit_count" {
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             let state_key = format!(
                 "$$last_hit_count:{}:{}",
                 call_id,
@@ -1290,7 +1254,7 @@ impl Evaluator {
             return Ok(Value::from(current));
         }
         if lowered == "last_hit_time" {
-            let call_id = Self::column_name(expr, 0);
+            let call_id = expr.to_ekuiper_string();
             let state_key = format!(
                 "$$last_hit_time:{}:{}",
                 call_id,
@@ -2221,140 +2185,43 @@ impl Evaluator {
         Value::from(1)
     }
 
-    fn op_str(op: &BinaryOperator) -> &'static str {
-        match op {
-            BinaryOperator::Eq => "=",
-            BinaryOperator::Neq => "!=",
-            BinaryOperator::Lt => "<",
-            BinaryOperator::Lte => "<=",
-            BinaryOperator::Gt => ">",
-            BinaryOperator::Gte => ">=",
-            BinaryOperator::And => "AND",
-            BinaryOperator::Or => "OR",
-            BinaryOperator::Add => "+",
-            BinaryOperator::Sub => "-",
-            BinaryOperator::Mul => "*",
-            BinaryOperator::Div => "/",
-            BinaryOperator::Mod => "%",
-            BinaryOperator::BitAnd => "&",
-            BinaryOperator::BitOr => "|",
-            BinaryOperator::BitXor => "^",
-            BinaryOperator::Like => "LIKE",
+    pub fn select_field_names(stmt: &SelectStmt) -> Vec<String> {
+        let mut names = Vec::with_capacity(stmt.fields.len());
+        let mut unaliased_counter = 0;
+        for (idx, field) in stmt.fields.iter().enumerate() {
+            if let Some(Some(alias)) = stmt.field_aliases.get(idx) {
+                names.push(alias.clone());
+            } else {
+                match field {
+                    Expr::Wildcard | Expr::WildcardModified { .. } => {
+                        names.push("*".to_string());
+                    }
+                    Expr::Identifier(name) => {
+                        names.push(name.clone());
+                    }
+                    Expr::FieldAccess { field: leaf, .. } => {
+                        names.push(leaf.clone());
+                    }
+                    Expr::Call { name, .. } => {
+                        names.push(name.clone());
+                    }
+                    _ => {
+                        names.push(format!("kuiper_field_{}", unaliased_counter));
+                        unaliased_counter += 1;
+                    }
+                }
+            }
         }
+        names
     }
 
     pub fn column_name(expr: &Expr, idx: usize) -> String {
         match expr {
             Expr::Wildcard | Expr::WildcardModified { .. } => "*".to_string(),
             Expr::Identifier(name) => name.clone(),
-            Expr::FieldAccess { parent, field } => {
-                // Full dotted path for uniqueness, e.g. dev.temp
-                let parent_name = Self::column_name(parent, idx);
-                if parent_name.is_empty() {
-                    field.clone()
-                } else {
-                    format!("{}.{}", parent_name, field)
-                }
-            }
-            Expr::Index { base, .. } => Self::column_name(base, idx),
-            Expr::Slice { base, .. } => Self::column_name(base, idx),
-            Expr::Literal(v) => match v {
-                Value::Null => "NULL".to_string(),
-                Value::Bool(b) => b.to_string(),
-                Value::Number(n) => n.to_string(),
-                Value::String(s) => s.clone(),
-                _ => format!("col{}", idx),
-            },
-            Expr::BinaryOp { left, op, right } => {
-                format!(
-                    "{} {} {}",
-                    Self::column_name(left, idx),
-                    Self::op_str(op),
-                    Self::column_name(right, idx)
-                )
-            }
-            Expr::UnaryOp { op, expr } => match op {
-                UnaryOperator::Not => format!("NOT {}", Self::column_name(expr, idx)),
-                UnaryOperator::Neg => format!("-{}", Self::column_name(expr, idx)),
-            },
-            Expr::Between {
-                expr,
-                low,
-                high,
-                negated,
-            } => {
-                let not = if *negated { "NOT " } else { "" };
-                format!(
-                    "{} {}BETWEEN {} AND {}",
-                    Self::column_name(expr, idx),
-                    not,
-                    Self::column_name(low, idx),
-                    Self::column_name(high, idx)
-                )
-            }
-            Expr::InList {
-                expr,
-                list,
-                negated,
-            } => {
-                let not = if *negated { "NOT " } else { "" };
-                let items: Vec<String> = list.iter().map(|e| Self::column_name(e, idx)).collect();
-                format!(
-                    "{} {}IN ({})",
-                    Self::column_name(expr, idx),
-                    not,
-                    items.join(", ")
-                )
-            }
-            Expr::IsNull { expr, negated } => {
-                let not = if *negated { "NOT " } else { "" };
-                format!("{} IS {}NULL", Self::column_name(expr, idx), not)
-            }
-            Expr::Call { name, args } => {
-                let inner: Vec<String> = args.iter().map(|a| Self::column_name(a, idx)).collect();
-                format!("{}({})", name, inner.join(", "))
-            }
-            Expr::Over {
-                call,
-                partition_by,
-                when,
-            } => {
-                let mut parts = Vec::new();
-                if let Some(p) = partition_by {
-                    parts.push(format!("PARTITION BY {}", Self::column_name(p, idx)));
-                }
-                if let Some(w) = when {
-                    parts.push(format!("WHEN {}", Self::column_name(w, idx)));
-                }
-                format!(
-                    "{} OVER ({})",
-                    Self::column_name(call, idx),
-                    parts.join(" ")
-                )
-            }
-            Expr::Case {
-                operand,
-                when_clauses,
-                else_clause,
-            } => {
-                let mut s = String::from("CASE");
-                if let Some(op) = operand {
-                    s.push(' ');
-                    s.push_str(&Self::column_name(op, idx));
-                }
-                for (w, t) in when_clauses {
-                    s.push_str(&format!(
-                        " WHEN {} THEN {}",
-                        Self::column_name(w, idx),
-                        Self::column_name(t, idx)
-                    ));
-                }
-                if let Some(e) = else_clause {
-                    s.push_str(&format!(" ELSE {}", Self::column_name(e, idx)));
-                }
-                s.push_str(" END");
-                s
-            }
+            Expr::FieldAccess { field: leaf, .. } => leaf.clone(),
+            Expr::Call { name, .. } => name.clone(),
+            _ => format!("kuiper_field_{}", idx),
         }
     }
 
@@ -2496,12 +2363,9 @@ impl Evaluator {
     /// explicit `AS` aliases.
     pub fn infer_select_schema(stmt: &SelectStmt) -> serde_json::Map<String, Value> {
         let mut schema = serde_json::Map::new();
+        let field_names = Self::select_field_names(stmt);
         for (idx, field) in stmt.fields.iter().enumerate() {
-            let field_name = stmt
-                .field_aliases
-                .get(idx)
-                .and_then(|a| a.clone())
-                .unwrap_or_else(|| Self::column_name(field, idx));
+            let field_name = field_names[idx].clone();
             schema.insert(
                 field_name,
                 Value::String(Self::infer_expr_type(field).to_string()),
