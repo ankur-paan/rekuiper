@@ -59,6 +59,12 @@ decode(col, encodeType)
 
 Decodes an encoded string into its original representation using the specified decoding scheme. Currently, the engine supports `"base64"`.
 
+> [!NOTE]
+> **Compatibility & Safety Note: Non-Crashing Null Safety in DECODE**
+> In legacy eKuiper, unhandled decoding errors or unmapped targets in value decoders could panic at runtime when no default fallback was provided. `rekuiper` safely returns `null` on decode failures without panicking.
+> 
+> **Why we chose this difference**: Returning `null` follows SQL standards for conversion errors and prevents corrupt or malformed incoming sensor records from aborting active stream processing.
+
 ## COMPRESS
 
 ```text
@@ -90,6 +96,12 @@ chr(col)
 ```
 
 Returns the ASCII character corresponding to the specified integer code.
+
+> [!NOTE]
+> **Compatibility & Safety Note: Panic-Free Codepoint Validation in CHR**
+> Legacy eKuiper crashes on negative or out-of-range integer values passed to `chr()`. `rekuiper` validates codepoint bounds (0 to 127 for ASCII, valid Unicode scalar values) and safely returns `null` for invalid or negative inputs without crashing.
+> 
+> **Why we chose this difference**: Preventing server process crashes on abnormal sensor numbers is essential for edge gateways operating autonomously in unattended environments.
 
 ## HEX2DEC
 

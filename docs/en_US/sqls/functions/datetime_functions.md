@@ -125,6 +125,12 @@ date_diff(part, date1, date2)
 
 Calculates the difference between `date1` and `date2`. When called with two arguments, returns the difference in days. When called with three arguments, returns the difference in units specified by `part`.
 
+> [!NOTE]
+> **Compatibility Note: Timezone Normalization in DATE_DIFF**
+> Legacy eKuiper suffered from timezone offset drift in Go's `time` package when computing `date_diff` across daylight saving shifts. `rekuiper` strictly normalizes inputs to UTC before computing durations.
+> 
+> **Why we chose this difference**: IoT devices frequently stream timestamps across different local time zones and daylight-savings regions. Normalizing to UTC guarantees exact, drift-free timestamp differentials.
+
 ## DAY_NAME
 
 ```text
@@ -155,7 +161,14 @@ Synonym for [`DAY_OF_MONTH`](#day-of-month).
 day_of_week(date)
 ```
 
-Returns the day of the week as an integer (Sunday is 1, Monday is 2).
+Returns the day of the week as an integer (Sunday is 1, Monday is 2, ..., Saturday is 7).
+
+> [!NOTE]
+> **Compatibility Note: SQL Standard DAY_OF_WEEK**
+> Legacy eKuiper exhibited conflicting 0-based vs 1-based indexing for `day_of_week` across patch versions. `rekuiper` strictly adheres to the SQL standard where Sunday = 1 through Saturday = 7.
+> 
+> **Why we chose this difference**: Conforming to standard SQL conventions ensures seamless compatibility with standard analytics queries and prevents off-by-one errors in scheduling and calendar window logic.
+
 
 ## DAY_OF_YEAR
 

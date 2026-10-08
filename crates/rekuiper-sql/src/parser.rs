@@ -97,7 +97,35 @@ impl<'a> Parser<'a> {
 
         self.skip_whitespace();
         // Optional schema definition in parens: (col TYPE, ...)
-        let fields = self.parse_column_defs()?;
+        let fields = if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
+            self.parse_column_defs()?
+        } else if self.peek_word_is("WITH")
+            || self.pos >= self.input.len()
+            || self.input[self.pos..].starts_with(';')
+        {
+            Vec::new()
+        } else {
+            let tok = if let Some(w) = self.peek_word() {
+                format!("\"{}\"", w)
+            } else {
+                let remaining = self.input[self.pos..].trim_start();
+                if remaining.starts_with(['"', '\'']) {
+                    let inner = &remaining[1..];
+                    let word_end = inner
+                        .find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(inner.len());
+                    format!("\"{}\"", &inner[..word_end])
+                } else {
+                    let next_chunk = remaining
+                        .chars()
+                        .next()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
+                    format!("\"{}\"", next_chunk)
+                }
+            };
+            bail!("found {}, expected lparen after stream name.", tok);
+        };
 
         let mut options = HashMap::new();
         if self.match_keyword("WITH") {
@@ -120,6 +148,29 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+        }
+
+        self.skip_whitespace();
+        if self.pos < self.input.len() && self.input[self.pos..].starts_with(';') {
+            self.pos += 1;
+            self.skip_whitespace();
+        }
+        if self.pos < self.input.len() {
+            let tok = if let Some(w) = self.peek_word() {
+                format!("\"{}\"", w)
+            } else {
+                let remaining = self.input[self.pos..].trim_start();
+                let next_chunk = remaining
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                format!("\"{}\"", next_chunk)
+            };
+            bail!(
+                "found {}, expected semicolon or EOF after stream options.",
+                tok
+            );
         }
 
         Ok(CreateStreamStmt {
@@ -172,22 +223,61 @@ impl<'a> Parser<'a> {
 
         let mut fields = Vec::new();
         for part in split_top_level_commas(inner) {
-            let tokens: Vec<&str> = part.split_whitespace().collect();
-            if tokens.is_empty() {
+            let part = part.trim();
+            if part.is_empty() {
                 continue;
             }
-            let name = tokens[0].trim_matches(['"', '\'', '`']).to_string();
+            // Extract column name: quoted or unquoted
+            let (name, remainder) =
+                if part.starts_with('"') || part.starts_with('`') || part.starts_with('\'') {
+                    let quote = part.chars().next().unwrap();
+                    if let Some(close_idx) = part[1..].find(quote) {
+                        let name = &part[1..1 + close_idx];
+                        let rem = part[1 + close_idx + 1..].trim();
+                        (name.to_string(), rem)
+                    } else {
+                        bail!("Unclosed quote in column definition: {}", part);
+                    }
+                } else {
+                    let first_ws = part.find(char::is_whitespace).unwrap_or(part.len());
+                    let name = &part[..first_ws];
+                    let rem = part[first_ws..].trim();
+                    (name.to_string(), rem)
+                };
             if name.is_empty() {
                 continue;
             }
-            let data_type = tokens
-                .get(1)
-                .map(|t| {
-                    t.trim_matches(['"', '\'', '`', ',', ';'])
-                        .to_ascii_lowercase()
-                })
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| "string".to_string());
+
+            let (raw_type_str, _default_val) = split_at_default(remainder);
+            let mut raw_type = raw_type_str.trim();
+            // Strip trailing NOT NULL / NULL constraints if present
+            if let Some(stripped) = raw_type
+                .strip_suffix("not null")
+                .or_else(|| raw_type.strip_suffix("NOT NULL"))
+            {
+                raw_type = stripped.trim();
+            } else if let Some(stripped) = raw_type
+                .strip_suffix("null")
+                .or_else(|| raw_type.strip_suffix("NULL"))
+            {
+                raw_type = stripped.trim();
+            }
+            let data_type = if raw_type.is_empty() {
+                "string".to_string()
+            } else {
+                raw_type
+                    .trim_matches(['"', '\'', '`', ',', ';'])
+                    .to_ascii_lowercase()
+            };
+
+            if !is_valid_stream_type(&data_type) {
+                bail!(
+                    "Unsupported or invalid data type '{}' for column '{}'",
+                    data_type,
+                    name
+                );
+            }
+
             fields.push(StreamColumn { name, data_type });
         }
         Ok(fields)
@@ -207,7 +297,35 @@ impl<'a> Parser<'a> {
 
         self.skip_whitespace();
         // Optional schema definition in parens: (col TYPE, ...)
-        let fields = self.parse_column_defs()?;
+        let fields = if self.pos < self.input.len() && self.input[self.pos..].starts_with('(') {
+            self.parse_column_defs()?
+        } else if self.peek_word_is("WITH")
+            || self.pos >= self.input.len()
+            || self.input[self.pos..].starts_with(';')
+        {
+            Vec::new()
+        } else {
+            let tok = if let Some(w) = self.peek_word() {
+                format!("\"{}\"", w)
+            } else {
+                let remaining = self.input[self.pos..].trim_start();
+                if remaining.starts_with(['"', '\'']) {
+                    let inner = &remaining[1..];
+                    let word_end = inner
+                        .find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(inner.len());
+                    format!("\"{}\"", &inner[..word_end])
+                } else {
+                    let next_chunk = remaining
+                        .chars()
+                        .next()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
+                    format!("\"{}\"", next_chunk)
+                }
+            };
+            bail!("found {}, expected lparen after table name.", tok);
+        };
 
         let mut options = HashMap::new();
         if self.match_keyword("WITH") {
@@ -230,6 +348,29 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+        }
+
+        self.skip_whitespace();
+        if self.pos < self.input.len() && self.input[self.pos..].starts_with(';') {
+            self.pos += 1;
+            self.skip_whitespace();
+        }
+        if self.pos < self.input.len() {
+            let tok = if let Some(w) = self.peek_word() {
+                format!("\"{}\"", w)
+            } else {
+                let remaining = self.input[self.pos..].trim_start();
+                let next_chunk = remaining
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                format!("\"{}\"", next_chunk)
+            };
+            bail!(
+                "found {}, expected semicolon or EOF after table options.",
+                tok
+            );
         }
 
         Ok(CreateTableStmt {
@@ -1723,4 +1864,120 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
     }
     parts.push(&s[start..]);
     parts
+}
+
+/// Split at `DEFAULT` keyword (case-insensitive) at depth 0 (outside parentheses and quotes).
+fn split_at_default(s: &str) -> (&str, Option<&str>) {
+    let mut depth = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        let ch = bytes[i] as char;
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            }
+        } else if in_double {
+            if ch == '"' {
+                in_double = false;
+            }
+        } else {
+            match ch {
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth = depth.saturating_sub(1),
+                '\'' => in_single = true,
+                '"' => in_double = true,
+                _ if depth == 0 && s[i..].to_ascii_lowercase().starts_with("default") => {
+                    let before_ok = i == 0 || bytes[i - 1].is_ascii_whitespace();
+                    let after_idx = i + 7;
+                    let after_ok = after_idx >= len || bytes[after_idx].is_ascii_whitespace();
+                    if before_ok && after_ok {
+                        let type_part = s[..i].trim();
+                        let default_part = s[after_idx..].trim();
+                        return (type_part, Some(default_part));
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    (s.trim(), None)
+}
+
+/// Validate whether a declared stream or table column data type is supported.
+pub fn is_valid_stream_type(ty: &str) -> bool {
+    let t = ty.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        return false;
+    }
+    match t.as_str() {
+        "bigint" | "int" | "integer" | "smallint" | "tinyint" => true,
+        "float" | "double" | "real" | "numeric" | "decimal" => true,
+        "string" | "text" | "varchar" | "char" => true,
+        "datetime" | "timestamp" | "date" | "time" => true,
+        "boolean" | "bool" => true,
+        "bytea" | "binary" | "blob" => true,
+        "array" => true,
+        "struct" => true,
+        "json" | "object" | "map" => true,
+        _ => {
+            if (t.starts_with("decimal(") && t.ends_with(')'))
+                || (t.starts_with("numeric(") && t.ends_with(')'))
+            {
+                let inner = t[t.find('(').unwrap() + 1..t.len() - 1].trim();
+                let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();
+                (parts.len() == 1 || parts.len() == 2)
+                    && parts
+                        .iter()
+                        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            } else if (t.starts_with("varchar(") && t.ends_with(')'))
+                || (t.starts_with("char(") && t.ends_with(')'))
+            {
+                let inner = t[t.find('(').unwrap() + 1..t.len() - 1].trim();
+                !inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit())
+            } else if (t.starts_with("array(") && t.ends_with(')'))
+                || (t.starts_with("array[") && t.ends_with(']'))
+            {
+                let inner = t[6..t.len() - 1].trim();
+                if inner.is_empty() {
+                    true
+                } else {
+                    is_valid_stream_type(inner)
+                }
+            } else if t.ends_with("[]") {
+                is_valid_stream_type(t[..t.len() - 2].trim())
+            } else if t.starts_with("struct(") && t.ends_with(')') {
+                let inner = t[7..t.len() - 1].trim();
+                if inner.is_empty() {
+                    true
+                } else {
+                    for field_part in split_top_level_commas(inner) {
+                        let field_part = field_part.trim();
+                        if field_part.is_empty() {
+                            continue;
+                        }
+                        let tokens: Vec<&str> = field_part.split_whitespace().collect();
+                        if tokens.len() == 1 {
+                            if !is_valid_stream_type(tokens[0]) {
+                                return false;
+                            }
+                        } else if let Some((_, field_type)) =
+                            field_part.split_once(char::is_whitespace)
+                        {
+                            if !is_valid_stream_type(field_type.trim()) {
+                                return false;
+                            }
+                        }
+                    }
+                    true
+                }
+            } else {
+                false
+            }
+        }
+    }
 }

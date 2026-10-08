@@ -4,11 +4,48 @@ rekuiper integrates natively with Prometheus to export streaming metrics, operat
 
 ## Prometheus Metrics
 
-rekuiper exposes the following core metrics to Prometheus:
+rekuiper exposes 32 Prometheus metric families providing comprehensive observability across rules, sources, operators, sinks, and connections:
 
-- `kuiper_rule_status`: The operational state of each rule. Value `1` represents running, `0` represents paused or stopped, and `-1` represents abnormal exit.
-- `kuiper_rule_count`: The total count of active and paused rules.
-- `kuiper_rule_cpu_ms`: The CPU time used by the rule over the previous 30 seconds (in milliseconds).
+### Rule & Global Metrics
+- `kuiper_rule_status`: Operational status of each rule (`1` = running, `0` = stopped/paused, `-1` = failed).
+- `kuiper_rule_count`: Total active and paused rules partitioned by `status="running"|"stopped"`.
+- `kuiper_conn_status_gauge`: External connection status partitioned by connection `name`.
+
+### Source Metrics
+- `kuiper_source_records_in_total`: Total input records received at sources (`rule`, `op`, `op_instance`, `type`).
+- `kuiper_source_records_out_total`: Total output records emitted by sources.
+- `kuiper_source_messages_processed_total`: Total messages processed by sources.
+- `kuiper_source_exceptions_total`: Total exceptions encountered by sources.
+- `kuiper_source_buffer_length`: Current message buffer length for sources.
+- `kuiper_source_connection_status`: Source connection state (`1` = connected, `0` = connecting, `-1` = disconnected).
+- `kuiper_source_process_latency_us`: Source processing latency in microseconds.
+- `kuiper_source_process_latency_us_hist_bucket`, `_hist_count`, `_hist_sum`: Source processing latency histogram buckets and aggregates.
+
+### Operator Metrics
+- `kuiper_op_records_in_total`: Total input records received by pipeline operators (`rule`, `op`, `op_instance`, `type`).
+- `kuiper_op_records_out_total`: Total output records emitted by pipeline operators.
+- `kuiper_op_messages_processed_total`: Total messages processed by operators.
+- `kuiper_op_exceptions_total`: Total exceptions encountered by operators.
+- `kuiper_op_buffer_length`: Current input buffer queue depth for operators.
+- `kuiper_op_process_latency_us`: Operator processing latency in microseconds.
+- `kuiper_op_process_latency_us_hist_bucket`, `_hist_count`, `_hist_sum`: Operator processing latency histogram buckets and aggregates.
+
+### Sink Metrics
+- `kuiper_sink_records_in_total`: Total records received by sinks (`rule`, `op`, `op_instance`, `type`).
+- `kuiper_sink_records_out_total`: Total records successfully transmitted by sinks.
+- `kuiper_sink_messages_processed_total`: Total messages handled by sinks.
+- `kuiper_sink_exceptions_total`: Total sink errors and transmission exceptions.
+- `kuiper_sink_buffer_length`: Current message buffer queue depth for sinks.
+- `kuiper_sink_connection_status`: Target sink connection state (`1` = connected, `0` = connecting, `-1` = disconnected).
+- `kuiper_sink_process_latency_us`: Sink transmission latency in microseconds.
+- `kuiper_sink_process_latency_us_hist_bucket`, `_hist_count`, `_hist_sum`: Sink processing latency histogram buckets and aggregates.
+
+> [!NOTE]
+> **Compatibility & Cloud-Native Scraping Note: Single-Port Metrics**
+> In legacy eKuiper, Prometheus metrics are served strictly on a dedicated port (default `20499`) and return `404 Not Found` on the standard REST API port (`9081`). `rekuiper` serves Prometheus metrics directly on the REST port (`http://<host>:9081/metrics`) as well as the configurable dedicated metrics port.
+> 
+> **Why we chose this difference**: In Kubernetes and containerized microservice deployments, scraping metrics directly from the primary pod service port simplifies deployment manifests, reduces firewall port surface, and eliminates multi-port ingress configuration friction.
+
 
 ## Rule Status Metrics
 

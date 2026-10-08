@@ -70,7 +70,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 
 ---
 
-## Tool Catalog (46 Tools)
+## Tool Catalog (47 Tools)
 
 ### 1. SQL Intelligence & Simulation
 | Tool | Description |
@@ -110,6 +110,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_rule_status` | Retrieve real-time throughput metrics, latency, and error states. |
 | `get_rule_topo` | Retrieve DAG topological execution graph of source, operator, and sink nodes. |
 | `reset_rule_state` | Clear checkpointed state offsets and state store data for clean restart. |
+| `explain_rule` | Retrieve structured JSON physical execution plan for a registered rule (`GET /rules/{name}/explain`). |
 
 ### 5. Distributed Tracing & Diagnostics
 | Tool | Description |
@@ -141,7 +142,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_configs` | Retrieve daemon runtime configuration and parameters. |
 | `update_configs` | Dynamically update server configuration parameters. |
 | `export_data` | Export JSON catalog backup of rules, streams, schemas, and configurations. |
-| `import_data` | Restore catalog configuration from a JSON backup. |
+| `import_data` | Restore catalog configuration from a JSON backup (supports complete reset or `partial=true` merge mode). |
 
 ### 9. Health, Heartbeat & Telemetry
 | Tool | Description |

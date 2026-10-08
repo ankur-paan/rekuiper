@@ -10,6 +10,10 @@
           "path": "concepts/rekuiper"
         },
         {
+          "title": "eKuiper Compatibility & Enhancements",
+          "path": "concepts/ekuiper_compatibility"
+        },
+        {
           "title": "Stream Processing",
           "path": "concepts/streaming/overview",
           "collapsed": true,

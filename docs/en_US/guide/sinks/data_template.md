@@ -13,6 +13,13 @@ A template executes against an input data structure. Actions inside double brace
 - The cursor dot (`.`) represents the current data element.
 - Text outside actions passes unchanged to the output string.
 
+> [!NOTE]
+> **Compatibility & Safety Note: Upfront Template Validation**
+> In legacy eKuiper, syntax errors or unclosed template actions inside `dataTemplate` pass rule creation without detection, only failing silently during stream execution or emitting `<no value>` strings into outbound sink messages. `rekuiper` validates `dataTemplate` syntax upfront during rule creation (`POST /rules`), returning an informative `400 Bad Request` if braces are unclosed or syntax is malformed.
+> 
+> **Why we chose this difference**: Detecting template errors at creation time provides immediate feedback to developers and prevents faulty templates from silently corrupting egress data streams in production.
+
+
 ## Input Data Granularity
 
 The input data structure flowing into a sink is a slice of maps:

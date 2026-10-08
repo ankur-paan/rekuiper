@@ -390,3 +390,40 @@ Request payload:
 ```
 
 Both bulk endpoints return the execution status for each targeted rule. These operations are not atomic. An error on one rule does not cancel changes applied to other rules.
+
+## Explain Rule Execution Plan
+
+Use this endpoint to inspect the parsed query topology and execution plan of a rule:
+
+```http
+GET http://localhost:9081/rules/{id}/explain
+```
+
+Response sample (HTTP 200 OK):
+
+```json
+{
+  "ruleId": "rule1",
+  "plan": {
+    "source": {
+      "type": "mqtt",
+      "topic": "demo"
+    },
+    "filter": "temperature > 20.0",
+    "projection": ["device_id", "temperature", "humidity"],
+    "window": null,
+    "sinks": [
+      {
+        "type": "log"
+      }
+    ]
+  }
+}
+```
+
+> [!NOTE]
+> **Compatibility Note: Structured Execution Plan vs Raw ASCII Dump**
+> Legacy eKuiper returns an unstructured ASCII text dump (such as `ProjectPlan_0 -> FilterPlan_1`) from the explain endpoint. `rekuiper` returns a typed, structured JSON execution plan containing sources, filters, window specifications, projections, and sinks.
+> 
+> **Why we chose this difference**: Unstructured text dumps require brittle regex parsing and cannot be safely consumed by web management consoles, graph visualizers, or AI / MCP agentic workflows. Structured JSON provides machine-readable, schema-validatable graph representations that modern cloud-native systems can directly render and inspect.
+

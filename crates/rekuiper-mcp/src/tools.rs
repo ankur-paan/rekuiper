@@ -379,6 +379,20 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["name"]
             }),
         },
+        ToolDefinition {
+            name: "explain_rule".to_string(),
+            description: "Retrieves the structured JSON physical execution plan of a registered rule from the running engine via GET /rules/{name}/explain.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Identifier of the rule whose execution plan to inspect."
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
 
         // =========================================================================
         // 5. Tracing, Observability & Root-Cause Diagnostics
@@ -612,12 +626,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "import_data".to_string(),
-            description: "Restores or provisions rules, streams, lookup tables, and configurations from a JSON backup payload into the rekuiper engine.".to_string(),
+            description: "Restores or provisions rules, streams, lookup tables, and configurations from a JSON backup payload into the rekuiper engine. By default, resets existing configurations before importing; set partial=true for additive merge mode without dropping unreferenced resources.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "content": {
                         "description": "JSON backup payload adhering to rekuiper export format."
+                    },
+                    "partial": {
+                        "type": "boolean",
+                        "description": "Set to true to enable additive merge mode without wiping existing unreferenced streams and rules."
                     }
                 },
                 "required": ["content"]
@@ -1104,6 +1122,13 @@ pub async fn execute_tool(
             let path = format!("/rules/{}/reset_state", name);
             forward_request(client, base_url, reqwest::Method::PUT, &path, None).await
         }
+        "explain_rule" => {
+            let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+                return CallToolResult::err("Missing required parameter: 'name'");
+            };
+            let path = format!("/rules/{}/explain", name);
+            forward_request(client, base_url, reqwest::Method::GET, &path, None).await
+        }
 
         // --- 5. Tracing & Observability ---
         "start_rule_trace" => {
@@ -1252,11 +1277,25 @@ pub async fn execute_tool(
 
         "import_data" => {
             let content = args.get("content").cloned().unwrap_or(json!({}));
+            let is_partial = args
+                .get("partial")
+                .and_then(|v| {
+                    if v.as_bool() == Some(true)
+                        || v.as_str() == Some("1")
+                        || v.as_str() == Some("true")
+                    {
+                        Some("?partial=1")
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("");
+            let path = format!("/data/import{}", is_partial);
             forward_request(
                 client,
                 base_url,
                 reqwest::Method::POST,
-                "/data/import",
+                &path,
                 Some(content),
             )
             .await

@@ -73,6 +73,7 @@ async fn test_tools_list() {
     assert!(tool_names.contains(&"get_rule_status"));
     assert!(tool_names.contains(&"get_rule_topo"));
     assert!(tool_names.contains(&"reset_rule_state"));
+    assert!(tool_names.contains(&"explain_rule"));
 
     // Tracing
     assert!(tool_names.contains(&"start_rule_trace"));

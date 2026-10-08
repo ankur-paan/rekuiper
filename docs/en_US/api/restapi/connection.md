@@ -91,6 +91,13 @@ DELETE http://localhost:9081/connections/{id}
 > [!NOTE]
 > You cannot delete a connection profile while active rules reference it. Stop or update dependent rules before deleting the connection.
 
+> [!NOTE]
+> **Compatibility Note: 404 Not Found vs 400 Bad Request for Missing Connections**
+> In legacy eKuiper, querying (`GET /connections/{id}`) or deleting (`DELETE /connections/{id}`) a non-existent connection ID returns `400 Bad Request`. `rekuiper` strictly returns `404 Not Found`.
+> 
+> **Why we chose this difference**: Per RFC 9110, HTTP `400 Bad Request` indicates client syntax error (such as an unparseable body or missing mandatory fields), whereas `404 Not Found` specifically indicates that the identified target resource does not exist. Using `404` allows client applications to cleanly detect missing connection profiles and automatically trigger provisioning or fallbacks without misinterpreting the error as a syntax malfunction.
+
+
 ## Connectivity Health Checks
 
 Test external endpoint reachability using these diagnostic endpoints:

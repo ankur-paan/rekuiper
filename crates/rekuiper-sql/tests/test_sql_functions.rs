@@ -2653,3 +2653,222 @@ fn test_lead_with_ignore_null() {
         json!(-1)
     );
 }
+
+#[test]
+fn test_issue26_sql_functions_parity() {
+    let empty_rec = empty();
+
+    // 1. now([format])
+    let now_default = eval_one("SELECT now() AS v FROM demo", &empty_rec);
+    let s_def = now_default.as_str().expect("now() string");
+    assert_eq!(s_def.len(), 19);
+
+    let now_fmt1 = eval_one("SELECT now('YYYY-MM-DD') AS v FROM demo", &empty_rec);
+    let s_fmt1 = now_fmt1.as_str().expect("now(fmt) string");
+    assert_eq!(s_fmt1.len(), 10);
+    assert_eq!(&s_fmt1[4..5], "-");
+    assert_eq!(&s_fmt1[7..8], "-");
+
+    let now_fmt2 = eval_one("SELECT now('%Y/%m/%d') AS v FROM demo", &empty_rec);
+    let s_fmt2 = now_fmt2.as_str().expect("now(fmt) string");
+    assert_eq!(s_fmt2.len(), 10);
+    assert_eq!(&s_fmt2[4..5], "/");
+
+    assert_eq!(
+        eval_one("SELECT now(1) AS v FROM demo", &empty_rec),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT now(null) AS v FROM demo", &empty_rec),
+        Value::Null
+    );
+
+    // current_timestamp and local_timestamp optional format
+    let cur_ts_fmt = eval_one(
+        "SELECT current_timestamp('YYYY-MM-DD') AS v FROM demo",
+        &empty_rec,
+    );
+    assert_eq!(cur_ts_fmt.as_str().unwrap().len(), 10);
+
+    // 2. to_seconds(ts)
+    assert_eq!(
+        eval_one(
+            "SELECT to_seconds('2024-01-01T00:00:00Z') AS v FROM demo",
+            &empty_rec
+        ),
+        json!(1704067200)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT to_seconds('2024-01-01 00:00:00') AS v FROM demo",
+            &empty_rec
+        ),
+        json!(1704067200)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT to_seconds('2024-01-01 00:00:00.500') AS v FROM demo",
+            &empty_rec
+        ),
+        json!(1704067200)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT to_seconds(1704067200000) AS v FROM demo",
+            &empty_rec
+        ),
+        json!(1704067200)
+    );
+    assert_eq!(
+        eval_one("SELECT to_seconds(null) AS v FROM demo", &empty_rec),
+        Value::Null
+    );
+
+    // 3. cast(expr, 'datetime') and cast(expr, 'timestamp')
+    assert_eq!(
+        eval_one(
+            "SELECT cast(1700000000000, 'datetime') AS v FROM demo",
+            &empty_rec
+        ),
+        json!("2023-11-14T22:13:20Z")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT cast(1700000000000, 'timestamp') AS v FROM demo",
+            &empty_rec
+        ),
+        json!("2023-11-14T22:13:20Z")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT cast('2023-11-14 22:13:20', 'datetime') AS v FROM demo",
+            &empty_rec
+        ),
+        json!("2023-11-14T22:13:20Z")
+    );
+
+    // 4. element_at(arr, index) and element_at(obj, key)
+    assert_eq!(
+        eval_one(
+            "SELECT element_at([10, 20, 30], 0) AS v FROM demo",
+            &empty_rec
+        ),
+        json!(10)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT element_at([10, 20, 30], 1) AS v FROM demo",
+            &empty_rec
+        ),
+        json!(20)
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT element_at([10, 20, 30], -1) AS v FROM demo",
+            &empty_rec
+        ),
+        json!(30)
+    );
+    let mut obj_rec = empty();
+    obj_rec.insert("m".to_string(), json!({"a": 1, "b": "hello"}));
+    assert_eq!(
+        eval_one("SELECT element_at(m, 'a') AS v FROM demo", &obj_rec),
+        json!(1)
+    );
+    assert_eq!(
+        eval_one("SELECT element_at(m, 'b') AS v FROM demo", &obj_rec),
+        json!("hello")
+    );
+    assert_eq!(
+        eval_one(
+            "SELECT element_at(m, 'nonexistent') AS v FROM demo",
+            &obj_rec
+        ),
+        Value::Null
+    );
+
+    // 5. min and max on strings
+    let str_rows = vec![
+        rec(&[("val", json!("v2"))]),
+        rec(&[("val", json!("v1"))]),
+        rec(&[("val", json!("v3"))]),
+    ];
+    assert_eq!(
+        eval_agg_one("SELECT min(val) AS v FROM demo", &str_rows),
+        json!("v1")
+    );
+    assert_eq!(
+        eval_agg_one("SELECT max(val) AS v FROM demo", &str_rows),
+        json!("v3")
+    );
+    assert_eq!(
+        eval_agg_one("SELECT concat(max(val), '!') AS v FROM demo", &str_rows),
+        json!("v3!")
+    );
+
+    // 6. log(x), ln(x), log2(x)
+    assert_eq!(
+        eval_one("SELECT log(100) AS v FROM demo", &empty_rec),
+        json!(2.0)
+    );
+    assert_eq!(
+        eval_one("SELECT log(10, 1000) AS v FROM demo", &empty_rec),
+        json!(3.0)
+    );
+    assert_eq!(
+        eval_one("SELECT log(2, 8) AS v FROM demo", &empty_rec),
+        json!(3.0)
+    );
+    assert_eq!(
+        eval_one("SELECT ln(1) AS v FROM demo", &empty_rec),
+        json!(0.0)
+    );
+    assert_eq!(
+        eval_one("SELECT log2(8) AS v FROM demo", &empty_rec),
+        json!(3.0)
+    );
+    assert_eq!(
+        eval_one("SELECT log(0) AS v FROM demo", &empty_rec),
+        Value::Null
+    );
+    assert_eq!(
+        eval_one("SELECT log(-10) AS v FROM demo", &empty_rec),
+        Value::Null
+    );
+
+    // 7. latest with default value
+    let null_rows = vec![rec(&[("temp", Value::Null)]), rec(&[("temp", Value::Null)])];
+    assert_eq!(
+        eval_agg_one("SELECT latest(temp, 99) AS v FROM demo", &null_rows),
+        json!(99)
+    );
+    let mixed_rows = vec![rec(&[("temp", json!(42))]), rec(&[("temp", Value::Null)])];
+    assert_eq!(
+        eval_agg_one("SELECT latest(temp, 99) AS v FROM demo", &mixed_rows),
+        json!(42)
+    );
+}
+
+#[test]
+fn test_issue26_lag_with_ignore_null() {
+    let mut state = RuleState::default();
+    let step = |val: Value, state: &mut RuleState| -> Value {
+        let mut r = empty();
+        r.insert("temp".to_string(), val);
+        let mut parser = Parser::new("SELECT lag(temp, 1, -1, true) AS v FROM demo");
+        let stmt = parser.parse_select().unwrap();
+        Evaluator::eval_select_stateful(&stmt, &r, state)
+            .unwrap()
+            .remove("v")
+            .unwrap()
+    };
+
+    // First row: no previous, returns default -1
+    assert_eq!(step(json!(10), &mut state), json!(-1));
+    // Second row is null: ignore_null=true ignores it from history, returns previous non-null 10
+    assert_eq!(step(Value::Null, &mut state), json!(10));
+    // Third row is 20: previous was 10 (null was skipped)
+    assert_eq!(step(json!(20), &mut state), json!(10));
+    // Fourth row is 30: previous was 20
+    assert_eq!(step(json!(30), &mut state), json!(20));
+}

@@ -1334,6 +1334,82 @@ fn test_parse_create_stream_columns() {
 }
 
 #[test]
+fn test_issue23_stream_ddl_type_validation() {
+    // 1. All valid catalog types parse successfully
+    let mut parser = Parser::new(
+        "CREATE STREAM valid_stream (
+            id BIGINT,
+            temp FLOAT,
+            name STRING,
+            active BOOLEAN,
+            ts DATETIME,
+            data BYTEA,
+            arr ARRAY(STRING),
+            st STRUCT(field1 STRING, field2 INT)
+        ) WITH (FORMAT=\"json\")",
+    );
+    let stmt = parser
+        .parse_create_stream()
+        .expect("Valid types should parse");
+    assert_eq!(stmt.fields.len(), 8);
+    assert_eq!(stmt.fields[0].data_type, "bigint");
+    assert_eq!(stmt.fields[1].data_type, "float");
+    assert_eq!(stmt.fields[2].data_type, "string");
+    assert_eq!(stmt.fields[3].data_type, "boolean");
+    assert_eq!(stmt.fields[4].data_type, "datetime");
+    assert_eq!(stmt.fields[5].data_type, "bytea");
+    assert_eq!(stmt.fields[6].data_type, "array(string)");
+    assert_eq!(
+        stmt.fields[7].data_type,
+        "struct(field1 string, field2 int)"
+    );
+
+    // 2. Default clause and constraints parse and clean the data type
+    let mut parser = Parser::new(
+        "CREATE STREAM with_defaults (
+            temperature FLOAT DEFAULT 12.0,
+            status STRING DEFAULT \"unknown\",
+            active BOOLEAN DEFAULT false,
+            user_id BIGINT DEFAULT 2,
+            dev_id BIGINT NOT NULL
+        ) WITH (FORMAT=\"json\")",
+    );
+    let stmt = parser.parse_create_stream().expect("Defaults should parse");
+    assert_eq!(stmt.fields[0].data_type, "float");
+    assert_eq!(stmt.fields[1].data_type, "string");
+    assert_eq!(stmt.fields[2].data_type, "boolean");
+    assert_eq!(stmt.fields[3].data_type, "bigint");
+    assert_eq!(stmt.fields[4].data_type, "bigint");
+
+    // 3. Unknown types are rejected with descriptive error
+    let mut parser = Parser::new("CREATE STREAM bad (col foobar) WITH (FORMAT=\"json\")");
+    let err = parser.parse_create_stream().unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Unsupported or invalid data type 'foobar' for column 'col'"),
+        "Unexpected error: {err}"
+    );
+
+    // 4. Invalid nested array type rejected
+    let mut parser =
+        Parser::new("CREATE STREAM bad_arr (arr ARRAY(invalid_t)) WITH (FORMAT=\"json\")");
+    let err = parser.parse_create_stream().unwrap_err();
+    assert!(
+        err.to_string().contains("Unsupported or invalid data type"),
+        "Unexpected error: {err}"
+    );
+
+    // 5. Invalid nested struct type rejected
+    let mut parser =
+        Parser::new("CREATE STREAM bad_st (st STRUCT(a INT, b bad_type)) WITH (FORMAT=\"json\")");
+    let err = parser.parse_create_stream().unwrap_err();
+    assert!(
+        err.to_string().contains("Unsupported or invalid data type"),
+        "Unexpected error: {err}"
+    );
+}
+
+#[test]
 fn test_issue24_sql_window_features() {
     use rekuiper_sql::{Evaluator, TimeUnit, WindowDef};
     use serde_json::json;
@@ -1411,4 +1487,28 @@ fn test_issue24_sql_window_features() {
     assert_eq!(out.get("s"), Some(&json!(42)));
     assert_eq!(out.get("lo"), Some(&json!(42)));
     assert_eq!(out.get("hi"), Some(&json!(42)));
+}
+
+#[test]
+fn test_parse_create_stream_reject_garbage() {
+    let mut p = Parser::new("CREATE STREAM cli_bad this is not a definition");
+    let err = p.parse_create_stream().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "found \"this\", expected lparen after stream name."
+    );
+
+    let mut p = Parser::new("CREATE STREAM cli_bad \"this is not a definition\"");
+    let err = p.parse_create_stream().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "found \"this\", expected lparen after stream name."
+    );
+
+    let mut p = Parser::new("CREATE TABLE cli_bad this is not a definition");
+    let err = p.parse_create_table().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "found \"this\", expected lparen after table name."
+    );
 }

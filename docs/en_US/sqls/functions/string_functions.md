@@ -211,6 +211,12 @@ substring(col, start, length)
 
 Returns a substring starting at zero-based index `start` with a character length of `length`.
 
+> [!NOTE]
+> **Compatibility & Safety Note: Memory Safety and Boundary Clamping**
+> In legacy eKuiper 2.4.1, `substring` was prone to out-of-bounds slice panics in Go when `start + length` exceeded string length, or when negative/large indices were passed. `rekuiper` implements memory-safe boundary clamping for `substring` without panics, and safely handles UTF-8 character and grapheme boundaries.
+> 
+> **Why we chose this difference**: In continuous stream processing engines running 24/7, runtime panics caused by unexpected string lengths halt the rule executor and disrupt telemetry pipelines. Safe boundary clamping ensures that queries never crash on malformed payloads.
+
 ## TRIM
 
 ```text

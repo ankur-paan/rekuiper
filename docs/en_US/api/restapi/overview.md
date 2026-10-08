@@ -87,3 +87,12 @@ Response payload:
 - [Configuration Keys](configKey.md)
 - [Connections](connection.md)
 - [Tracing](trace.md)
+
+## HTTP Standards Compliance & Status Codes
+
+> [!NOTE]
+> **Compatibility Note: HTTP Status Codes**
+> In legacy eKuiper, querying or deleting non-existent resources (such as `GET /connections/{missing}` or `GET /schemas/{missing}`) returns `400 Bad Request`. `rekuiper` strictly complies with RFC 9110 HTTP semantics by returning `404 Not Found` for missing resources and reserving `400 Bad Request` strictly for malformed syntax or unparseable payloads.
+> 
+> **Why we chose this difference**: Conflating missing resources with malformed client payloads violates HTTP standards and breaks standard client libraries (which handle 404 with retry or create-if-missing logic), OpenAPI client code generators, caching reverse proxies, and automated REST testing frameworks. Returning `404 Not Found` provides clear, deterministic REST behavior.
+
