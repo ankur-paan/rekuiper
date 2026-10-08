@@ -69,7 +69,7 @@
           ]
         },
         {
-          "title": "Contribute",
+          "title": "Contributing Guide",
           "path": "CONTRIBUTING"
         }
       ]
@@ -169,34 +169,8 @@
           ]
         },
         {
-          "title": "AI/ML",
-          "collapsed": true,
-          "children": [
-            {
-              "title": "TensorFlow Lite with External Functions",
-              "path": "guide/ai/tensorflow_lite_external_function_tutorial"
-            },
-            {
-              "title": "AI with Native Plugins (Legacy Reference)",
-              "path": "guide/ai/tensorflow_lite_tutorial"
-            },
-            {
-              "title": "TensorFlow Lite with Python (Legacy Reference)",
-              "path": "guide/ai/python_tensorflow_lite_tutorial"
-            },
-            {
-              "title": "OpenVINO with Python (Legacy Reference)",
-              "path": "guide/ai/python_openvino_tutorial"
-            },
-            {
-              "title": "TensorFlow Lite Plugin (Legacy Reference)",
-              "path": "guide/ai/tensorflow_lite"
-            },
-            {
-              "title": "ONNX Plugin (Legacy Reference)",
-              "path": "guide/ai/onnx"
-            }
-          ]
+          "title": "AI/ML with External Functions",
+          "path": "guide/ai/tensorflow_lite_external_function_tutorial"
         }
       ]
     },
@@ -221,12 +195,12 @@
                   "path": "guide/sources/builtin/mqtt"
                 },
                 {
-                  "title": "RabbitMQ Source",
-                  "path": "guide/sources/builtin/rabbitmq"
+                  "title": "Kafka Source",
+                  "path": "guide/sources/plugin/kafka"
                 },
                 {
-                  "title": "EdgeX Source",
-                  "path": "guide/sources/builtin/edgex"
+                  "title": "SQL Source",
+                  "path": "guide/sources/plugin/sql"
                 },
                 {
                   "title": "HTTP Pull Source",
@@ -241,10 +215,6 @@
                   "path": "guide/sources/builtin/file"
                 },
                 {
-                  "title": "Memory Source",
-                  "path": "guide/sources/builtin/memory"
-                },
-                {
                   "title": "Redis Source",
                   "path": "guide/sources/builtin/redis"
                 },
@@ -257,34 +227,20 @@
                   "path": "guide/sources/builtin/websocket"
                 },
                 {
+                  "title": "RabbitMQ Source",
+                  "path": "guide/sources/builtin/rabbitmq"
+                },
+                {
+                  "title": "EdgeX Source",
+                  "path": "guide/sources/builtin/edgex"
+                },
+                {
+                  "title": "Memory Source",
+                  "path": "guide/sources/builtin/memory"
+                },
+                {
                   "title": "Simulator Source",
                   "path": "guide/sources/builtin/simulator"
-                }
-              ]
-            },
-            {
-              "title": "Extended & Plugin Sources",
-              "collapsed": true,
-              "children": [
-                {
-                  "title": "SQL Source (Built-in)",
-                  "path": "guide/sources/plugin/sql"
-                },
-                {
-                  "title": "Kafka Source (Built-in)",
-                  "path": "guide/sources/plugin/kafka"
-                },
-                {
-                  "title": "Random Source (Replaced)",
-                  "path": "guide/sources/plugin/random"
-                },
-                {
-                  "title": "Video Source (Legacy/Unsupported)",
-                  "path": "guide/sources/plugin/video"
-                },
-                {
-                  "title": "ZeroMQ Source (Legacy/Unsupported)",
-                  "path": "guide/sources/plugin/zmq"
                 }
               ]
             }
@@ -307,16 +263,20 @@
                   "path": "guide/sinks/builtin/mqtt"
                 },
                 {
-                  "title": "RabbitMQ Sink",
-                  "path": "guide/sinks/builtin/rabbitmq"
+                  "title": "Kafka Sink",
+                  "path": "guide/sinks/plugin/kafka"
                 },
                 {
-                  "title": "EdgeX Sink",
-                  "path": "guide/sinks/builtin/edgex"
+                  "title": "SQL Sink",
+                  "path": "guide/sinks/plugin/sql"
                 },
                 {
                   "title": "REST Sink",
                   "path": "guide/sinks/builtin/rest"
+                },
+                {
+                  "title": "File Sink",
+                  "path": "guide/sinks/builtin/file"
                 },
                 {
                   "title": "Redis Sink",
@@ -327,8 +287,16 @@
                   "path": "guide/sinks/builtin/redisPub"
                 },
                 {
-                  "title": "File Sink",
-                  "path": "guide/sinks/builtin/file"
+                  "title": "Websocket Sink",
+                  "path": "guide/sinks/builtin/websocket"
+                },
+                {
+                  "title": "RabbitMQ Sink",
+                  "path": "guide/sinks/builtin/rabbitmq"
+                },
+                {
+                  "title": "EdgeX Sink",
+                  "path": "guide/sinks/builtin/edgex"
                 },
                 {
                   "title": "Memory Sink",
@@ -339,50 +307,8 @@
                   "path": "guide/sinks/builtin/log"
                 },
                 {
-                  "title": "Websocket Sink",
-                  "path": "guide/sinks/builtin/websocket"
-                },
-                {
                   "title": "Nop Sink",
                   "path": "guide/sinks/builtin/nop"
-                }
-              ]
-            },
-            {
-              "title": "Extended & Plugin Sinks",
-              "collapsed": true,
-              "children": [
-                {
-                  "title": "SQL Sink (Built-in)",
-                  "path": "guide/sinks/plugin/sql"
-                },
-                {
-                  "title": "Kafka Sink (Built-in)",
-                  "path": "guide/sinks/plugin/kafka"
-                },
-                {
-                  "title": "InfluxDB Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/influx"
-                },
-                {
-                  "title": "InfluxDBV2 Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/influx2"
-                },
-                {
-                  "title": "IoTDB Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/iotdb"
-                },
-                {
-                  "title": "TDengine 3 Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/tdengine3"
-                },
-                {
-                  "title": "Image Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/image"
-                },
-                {
-                  "title": "ZeroMQ Sink (Legacy/Unsupported)",
-                  "path": "guide/sinks/plugin/zmq"
                 }
               ]
             }
@@ -503,14 +429,7 @@
         },
         {
           "title": "Management Console",
-          "path": "operation/manager-ui/overview",
-          "collapsed": true,
-          "children": [
-            {
-              "title": "Manage Custom Plugins",
-              "path": "operation/manager-ui/plugins_in_manager"
-            }
-          ]
+          "path": "operation/manager-ui/overview"
         },
         {
           "title": "Tracing Data",
@@ -651,52 +570,6 @@
         {
           "title": "Script Functions (JavaScript / Boa)",
           "path": "extension/script/overview"
-        },
-        {
-          "title": "Native Plugins (Legacy Reference)",
-          "path": "extension/native/overview",
-          "collapsed": true,
-          "children": [
-            {
-              "title": "Develop Overview",
-              "path": "extension/native/develop/overview"
-            },
-            {
-              "title": "Plugin Tutorial",
-              "path": "extension/native/develop/plugins_tutorial"
-            },
-            {
-              "title": "Function Plugin",
-              "path": "extension/native/develop/function"
-            },
-            {
-              "title": "Sink Plugin",
-              "path": "extension/native/develop/sink"
-            },
-            {
-              "title": "Source Plugin",
-              "path": "extension/native/develop/source"
-            }
-          ]
-        },
-        {
-          "title": "Portable Plugins (Legacy Reference)",
-          "path": "extension/portable/overview",
-          "collapsed": true,
-          "children": [
-            {
-              "title": "Go SDK for Portable Plugin",
-              "path": "extension/portable/go_sdk"
-            },
-            {
-              "title": "Python SDK for Portable Plugin",
-              "path": "extension/portable/python_sdk"
-            }
-          ]
-        },
-        {
-          "title": "Plugin Management in UI",
-          "path": "operation/manager-ui/plugins_in_manager"
         }
       ]
     },

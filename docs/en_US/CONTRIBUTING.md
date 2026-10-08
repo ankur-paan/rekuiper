@@ -1,336 +1,256 @@
-# How to Contribute
+# How to Contribute to rekuiper
 
-This document describes how to contribute code and documentation to the rekuiper project.
+This document describes how to contribute code, documentation, and tests to the `rekuiper` project.
 
-## Report Security Vulnerabilities
+`rekuiper` is a lightweight stream processing engine for edge devices, written in Rust.
 
-Do not open a public GitHub issue for a security vulnerability. Report security vulnerabilities privately as described in [SECURITY.md](../../SECURITY.md). For severe security incidents, use the emergency contact in that file.
+---
 
-## Report a Defect
+## Code of Conduct
 
-- If the defect is a security vulnerability, refer to [SECURITY.md](../../SECURITY.md). Do not submit a public issue.
-- Search existing issues on GitHub under [Issues](https://github.com/ankur-paan/rekuiper/issues) to verify that the defect is not already reported.
-- If no open issue exists, [open a new issue](https://github.com/ankur-paan/rekuiper/issues/new). Include a clear title, a detailed description, and a reproducible test case.
+All contributors to `rekuiper` must follow professional conduct. Treat all community members with respect and courtesy.
 
-## Code and Documentation Contributions
+---
 
-You can contribute code for new features or defect fixes.
+## Report Defects and Security Vulnerabilities
 
-### One-Time Setup
+### Report a Defect
+1. Search existing issues in the [GitHub Issues](https://github.com/ankur-paan/rekuiper/issues) tracker before you create a new issue.
+2. If an issue does not exist, open a [New Issue](https://github.com/ankur-paan/rekuiper/issues/new).
+3. Include these items in your report:
+   - Clear title and summary of the defect.
+   - Operating system, hardware architecture, and Rust compiler version.
+   - Exact steps to reproduce the defect.
+   - Stream definitions, SQL queries, and rule configurations.
+   - Actual output versus expected output.
 
-Project maintainers review proposed code changes through GitHub pull requests. Complete this setup before you contribute code:
+### Report a Security Vulnerability
+Do **not** report security vulnerabilities in public GitHub issues.
 
-1. **Fork** the repository to your personal GitHub account.
-2. **Clone** your fork locally:
-   ```shell
-   git clone https://github.com/<Github_user>/ekuiper.git
+Report security vulnerabilities privately to the **I-Dacs Labs Security Team**:
+- Email: **[measure@i-dacs.com](mailto:measure@i-dacs.com)**
+- Subject: `[SECURITY] rekuiper vulnerability report`
+- Review [SECURITY.md](../../SECURITY.md) for full disclosure details.
+
+---
+
+## Development Setup
+
+### Prerequisites
+- **Rust Toolchain**: Rust 1.78 or newer (`rustup toolchain install stable`).
+- **Cargo Components**: `clippy` and `rustfmt`:
+  ```bash
+  rustup component add clippy rustfmt
+  ```
+- **Optional Services**: Docker (useful to run local test brokers like Mosquitto, Redis, or Kafka).
+
+### Fork and Clone
+1. Fork the repository to your GitHub account.
+2. Clone your fork locally:
+   ```bash
+   git clone https://github.com/<your-username>/rekuiper.git
+   cd rekuiper
    ```
-3. Add the upstream repository as an additional Git remote:
-   ```shell
+3. Add the upstream repository remote:
+   ```bash
    git remote add upstream https://github.com/ankur-paan/rekuiper.git
    ```
 
-You can use any IDE or text editor. For Go development, refer to [Editors and IDEs for GO](https://github.com/golang/go/wiki/IDEsAndTextEditorPlugins).
+---
 
-### Create a Branch in Your Fork
+## Cargo Workspace Architecture
 
-Work on your contribution in a branch in your forked repository. Create a local branch based on the `master` branch:
+`rekuiper` is structured as a modular Cargo workspace containing 8 crates:
 
-```shell
-git fetch upstream
-git checkout -b <my-branch> upstream/master
+| Crate | Directory | Purpose |
+| :--- | :--- | :--- |
+| `rekuiper-core` | `crates/rekuiper-core` | Core streaming runtime primitives, rule data models, `StreamRecord`, and internal bus. |
+| `rekuiper-sql` | `crates/rekuiper-sql` | SQL lexer, AST parser, tumbling/hopping/sliding/count window engine, and scalar functions. |
+| `rekuiper-conf` | `crates/rekuiper-conf` | Configuration loader (`etc/kuiper.yaml`), environment variable overrides, and dynamic config. |
+| `rekuiper-connectors` | `crates/rekuiper-connectors` | Built-in connectors: MQTT, Kafka, Redis, WebSocket, SQL, HTTP Pull/Push, File, Memory. |
+| `rekuiper-server` | `crates/rekuiper-server` | REST API, 100% OpenAPI 3.0 route handlers, Prometheus metrics server, pipeline runner. |
+| `rekuiper-cli` | `crates/rekuiper-cli` | Command-line interface (`kuiper`) drop-in client binary. |
+| `rekuiper-mcp` | `crates/rekuiper-mcp` | Model Context Protocol server exposing AI assistant tools for rule validation and control. |
+| `kuiperd` | `crates/kuiperd` | Server daemon executable entrypoint (`kuiperd`). |
+
+---
+
+## Building and Running
+
+### Build from Source
+Build in debug mode:
+```bash
+cargo build
 ```
 
-### Package Import Specification
+Build optimized release binaries:
+```bash
+cargo build --release
+```
 
-Consistent package import order maintains code quality. This project uses `gci` to verify package import order. Group imports in this order:
+The compiled binaries are placed in:
+- `target/release/kuiperd` (server daemon)
+- `target/release/kuiper` (command-line client)
+- `target/release/rekuiper-mcp` (MCP server)
 
-1. Standard library packages
-2. Third-party external packages
-3. Local project packages
+### Run the Server Daemon
+Start the server with local configuration:
+```bash
+./target/release/kuiperd --etc etc
+```
+
+Or run directly through Cargo:
+```bash
+cargo run --bin kuiperd -- --etc etc
+```
+
+The server listens on `http://0.0.0.0:9081`. Prometheus metrics are available at `http://0.0.0.0:20499/metrics`.
+
+### Use the CLI Client
+Run client commands against the local daemon:
+```bash
+# Check version
+./target/release/kuiper --version
+
+# Create a stream
+./target/release/kuiper create stream demo '() WITH (FORMAT="json", TYPE="mqtt", DATASOURCE="demo/telemetry")'
+
+# List streams
+./target/release/kuiper get stream demo
+```
+
+---
+
+## Quality and Testing Standards
+
+All contributions must pass automated tests and satisfy zero-warning code quality rules.
+
+### Run Workspace Tests
+Run all unit and integration tests:
+```bash
+cargo test --workspace
+```
+
+Run tests for a single crate:
+```bash
+cargo test -p rekuiper-sql
+cargo test -p rekuiper-server --test fvt_compat
+```
+
+### Run Performance Benchmarks
+Verify that code changes do not degrade streaming throughput:
+```bash
+cargo test --test perf_throughput -- --nocapture
+```
+
+### Code Formatting and Linting
+Format the codebase:
+```bash
+cargo fmt --all
+```
+
+Run the Clippy linter with warnings treated as errors:
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+---
+
+## Rust Coding Conventions
+
+### Import Order
+Group `use` declarations in this order, separated by a blank line:
+
+1. Standard library (`std::`)
+2. External third-party crates (`tokio`, `serde`, `tracing`)
+3. Workspace crates (`rekuiper_core`, `rekuiper_sql`)
+4. Current crate modules (`crate::`, `super::`)
 
 Example:
+```rust
+use std::sync::Arc;
+use std::time::Duration;
 
-```go
-import (
-    "fmt"
+use tokio::sync::mpsc;
+use tracing::{debug, error, info};
 
-    "github.com/sirupsen/logrus"
+use rekuiper_core::model::StreamRecord;
 
-    "github.com/lf-edge/ekuiper/contract/v2/api"
-)
+use crate::error::Result;
 ```
 
-In the project root directory, run this command to reorder imports:
+### Error Handling
+- Use structured error types defined with `thiserror` for crate APIs.
+- Do not call `.unwrap()` or `.expect()` in production code paths.
+- Return explicit `Result<T, E>` types.
 
-```shell
-gci write --skip-generated -s standard -s default -s "prefix(github.com/lf-edge/ekuiper)" .
+### Concurrency and Asynchronous Code
+- Use `tokio` for asynchronous input/output tasks.
+- Keep lock holding times short when using `tokio::sync::Mutex` or `std::sync::RwLock`.
+- Prefer message passing with bounded channels (`tokio::sync::mpsc::channel`) over shared mutable state.
+
+### Observability
+- Use structured logging with the `tracing` crate (`tracing::info!`, `tracing::debug!`, `tracing::warn!`, `tracing::error!`).
+- Do not use `println!` or `eprintln!` in library crates.
+
+---
+
+## Debugging
+
+### Debug with VS Code
+Install these extensions:
+- `rust-lang.rust-analyzer`
+- `vadimcn.vscode-lldb`
+
+Set breakpoints in Rust source files, then launch tests or binaries with the `Debug` lens above test functions.
+
+### Control Log Levels
+Enable detailed logging with the `RUST_LOG` environment variable:
+```bash
+RUST_LOG=debug ./target/release/kuiperd --etc etc
 ```
 
-In GoLand, enable automatic import sorting under `Settings > Editor > Code Style > Go > Imports`.
-
-### Code Conventions
-
-- Format your code with `go fmt` before you commit. The GitHub Actions CI pipeline rejects code that is not formatted with `go fmt`.
-- Run static analysis with `make lint` to verify code quality.
-  - If `gofumpt` errors occur, run `gofumpt -w .` in the project root directory.
-  - Refer to [golangci-lint](https://golangci-lint.run/) for lint rule documentation.
-- Use camelCase for configuration keys in configuration files.
-
-### Debug the Code
-
-To debug code in GoLand:
-
-1. Full application debugging: Verify all directories in the `build_prepare` section of the [Makefile](https://github.com/lf-edge/ekuiper/blob/master/Makefile) exist in the project root. Add breakpoints. Open `cmd/kuiperd/main.go` and start the debugger. Create a stream or rule that executes the target code path.
-2. Unit test debugging: Write and debug a unit test. For example, debug `TestMapConvert_Funcs` in `pkg/cast/cast_test.go`.
-
-#### Debug EdgeX Integration
-
-To debug EdgeX source or sink code, run external services in Docker containers and run rekuiper locally.
-
-##### Expose the Message Bus
-
-EdgeX uses Redis as the default message bus. To expose the message bus, edit the `docker-compose.yml` file. Change the port mapping of the `database` service from `127.0.0.1:6379` to `0.0.0.0:6379`, then restart services:
-
-```yaml
- database:
-   container_name: edgex-redis
-   environment:
-     CLIENTS_CORE_COMMAND_HOST: edgex-core-command
-     CLIENTS_CORE_DATA_HOST: edgex-core-data
-     CLIENTS_CORE_METADATA_HOST: edgex-core-metadata
-     CLIENTS_SUPPORT_NOTIFICATIONS_HOST: edgex-support-notifications
-     CLIENTS_SUPPORT_SCHEDULER_HOST: edgex-support-scheduler
-     DATABASES_PRIMARY_HOST: edgex-redis
-     EDGEX_SECURITY_SECRET_STORE: "false"
-     REGISTRY_HOST: edgex-core-consul
-   hostname: edgex-redis
-   image: redis:6.2-alpine
-   networks:
-     edgex-network: { }
-   ports:
-     - 0.0.0.0:6379:6379/tcp
-   read_only: true
-   restart: always
-   security_opt:
-     - no-new-privileges:true
-   user: root:root
-   volumes:
-     - db-data:/data:z
-```
-
-##### Configure EdgeX Locally
-
-Configure `etc/sources/edgex.yaml` based on the message bus type:
-
-| Message Bus | Type | Protocol | Server | Port |
-| :--- | :--- | :--- | :--- | :--- |
-| Redis Server | redis | redis | 10.65.38.224 | 6379 |
-| MQTT Broker | mqtt | tcp | 10.65.38.224 | 1883 |
-| ZeroMQ | zero | tcp | 10.65.38.224 | 5566 |
-
-Example Redis configuration:
-
-```yaml
-default:
-  protocol: redis
-  server: 10.65.38.224
-  port: 6379
-  topic: rules-events
-  type: redis
-  # Could be 'event' or 'request'.
-  # If the message is from app service, the message type is an event;
-  # Otherwise, if it is from the message bus directly, it should be a request
-  messageType: event
-```
-
-##### Enable Console Logging and Set the REST API Port
-
-In `etc/kuiper.yaml`, set `consoleLog` to `true` and set `restPort` to `59720`:
-
-```yaml
-basic:
-  debug: false
-  consoleLog: true
-  fileLog: true
-  rotateTime: 24
-  maxAge: 72
-  ip: 0.0.0.0
-  port: 20498
-  restIp: 0.0.0.0
-  restPort: 59720
-  authentication: false
-  prometheus: false
-  prometheusPort: 20499
-  ignoreCase: true
-```
-
-##### Run rekuiper Locally
-
-Start rekuiper using the debug procedure described above.
-
-### Testing
-
-The project uses GitHub Actions to run unit tests and Functional Verification Tests (FVT). Verify that all tests pass on your pull request.
-
-- Write Go unit tests to validate new code.
-- Pull requests trigger the [FVT test suite](https://github.com/lf-edge/ekuiper/blob/master/test/README.md). Verify that all tests pass.
-
-### Licensing
-
-All code contributions are licensed under the Apache License 2.0. Add the correct license header to every new file.
-
-### Sign-Off Commits
-
-You must sign off each commit to certify origin. Configure `user.name` and `user.email` in Git, then use `git commit -s`.
-
-### Synchronize Your Branch
-
-Rebase your branch on the latest upstream changes before you submit a pull request:
-
-```shell
-git fetch upstream
-git rebase upstream/master
-```
-
-Push changes to your fork. If you rebased previously pushed commits, use force push:
-
-```shell
-git push origin -f
-```
-
-### Submit Pull Requests
-
-Base your pull requests on the `master` branch.
-
-Submit small, focused pull requests. Squash commits into a single commit where appropriate:
-
-```shell
-git rebase -i upstream/master
-```
-
-Ensure all commit messages follow the guidelines below. Push to your branch and create the pull request on GitHub.
-
-### Commit Message Guidelines
-
-Commit messages must have a header, an optional body, and an optional footer:
-
-```text
-<type>(<scope>): <subject>
-<BLANK LINE>
-<body>
-<BLANK LINE>
-<footer>
-```
-
-Rules:
-- The header with `<type>` is mandatory.
-- The maximum line length is 100 characters.
-- Reference related issues in the footer (for example, `Closes: #123`).
-
-Example:
-
-```text
-feat: add Fuji release compose files
-```
-
-```text
-fix(script): correct run script to use the right ports
-
-Previously device services used wrong port numbers. This commit fixes the port numbers to use the latest port numbers.
-
-Closes: #123, #245, #992
-```
-
-#### Revert
-
-If a commit reverts a previous change, prefix the header with `revert:`. In the body, write: `This reverts commit <hash>.`
-
-#### Type
-
-The type must be one of the following:
-
-- **feat**: New user-facing feature
-- **fix**: Defect fix for the user
-- **docs**: Documentation changes
-- **style**: Formatting and stylistic corrections without code logic changes
-- **refactor**: Code restructuring without bug fixes or feature additions
-- **chore**: Build tasks and dependency maintenance
-- **perf**: Performance improvements
-- **test**: Test suite additions or modifications
-- **build**: Build system or dependency changes
-- **ci**: Continuous integration configuration changes
-- **revert**: Revert of a previous commit
-
-#### Scope
-
-No predefined scopes exist. Use a custom scope when helpful.
-
-#### Subject
-
-The subject must contain a succinct description:
-- Use imperative present tense (for example, "change", not "changed" or "changes").
-- Do not capitalize the first letter.
-- Do not add a period at the end.
-
-#### Body
-
-Use imperative present tense. Describe the motivation for the change and compare with previous behavior.
-
-#### Footer
-
-Document breaking changes with prefix `BREAKING CHANGE:`. Reference closed GitHub issues with `Closes: #<issue>`.
-
-## Community Promotion
-
-You can also contribute by promoting the project in the community:
-
-- Integrate rekuiper into your open-source projects.
-- Organize workshops or meetups.
-- Answer user questions in GitHub Issues, Slack, or mailing lists.
-- Write tutorials.
-- Mentor new contributors.
-
-## Roles and Responsibilities
-
-### Contributor
-
-Contributors are community members who contribute to the project. Any person can become a contributor. Common contribution activities include:
-
-- Reporting and fixing defects.
-- Reviewing requirements and software capabilities.
-- Writing documentation.
-
-Start with the [Code and Documentation Contributions](#code-and-documentation-contributions) guide and join the community Slack channel.
-
-### Committer
-
-Committers have direct access to project repositories. To qualify as a committer:
-
-- Contribute actively to the rekuiper project.
-- Express interest to maintainers.
-- Submit 6 or more substantial pull requests.
-- Demonstrate technical understanding of the codebase and project goals.
-
-An existing maintainer nominates eligible contributors. Committers review issues and pull requests.
-
-### Maintainer
-
-Maintainers plan and design the project architecture. To qualify as a maintainer, committers must:
-
-- Expand adoption and ecosystem integrations.
-- Collaborate in community meetings and discussions.
-- Demonstrate mastery of rekuiper architecture and strategy.
-- Lead major feature designs and implementations.
-
-An existing maintainer nominates candidates on the [Maintainer List](https://github.com/lf-edge/ekuiper/blob/master/MAINTAINERS.md).
-
-### Nomination Process
-
-The following table describes how the nomination is approved:
-
-| Nomination | Description | Approval | Binding Roles | Minimum Length (days) |
-| :--- | :--- | :--- | :--- | :--- |
-| New Committer | Proposed by a maintainer | [Lazy Consensus](https://communitymgt.fandom.com/wiki/Lazy_consensus) | Active maintainers | 7 |
-| New Maintainer | Proposed by a maintainer | Supermajority (2/3) Approval | Active maintainers | 7 |
-
+---
+
+## Submitting a Pull Request
+
+1. Create a topic branch from the `main` branch:
+   ```bash
+   git checkout -b feat/my-new-feature upstream/main
+   ```
+2. Make small, focused changes.
+3. Verify that formatting, linting, and tests pass:
+   ```bash
+   cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
+   ```
+4. Sign off every commit (DCO requirement):
+   ```bash
+   git commit -s -m "feat(connectors): add support for batch sink flushing"
+   ```
+5. Follow conventional commit message format:
+   - `feat`: New feature
+   - `fix`: Defect fix
+   - `docs`: Documentation update
+   - `perf`: Performance improvement
+   - `test`: Test suite update
+   - `refactor`: Code restructuring without functional changes
+   - `chore`: Build or dependency maintenance
+6. Rebase your branch on `upstream/main` before opening your pull request:
+   ```bash
+   git fetch upstream
+   git rebase upstream/main
+   git push origin feat/my-new-feature
+   ```
+7. Open a pull request against the `main` branch on GitHub.
+
+---
+
+## Licensing
+
+`rekuiper` is dual-licensed under:
+- **Apache License, Version 2.0** ([LICENSE-APACHE](../../LICENSE-APACHE))
+- **MIT License** ([LICENSE-MIT](../../LICENSE-MIT))
+
+By contributing to `rekuiper`, you agree that your contributions will be licensed under these terms.

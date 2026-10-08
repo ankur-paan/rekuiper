@@ -1,24 +1,30 @@
 # Extensions
 
-rekuiper includes built-in sources, sinks, and SQL functions. However, custom integrations frequently require proprietary protocols or domain-specific calculations. rekuiper provides an extension framework to customize sources, sinks, and functions.
+rekuiper includes built-in sources, sinks, and SQL functions. For specialized integrations, rekuiper provides a modular extension framework.
+
+---
+
+## Extension Mechanisms
+
+rekuiper supports four extension mechanisms designed for high performance, portability, and memory safety:
+
+| Mechanism | Description | Supported Languages | Link |
+| :--- | :--- | :--- | :--- |
+| **WebAssembly (Wasm)** | High-performance in-process functions compiled to WebAssembly bytecode. | Rust, C, C++, Go (TinyGo), Zig | [WebAssembly Guide](../extension/wasm/overview.md) |
+| **External Services** | Functions backed by external microservices over gRPC or REST. | Python, Node.js, Go, Java, Rust | [External Services Guide](../extension/external/external_func.md) |
+| **Script Functions (UDF)** | Lightweight functions evaluated by an embedded JavaScript interpreter. | JavaScript (ECMAScript) | [Script Functions Guide](../extension/script/overview.md) |
+| **Model Context Protocol (MCP)** | Tool server for AI assistant control, query validation, and pipeline tests. | Native JSON-RPC stdio | [MCP Overview](../mcp/overview.md) |
+
+---
 
 ## Extension Points
 
-rekuiper provides three extension points:
+1. **Source Connectors**: Ingest data from external protocols into streams or tables. Core connectors (Kafka, SQL, Redis, WebSocket, File, MQTT, HTTP) are compiled into the binary.
+2. **Sink Connectors**: Deliver processed records to external destinations.
+3. **Analytical Functions**: Transform and aggregate streaming records using SQL.
 
-- **Source**: Adds a custom source type to ingest data. You can reference the new source type in stream and table definitions.
-- **Sink**: Adds a custom sink type to emit data. You can reference the new sink type in rule actions.
-- **Function**: Adds a custom SQL function to transform data. You can use the new function in rule SQL queries.
-
-## Extension Types
-
-rekuiper supports three extension mechanisms:
-
-- **[Native plugin](../extension/native/overview.md)**: Extends functionality with native shared libraries. This mechanism provides maximum performance, but requires specific compilation environments.
-- **[Portable plugin](../extension/portable/overview.md)**: Implements extensions in languages such as Python or Go through independent processes. This mechanism simplifies development and deployment.
-- **[External service](../extension/external/external_func.md)**: Maps existing external REST or RPC services to SQL functions through configuration files. This mechanism supports function extensions only.
+---
 
 ## Further Reading
 
-- [Extension Reference](../extension/overview.md)
-
+- [Extension Architecture Overview](../extension/overview.md)

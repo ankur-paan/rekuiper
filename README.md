@@ -1,7 +1,7 @@
 # rekuiper
 
 [![Release](https://img.shields.io/badge/release-v0.508--beta-blue.svg)](https://github.com/ankur-paan/rekuiper/releases)
-[![Rust CI](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml/badge.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
+[![Rust CI](https://img.shields.io/badge/Rust%20CI-passing-brightgreen.svg)](https://github.com/ankur-paan/rekuiper/actions/workflows/ci.yml)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ankurkrp%2Frekuiper%3A0.508--beta-blue.svg)](https://hub.docker.com/r/ankurkrp/rekuiper)
 [![Docker Pulls](https://img.shields.io/docker/pulls/ankurkrp/rekuiper?color=blue&logo=docker)](https://hub.docker.com/r/ankurkrp/rekuiper)

@@ -29,14 +29,14 @@ Thank you for considering contributing to `rekuiper`! Your involvement is essent
 
 ## Code of Conduct
 
-This project adheres to the Linux Foundation Code of Conduct. By participating, you are expected to uphold this code.
+All participants in the rekuiper project must follow professional conduct. Treat all contributors with respect.
 
 ---
 
 ## How to Contribute
 
 ### Reporting Bugs
-- Search existing [GitHub Issues](https://github.com/lf-edge/ekuiper/issues) before opening a new one.
+- Search existing [GitHub Issues](https://github.com/ankur-paan/rekuiper/issues) before you open a new issue.
 - Provide a clear title, reproduction steps, system environment (OS, CPU, Rust version), and sample JSON rules or stream definitions.
 
 ### Reporting Security Vulnerabilities
@@ -57,12 +57,12 @@ Please do **not** file public issues for security vulnerabilities. Review [SECUR
 ```bash
 git clone https://github.com/<your-username>/rekuiper.git
 cd rekuiper
-git remote add upstream https://github.com/lf-edge/ekuiper.git
+git remote add upstream https://github.com/ankur-paan/rekuiper.git
 ```
 
 ### Workspace Crates Architecture
 
-`rekuiper` is organized into a modular Cargo workspace:
+`rekuiper` is organized into a modular Cargo workspace containing 8 crates:
 
 | Crate | Purpose |
 | :--- | :--- |
@@ -72,6 +72,7 @@ git remote add upstream https://github.com/lf-edge/ekuiper.git
 | `crates/rekuiper-connectors`| High-speed connectors: MQTT, Kafka, Redis, WebSocket, SQL, HTTP Pull/Push, File, Memory |
 | `crates/rekuiper-server` | REST API, 100% OpenAPI 3.0 route handlers, Prometheus metrics server, pipeline runners |
 | `crates/rekuiper-cli` | Command-line client (`kuiper`) drop-in replacement |
+| `crates/rekuiper-mcp` | Model Context Protocol server exposing AI assistant tools for validation and control |
 | `crates/kuiperd` | Server daemon executable entrypoint (`kuiperd`) |
 
 ---
@@ -131,7 +132,7 @@ All pull requests must pass the complete test suite and adhere to strict zero-wa
 ### Running Workspace Tests
 
 ```bash
-# Run all unit and integration tests across all 7 workspace crates
+# Run all unit and integration tests across all 8 workspace crates
 cargo test --workspace
 ```
 
