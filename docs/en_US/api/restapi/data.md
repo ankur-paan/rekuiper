@@ -95,7 +95,7 @@ Content-Type: application/json
 
 ### Example 5: Asynchronous Import
 
-Use this endpoint for long-running imports. The server returns a task ID immediately and executes the import in the background:
+Use this endpoint to import configurations asynchronously. The server creates a task identifier and executes the import in the background:
 
 ```http
 POST http://localhost:9081/async/data/import
@@ -113,6 +113,12 @@ Response sample:
   "id": "$taskID"
 }
 ```
+
+#### Validation Rules
+- The request body must not be empty.
+- If the request body is empty, the server returns status code `400 Bad Request`.
+- If the request body is invalid JSON, the server returns status code `400 Bad Request`.
+- When validation passes, the server returns status code `200 OK` with a task identifier.
 
 Query the status of an asynchronous background import task:
 

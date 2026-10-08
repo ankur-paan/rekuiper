@@ -626,16 +626,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "import_data".to_string(),
-            description: "Restores or provisions rules, streams, lookup tables, and configurations from a JSON backup payload into the rekuiper engine. By default, resets existing configurations before importing; set partial=true for additive merge mode without dropping unreferenced resources.".to_string(),
+            description: "Imports rules, streams, tables, and configurations into the engine. The request payload must not be empty. By default, this tool clears old configurations before import. Set partial=true to merge configurations without clearing old resources.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "content": {
-                        "description": "JSON backup payload adhering to rekuiper export format."
+                        "description": "The JSON configuration payload to import. Must not be empty."
                     },
                     "partial": {
                         "type": "boolean",
-                        "description": "Set to true to enable additive merge mode without wiping existing unreferenced streams and rules."
+                        "description": "Set to true to merge configurations without clearing old resources."
                     }
                 },
                 "required": ["content"]

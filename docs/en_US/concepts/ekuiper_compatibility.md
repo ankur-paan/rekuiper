@@ -22,6 +22,7 @@ Where legacy eKuiper behavior violates standards, compromises system stability, 
 | **Idempotent Resource Lifecycle** | Inconsistent status codes on resource updates; raw plain text errors on mutation failures | RFC 9110 compliant idempotent updates (`PUT` returning `200 OK`) and explicit `404 Not Found` on missing resources | Simplifies GitOps, automated state synchronization, and declarative deployments | [REST API Overview](../api/restapi/overview.md#idempotent-operations) |
 | **Import & Merge Semantics** | Inconsistent wipe vs merge behavior across versions | Defaults to full state reset (`reset_configuration`), wiping existing unreferenced streams/rules; supports `partial=1` merge mode | Parity with eKuiper declarative configuration management; guarantees clean restoration while supporting additive sync | [REST API Overview](../api/restapi/overview.md#configuration-import-and-export) |
 | **Prometheus Metrics Taxonomy** | Legacy 8-metric export lacking detailed operator/source/sink breakdown and latency histograms | Full 32 metric families with multidimensional labels (`op`, `op_instance`, `type`, `rule`, `name`) and histograms, alongside backward-compatible series | Native compatibility with LF Edge eKuiper Grafana dashboards and Prometheus Operator alert definitions | [Prometheus Monitoring](../operation/usage/monitor_with_prometheus.md#prometheus-metrics) |
+| **Import Payload Validation** | Accepts empty payloads; starts background tasks that do nothing | Validates payloads before processing; returns `400 Bad Request` for empty payloads | Prevents task table pollution; gives immediate error feedback to the client | [Data REST API](../api/restapi/data.md#asynchronous-data-import) |
 
 ---
 
@@ -71,5 +72,14 @@ Where legacy eKuiper behavior violates standards, compromises system stability, 
 ### 10. Comprehensive 32-Family Prometheus Metrics Taxonomy
 - **Difference**: Legacy eKuiper exports a subset of basic counters without granular operator-level breakdown or histogram distributions in earlier revisions. `rekuiper` exports all 32 official Prometheus metric families—including source, operator, and sink records in/out, exceptions, message processed totals, buffer lengths, connection statuses, process latencies, and Prometheus histogram representations (`_bucket`, `_count`, `_sum`) with multidimensional labels (`op`, `op_instance`, `type`, `rule`, `name`, `status`, `le`). Furthermore, legacy rule-only series are simultaneously retained.
 - **Why we chose this**: Industrial edge deployments rely heavily on Grafana dashboards designed for eKuiper and Prometheus alerting rules that measure operator latency percentiles (P95, P99) and queue buffer pressures. Providing complete metric families and histograms enables turnkey observability without altering dashboard queries.
+
+### 11. Upfront Payload Validation for Data Import
+- **Difference**: Legacy systems accept empty request bodies on `/async/data/import`. The server creates a task identifier and starts a background task. The background task does not do any work. `rekuiper` validates the request body immediately at the HTTP boundary. If the payload is empty or invalid JSON, `rekuiper` returns status code `400 Bad Request` with an error message (`{"message": "configuration unmarshal with error: empty payload"}`).
+- **Why we chose this**:
+  - Do not create background tasks for empty or invalid requests.
+  - Return errors to the client immediately.
+  - Prevent clients from waiting and polling for empty tasks.
+  - Save memory and processor resources.
+
 
 

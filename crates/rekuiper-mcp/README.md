@@ -142,7 +142,7 @@ An enterprise-grade, native Rust **Model Context Protocol (MCP)** server providi
 | `get_configs` | Retrieve daemon runtime configuration and parameters. |
 | `update_configs` | Dynamically update server configuration parameters. |
 | `export_data` | Export JSON catalog backup of rules, streams, schemas, and configurations. |
-| `import_data` | Restore catalog configuration from a JSON backup (supports complete reset or `partial=true` merge mode). |
+| `import_data` | Import configurations from a JSON payload. Requires a non-empty payload. Supports state reset or `partial=true` merge mode. |
 
 ### 9. Health, Heartbeat & Telemetry
 | Tool | Description |
