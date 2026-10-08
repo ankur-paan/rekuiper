@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > See `BENCHMARK-AUDIT.md` and `test/BENCHMARKS.md` for the audited methodology.
 > No latency-histogram p99 is claimed.
 
+## [0.508.0-beta] - 2026-10-08
+
+### Added
+- **Full Sink Options Parity**: Added `sendSingle`, `fields`, `excludeFields`, `dataField`, `batchSize`, and `lingerInterval` options to ActionRuntime. Supported delimited formatting with custom delimiters. Added upfront sink configuration validation for format and MQTT topics.
+- **Go text/template Engine**: Implemented full Go `text/template` parser, AST, and evaluator with Sprig helper functions (`toJson`, `base64`, `printf`, `index`, math, and string transformations). Added upfront template syntax validation during rule creation.
+- **Stream DDL Validation**: Added column type validation for `CREATE STREAM` and `CREATE TABLE`. Supported ingress record type coercion for declared schemas. Supported `FORMAT="binary"` and `FORMAT="delimited"`.
+- **Built-in SQL Functions**: Added `to_seconds`, `now`, `current_timestamp`, `local_timestamp`, `element_at`, string `min`/`max`, and logarithms (`log`, `log2`, `ln`). Added extended argument support for `cast`, `latest`, and `lag`.
+- **HTTPPush Source Listener**: Added automatic HTTP listener route lifecycle management for streams configured with `TYPE="httppush"`.
+- **Prometheus Metric Taxonomy**: Added all 32 Prometheus metric families with multidimensional labels for rules, connections, sources, operators, and sinks.
+- **CLI Subcommands and POSIX Exit Codes**: Added `explain rule` and `query` subcommands. Extended `show`, `drop`, and `create schema` subcommands. Standardized POSIX exit codes and formatted text table outputs.
+- **Configuration Reset and Merge Modes**: Added default configuration reset (`reset_configuration`) for data import. Added `partial=1` query parameter for additive merge mode.
+- **Model Context Protocol (MCP) Parity**: Added `explain_rule` tool and updated `import_data` tool with partial merge mode and fail-fast validation.
+
+### Changed
+- **REST API Response Envelopes**: Standardized all error responses to uniform JSON envelopes (`{"error": <code>, "message": "..."}`) with `application/json` content type. Documented intentional RFC 9110 HTTP status superiorities in `concepts/ekuiper_compatibility.md`.
+- **Fail-Fast Data Import Validation**: Enforced upfront payload validation on `POST /async/data/import`. The endpoint returns HTTP 400 Bad Request with a clear message if the request body is empty or malformed.
+- **Output Shape Parity**: Aligned null field output with `sendNilField` settings. Removed internal runtime metadata keys from payloads. Ensured deterministic sorted JSON key ordering.
+
+### Fixed
+- **Window HAVING State Change Detection**: Enabled stateful change detection (`had_changed`) in window `HAVING` clauses.
+- **Test Harness Synchronization**: Updated OpenAPI smoke tests to assert fail-fast 400 validation on empty data import requests.
+
+### Packaging
+- Updated official Docker images to `ankurkrp/rekuiper:0.508-beta`.
+- Updated Kubernetes Helm chart `AppVersion` to `0.508-beta`.
+
+---
+
 ## [0.507.0-beta] - 2026-10-04
 
 ### Added

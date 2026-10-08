@@ -1,3 +1,24 @@
+# Release Notes - rekuiper v0.508-beta
+
+`rekuiper` v0.508-beta achieves upstream LF Edge eKuiper parity across sink options, dynamic templates, DDL validation, built-in SQL functions, HTTPPush listeners, REST API envelopes, CLI tools, and Prometheus metrics.
+
+Key highlights:
+- **Sink Options Parity**: Added `sendSingle`, `fields`, `excludeFields`, `dataField`, `batchSize`, and `lingerInterval` options to ActionRuntime. Supported delimited formatting with custom delimiters. Added upfront sink configuration validation for format and MQTT topics.
+- **Go text/template Engine**: Implemented full Go `text/template` parser, AST, and evaluator with Sprig helper functions (`toJson`, `base64`, `printf`, `index`, math, and string transformations). Added upfront template syntax validation during rule creation.
+- **Stream DDL Validation**: Added column type validation for `CREATE STREAM` and `CREATE TABLE`. Supported ingress record type coercion for declared schemas. Supported `FORMAT="binary"` and `FORMAT="delimited"`.
+- **Built-in SQL Functions**: Added `to_seconds`, `now`, `current_timestamp`, `local_timestamp`, `element_at`, string `min`/`max`, and logarithms (`log`, `log2`, `ln`). Added extended argument support for `cast`, `latest`, and `lag`.
+- **HTTPPush Source Listener**: Added automatic HTTP listener route lifecycle management for streams configured with `TYPE="httppush"`.
+- **Prometheus Metric Taxonomy**: Added all 32 Prometheus metric families with multidimensional labels for rules, connections, sources, operators, and sinks.
+- **Fail-Fast Data Import Validation**: Enforced upfront payload validation on `POST /async/data/import`. The endpoint returns HTTP 400 Bad Request with a clear message if the request body is empty or malformed.
+- **REST API Response Envelopes**: Standardized all error responses to uniform JSON envelopes (`{"error": <code>, "message": "..."}`) with `application/json` content type. Documented intentional RFC 9110 HTTP status superiorities in `concepts/ekuiper_compatibility.md`.
+- **CLI Subcommands and POSIX Exit Codes**: Added `explain rule` and `query` subcommands. Extended `show`, `drop`, and `create schema` subcommands. Standardized POSIX exit codes and formatted text table outputs.
+- **Model Context Protocol (MCP) Parity**: Added `explain_rule` tool and updated `import_data` tool with partial merge mode and fail-fast validation in ASD-STE100.
+
+- Docker image: `ankurkrp/rekuiper:0.508-beta` (plus `latest`)
+- Helm chart: `deploy/chart/ekuiper` (`AppVersion: 0.508-beta`)
+
+---
+
 # Release Notes - rekuiper v0.507-beta
 
 `rekuiper` v0.507-beta delivers upstream LF Edge eKuiper REST API and rule metadata parity, enhanced daemon qualification discovery, and GitHub Actions CI runner workflow optimizations.
