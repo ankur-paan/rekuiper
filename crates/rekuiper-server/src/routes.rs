@@ -3709,7 +3709,7 @@ fn prepare_actions(
                 },
                 "websocket" => match serde_json::from_value::<WebSocketConfig>(opts.clone()) {
                     Ok(ws_cfg) => {
-                        let common_opts = parse_common_opts(opts, rule_send_nil_field, false);
+                        let common_opts = parse_common_opts(opts, rule_send_nil_field, true);
                         out.push(PreparedAction::WebSocket {
                             url: ws_cfg.target_url(),
                             template: action_template(opts).map(|s| s.to_string()),
